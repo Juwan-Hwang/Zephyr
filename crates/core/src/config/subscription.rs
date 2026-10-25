@@ -40,10 +40,140 @@ pub fn quote_short_id_values(content: &str) -> String {
     .into_owned()
 }
 
+/// Fast-path unindented line scanner for extracting policy group names from `rules:`.
+/// Avoids allocating and parsing large subscription YAML ASTs for typical rule files.
+fn extract_name_from_rules_fast(content: &str) -> Option<String> {
+    let mut in_rules = false;
+    let mut scanned_count = 0;
+
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if !in_rules {
+            // Must be an unindented top-level key line.
+            if line.starts_with(' ') || line.starts_with('\t') {
+                continue;
+            }
+            let after_key = if let Some(rest) = line.strip_prefix("rules") {
+                rest
+            } else if let Some(rest) = line.strip_prefix("\"rules\"") {
+                rest
+            } else if let Some(rest) = line.strip_prefix("'rules'") {
+                rest
+            } else {
+                continue;
+            };
+
+            let rest_trimmed = after_key.trim_start();
+            if let Some(rest_after_colon) = rest_trimmed.strip_prefix(':') {
+                let rest_comment = rest_after_colon.trim();
+                if rest_comment.is_empty() || rest_comment.starts_with('#') {
+                    in_rules = true;
+                } else {
+                    // Complex rules header (e.g. flow sequence `rules: [...]`), abort fast path.
+                    return None;
+                }
+            }
+        } else {
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+
+            // Unindented line indicates end of rules mapping section.
+            if !line.starts_with(' ') && !line.starts_with('\t') {
+                break;
+            }
+
+            let item_str = if let Some(rest) = trimmed.strip_prefix('-') {
+                rest.trim()
+            } else {
+                // Not a standard list item line (`- ...`), abort fast path to fall back to serde_yaml.
+                return None;
+            };
+
+            scanned_count += 1;
+            if scanned_count > 10 {
+                break;
+            }
+
+            // If item starts with flow map/seq delimiters, abort fast path.
+            if item_str.starts_with('{') || item_str.starts_with('[') {
+                return None;
+            }
+
+            // Unquote outer quotes if present
+            let mut s = if (item_str.starts_with('"') && item_str.ends_with('"'))
+                || (item_str.starts_with('\'') && item_str.ends_with('\''))
+            {
+                if item_str.len() >= 2 {
+                    &item_str[1..item_str.len() - 1]
+                } else {
+                    item_str
+                }
+            } else {
+                item_str
+            };
+
+            // Strip trailing inline comment if unquoted
+            if !item_str.starts_with('"') && !item_str.starts_with('\'') {
+                if let Some((rule_part, _comment)) = s.split_once('#') {
+                    s = rule_part.trim();
+                }
+            }
+
+            let mut raw_name = match s.split(',').nth(2) {
+                Some(n) => n.trim(),
+                None => continue,
+            };
+
+            // Strip quotes around field 3 if present
+            if (raw_name.starts_with('"') && raw_name.ends_with('"'))
+                || (raw_name.starts_with('\'') && raw_name.ends_with('\''))
+            {
+                if raw_name.len() >= 2 {
+                    raw_name = &raw_name[1..raw_name.len() - 1];
+                }
+            }
+
+            let name = raw_name.trim();
+
+            let upper = name.to_uppercase();
+            if upper.is_empty()
+                || upper == "DIRECT"
+                || upper == "REJECT"
+                || upper == "MATCH"
+                || upper == "PROXY"
+                || upper == "PASS"
+                || upper == "DROP"
+            {
+                continue;
+            }
+
+            if name.len() > 64 {
+                continue;
+            }
+            let is_safe = name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c.is_ascii_whitespace());
+            if !is_safe {
+                continue;
+            }
+
+            return Some(name.to_owned());
+        }
+    }
+
+    None
+}
+
 /// Extract a name from the rules' policy-group field.
 /// Scans up to 10 rules, returns the first non-generic policy-group name.
 #[must_use]
 pub fn extract_name_from_rules(content: &str) -> Option<String> {
+    // Fast path: scan rules lines directly to avoid full serde_yaml AST allocations.
+    if let Some(name) = extract_name_from_rules_fast(content) {
+        return Some(name);
+    }
+
     let yaml: serde_yaml::Value = serde_yaml::from_str(content).ok()?;
 
     let rules_seq = yaml.get("rules").and_then(|r| r.as_sequence())?;
@@ -1375,6 +1505,49 @@ mod tests {
         let yaml = r#"short-id: "abc123""#;
         let result = quote_short_id_values(yaml);
         assert_eq!(result, r#"short-id: "abc123""#);
+    }
+
+    #[test]
+    fn test_extract_name_from_rules() {
+        // Standard unquoted rules
+        let yaml_simple = "rules:\n  - DOMAIN-SUFFIX,example.com,Airport-1\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_simple),
+            Some("Airport-1".to_owned())
+        );
+
+        // Quoted rules (double and single quotes)
+        let yaml_quoted = "rules:\n  - \"DOMAIN-SUFFIX,example.com,Airport-Double\"\n  - 'DOMAIN-SUFFIX,example.com,Airport-Single'\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_quoted),
+            Some("Airport-Double".to_owned())
+        );
+
+        // Generic policy names skipped
+        let yaml_generic = "rules:\n  - DOMAIN-SUFFIX,site1.com,DIRECT\n  - DOMAIN-SUFFIX,site2.com,REJECT\n  - DOMAIN-SUFFIX,site3.com,Airport-Custom\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_generic),
+            Some("Airport-Custom".to_owned())
+        );
+
+        // Skips invalid characters / names > 64 chars
+        let long_name = "A".repeat(65);
+        let yaml_long = format!("rules:\n  - DOMAIN-SUFFIX,site1.com,{long_name}\n  - DOMAIN-SUFFIX,site2.com,ValidGroup\n");
+        assert_eq!(
+            extract_name_from_rules(&yaml_long),
+            Some("ValidGroup".to_owned())
+        );
+
+        // Empty rules or missing rules section
+        assert_eq!(extract_name_from_rules("rules: []"), None);
+        assert_eq!(extract_name_from_rules("port: 7890\n"), None);
+
+        // Fallback parity when rules section has unusual layout
+        let yaml_unusual = "rules: [ 'DOMAIN-SUFFIX,site1.com,UnusualGroup' ]\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_unusual),
+            Some("UnusualGroup".to_owned())
+        );
     }
 
     #[test]
