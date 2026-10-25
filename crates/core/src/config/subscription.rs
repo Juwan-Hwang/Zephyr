@@ -40,10 +40,229 @@ pub fn quote_short_id_values(content: &str) -> String {
     .into_owned()
 }
 
+/// Helper to extract and validate group name from rule string field.
+fn extract_valid_group_name(rule_str: &str) -> Option<String> {
+    let name = rule_str.split(',').nth(2)?.trim();
+
+    let upper = name.to_uppercase();
+    if upper.is_empty()
+        || upper == "DIRECT"
+        || upper == "REJECT"
+        || upper == "MATCH"
+        || upper == "PROXY"
+        || upper == "PASS"
+        || upper == "DROP"
+    {
+        return None;
+    }
+
+    if name.len() > 64 {
+        return None;
+    }
+
+    let is_safe = name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c.is_ascii_whitespace());
+    if !is_safe {
+        return None;
+    }
+
+    Some(name.to_owned())
+}
+
+/// Fast-path extraction for policy-group name from rules section without full YAML AST parsing.
+///
+/// Avoids parsing the entire YAML document (which can take 15-20ms for 1000-proxy subscription configs)
+/// by line-scanning the unindented top-level `rules:` sequence.
+///
+/// Returns `Some(Some(name))` if a name was found,
+/// `Some(None)` if line scanning completed rules inspection and determined no valid name exists,
+/// or `None` if complex YAML features require falling back to full `serde_yaml` parsing.
+fn extract_name_from_rules_fast(content: &str) -> Option<Option<String>> {
+    if content.contains("<<") || content.contains("%YAML") || content.starts_with('\u{FEFF}') {
+        return None;
+    }
+
+    // Check if document could contain a quoted `rules` key or top-level flow structure
+    let mut saw_unindented_line = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+        saw_unindented_line = true;
+        if trimmed.starts_with('{')
+            || trimmed.starts_with("\"rules\"")
+            || trimmed.starts_with("'rules'")
+        {
+            return None;
+        }
+        if let Some(rest) = trimmed.strip_prefix("rules") {
+            if !rest.starts_with(':') && rest.trim_start_matches([' ', '\t']).starts_with(':') {
+                return None;
+            }
+        }
+    }
+    if !saw_unindented_line {
+        return None;
+    }
+
+    let mut lines = content.lines().peekable();
+    let mut saw_rules_block = false;
+    let mut expected_indent: Option<usize> = None;
+    let mut scan_count = 0usize;
+
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if line.starts_with("---") || line.starts_with("...") || trimmed.starts_with('?') {
+            return None;
+        }
+
+        if let Some(after_colon_raw) = line.strip_prefix("rules:") {
+            if !after_colon_raw.is_empty()
+                && !after_colon_raw.starts_with(' ')
+                && !after_colon_raw.starts_with('\t')
+                && !after_colon_raw.starts_with('#')
+            {
+                continue;
+            }
+
+            let after_colon = after_colon_raw.trim();
+            if !after_colon.is_empty() && !after_colon.starts_with('#') {
+                // Inline scalar or flow sequence (`rules: [...]`). Fall back.
+                return None;
+            }
+
+            if saw_rules_block {
+                // Duplicate mapping keys. Fall back to full parser.
+                return None;
+            }
+            saw_rules_block = true;
+
+            // Scan sequence items under `rules:`
+            while let Some(&next_line) = lines.peek() {
+                if next_line.starts_with('\t') {
+                    return None;
+                }
+                let next_trimmed = next_line.trim();
+                if next_trimmed.is_empty() || next_trimmed.starts_with('#') {
+                    lines.next();
+                    continue;
+                }
+
+                if next_trimmed.starts_with('?') {
+                    return None;
+                }
+
+                let indent = next_line.len() - next_line.trim_start().len();
+
+                // If line is unindented, the `rules:` block ended.
+                if indent == 0 {
+                    break;
+                }
+
+                let child_indent = *expected_indent.get_or_insert(indent);
+
+                if indent < child_indent {
+                    return None;
+                }
+                if indent > child_indent {
+                    // Lines indented further than the sequence level (e.g. multi-line rule)
+                    return None;
+                }
+
+                let indented = next_line.trim_start();
+                if !indented.starts_with('-') {
+                    return None;
+                }
+
+                let rest_raw = indented[1..].trim();
+                let rule_str = if let Some(rest_q) = rest_raw.strip_prefix('"') {
+                    if let Some(close_idx) = rest_q.find('"') {
+                        let inner = &rest_q[..close_idx];
+                        if inner.contains('\\') {
+                            return None;
+                        }
+                        let trailing = rest_q[close_idx + 1..].trim();
+                        if !trailing.is_empty() && !trailing.starts_with('#') {
+                            return None;
+                        }
+                        inner
+                    } else {
+                        return None;
+                    }
+                } else if let Some(rest_q) = rest_raw.strip_prefix('\'') {
+                    if let Some(close_idx) = rest_q.find('\'') {
+                        let inner = &rest_q[..close_idx];
+                        if inner.contains('\'') {
+                            return None;
+                        }
+                        let trailing = rest_q[close_idx + 1..].trim();
+                        if !trailing.is_empty() && !trailing.starts_with('#') {
+                            return None;
+                        }
+                        inner
+                    } else {
+                        return None;
+                    }
+                } else {
+                    let mut val = rest_raw;
+                    if val.contains('\t')
+                        || val.starts_with('{')
+                        || val.starts_with('[')
+                        || val.starts_with('|')
+                        || val.starts_with('>')
+                        || val.starts_with('&')
+                        || val.starts_with('*')
+                        || val.starts_with('!')
+                    {
+                        return None;
+                    }
+                    if let Some(comment_pos) = val.find(" #") {
+                        val = val[..comment_pos].trim();
+                    } else if val.starts_with('#') {
+                        val = "";
+                    }
+                    val.trim()
+                };
+
+                lines.next();
+                scan_count += 1;
+
+                if let Some(name) = extract_valid_group_name(rule_str) {
+                    return Some(Some(name));
+                }
+
+                if scan_count >= 10 {
+                    return Some(None);
+                }
+            }
+        }
+    }
+
+    if saw_rules_block {
+        Some(None)
+    } else {
+        // No top-level `rules:` key found
+        Some(None)
+    }
+}
+
 /// Extract a name from the rules' policy-group field.
 /// Scans up to 10 rules, returns the first non-generic policy-group name.
 #[must_use]
 pub fn extract_name_from_rules(content: &str) -> Option<String> {
+    if let Some(fast_res) = extract_name_from_rules_fast(content) {
+        return fast_res;
+    }
+
     let yaml: serde_yaml::Value = serde_yaml::from_str(content).ok()?;
 
     let rules_seq = yaml.get("rules").and_then(|r| r.as_sequence())?;
@@ -59,34 +278,9 @@ pub fn extract_name_from_rules(content: &str) -> Option<String> {
             None => continue,
         };
 
-        let name = match rule_str.split(',').nth(2) {
-            Some(n) => n.trim(),
-            None => continue,
-        };
-
-        let upper = name.to_uppercase();
-        if upper.is_empty()
-            || upper == "DIRECT"
-            || upper == "REJECT"
-            || upper == "MATCH"
-            || upper == "PROXY"
-            || upper == "PASS"
-            || upper == "DROP"
-        {
-            continue;
+        if let Some(name) = extract_valid_group_name(rule_str) {
+            return Some(name);
         }
-
-        if name.len() > 64 {
-            continue;
-        }
-        let is_safe = name
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c.is_ascii_whitespace());
-        if !is_safe {
-            continue;
-        }
-
-        return Some(name.to_owned());
     }
 
     None
@@ -1769,6 +1963,55 @@ mod tests {
     #[test]
     fn snapshot_redact_url_in_string_no_url() {
         insta::assert_snapshot!(redact_url_in_string("Just a plain message".to_owned()));
+    }
+
+    #[test]
+    fn test_extract_name_from_rules_fast_path_and_parity() {
+        // Standard unquoted rules
+        let std_yaml = "rules:\n  - DOMAIN-SUFFIX,example.com,Airport-1\n  - MATCH,DIRECT\n";
+        assert_eq!(
+            extract_name_from_rules(std_yaml),
+            Some("Airport-1".to_owned())
+        );
+
+        // Generic targets skipped until non-generic name found
+        let generic_yaml = "rules:\n  - DOMAIN-SUFFIX,site1.com,DIRECT\n  - DOMAIN-KEYWORD,site2,PROXY\n  - DOMAIN,site3.com,MyGroup-A\n";
+        assert_eq!(
+            extract_name_from_rules(generic_yaml),
+            Some("MyGroup-A".to_owned())
+        );
+
+        // Quoted rule lines (double and single quotes)
+        let double_quoted = "rules:\n  - \"DOMAIN-SUFFIX,site.com,Airport-2\"\n";
+        assert_eq!(
+            extract_name_from_rules(double_quoted),
+            Some("Airport-2".to_owned())
+        );
+
+        let single_quoted = "rules:\n  - 'DOMAIN-SUFFIX,site.com,Airport-3'\n";
+        assert_eq!(
+            extract_name_from_rules(single_quoted),
+            Some("Airport-3".to_owned())
+        );
+
+        // Missing rules section
+        let no_rules = "port: 7890\nmixed-port: 7891\n";
+        assert_eq!(extract_name_from_rules(no_rules), None);
+
+        // Inline comments
+        let comment_yaml = "rules:\n  - DOMAIN-SUFFIX,example.com,Airport-4 # comment\n";
+        assert_eq!(
+            extract_name_from_rules(comment_yaml),
+            Some("Airport-4".to_owned())
+        );
+
+        // Complex YAML fallback (merge key)
+        let merge_yaml = "base: &base\n  - DOMAIN,a.com,Group-Merge\nrules:\n  <<: *base\n";
+        assert_eq!(extract_name_from_rules(merge_yaml), None);
+
+        // Tab in rules key falls back
+        let tab_yaml = "rules:\n\t- DOMAIN,a.com,Group-Tab\n";
+        assert_eq!(extract_name_from_rules(tab_yaml), None);
     }
 
     #[test]
