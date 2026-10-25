@@ -41,6 +41,18 @@ describe('home and settings page switches and theme swatches accessibility', () 
             expect(doc.getElementById(descId), descId).toBeTruthy();
         }
 
+        const modalSwitches = [
+            { file: 'ui/global-shortcut.js', toggleId: 'shortcut-enable-toggle', labelId: 'shortcut-enable-label' },
+            { file: 'ui/settings.js', toggleId: 'log-app-toggle', labelId: 'log-app-label' },
+            { file: 'ui/settings.js', toggleId: 'log-core-toggle', labelId: 'log-core-label' },
+        ];
+        for (const { file, toggleId, labelId } of modalSwitches) {
+            const src = read(file);
+            expect(src, file).toContain(`id="${labelId}"`);
+            expect(src, file).toContain(`id="${toggleId}"`);
+            expect(src, file).toContain(`aria-labelledby="${labelId}"`);
+        }
+
         const portBtn = doc.getElementById('port-config-btn');
         expect(portBtn).toBeTruthy();
         expect(portBtn?.getAttribute('aria-labelledby')).toBe('setting-port-title current-port-display');
