@@ -253,10 +253,28 @@ async function listen(event, handler) {
  * @returns {Promise<void>}
  */
 async function openUrl(url) {
-  const trimmed = typeof url === 'string' ? url.trim() : '';
-  if (!/^https?:\/\//i.test(trimmed)) {
+  const raw = typeof url === 'string' ? url : '';
+  let start = 0;
+  let end = raw.length;
+  while (start < end && raw.charCodeAt(start) <= 0x20) start++;
+  while (end > start && raw.charCodeAt(end - 1) <= 0x20) end--;
+  const trimmed = raw.slice(start, end);
+
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
     throw new ApiError('openUrl only supports http and https URLs');
   }
+
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    !parsed.hostname ||
+    !/^https?:\/\/[^/\\]/i.test(trimmed)
+  ) {
+    throw new ApiError('openUrl only supports http and https URLs');
+  }
+
   return invoke('plugin:opener|open_url', { url: trimmed });
 }
 

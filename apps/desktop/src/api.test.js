@@ -616,6 +616,9 @@ describe('openUrl', () => {
         await expect(openUrl('javascript:alert(1)')).rejects.toThrow('openUrl only supports http and https URLs');
         await expect(openUrl('data:text/html,hello')).rejects.toThrow('openUrl only supports http and https URLs');
         await expect(openUrl('powershell:Start-Process calc')).rejects.toThrow('openUrl only supports http and https URLs');
+        await expect(openUrl('vbscript:msgbox(1)')).rejects.toThrow('openUrl only supports http and https URLs');
+        await expect(openUrl('http:///missing-hostname')).rejects.toThrow('openUrl only supports http and https URLs');
+        await expect(openUrl(' \u0001 javascript:alert(1) \u0001 ')).rejects.toThrow('openUrl only supports http and https URLs');
         await expect(openUrl(/** @type {any} */ (null))).rejects.toThrow('openUrl only supports http and https URLs');
     });
 
