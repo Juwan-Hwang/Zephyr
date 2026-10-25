@@ -40,10 +40,288 @@ pub fn quote_short_id_values(content: &str) -> String {
     .into_owned()
 }
 
+/// Strip a YAML `#` comment from an unquoted scalar. In YAML, `#` only
+/// starts a comment when it is the first character or is preceded by a space
+/// or tab; otherwise it is part of the scalar (e.g. `Group#1` stays whole).
+fn strip_yaml_comment(s: &str) -> &str {
+    let mut prev: Option<u8> = None;
+    for (i, &b) in s.as_bytes().iter().enumerate() {
+        if b == b'#' && matches!(prev, None | Some(b' ') | Some(b'\t')) {
+            return s.get(..i).map(str::trim_end).unwrap_or("");
+        }
+        prev = Some(b);
+    }
+    s
+}
+
+/// Decode one quoted sequence item, or return `None` when the scanner cannot
+/// reproduce `serde_yaml` exactly: a closing quote missing on this line
+/// (multiline scalar), trailing tokens after the closing quote, or escape
+/// sequences in a double-quoted scalar. Single-quoted `''` escapes are
+/// decoded, matching YAML.
+fn unquote_item_scalar(item: &str) -> Option<String> {
+    let mut chars = item.char_indices().peekable();
+    let (_, quote) = chars.next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let mut out = String::new();
+    while let Some((i, c)) = chars.next() {
+        if quote == '"' && c == '\\' {
+            return None;
+        }
+        if c == quote {
+            if quote == '\'' {
+                if let Some(&(_, '\'')) = chars.peek() {
+                    chars.next();
+                    out.push('\'');
+                    continue;
+                }
+            }
+            let rest = item.get(i + c.len_utf8()..).unwrap_or("").trim_start();
+            if rest.is_empty() || rest.starts_with('#') {
+                return Some(out);
+            }
+            return None;
+        }
+        out.push(c);
+    }
+    None
+}
+
+/// Index of the first line after the top-level `rules:` key, or `None`
+/// when there is no such key or its header is a complex form the scanner
+/// cannot read (e.g. a flow sequence).
+fn rules_header_end(lines: &[&str]) -> Option<usize> {
+    for (i, line) in lines.iter().enumerate() {
+        // Must be an unindented top-level key line.
+        if line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+        let after_key = if let Some(rest) = line.strip_prefix("rules") {
+            rest
+        } else if let Some(rest) = line.strip_prefix("\"rules\"") {
+            rest
+        } else if let Some(rest) = line.strip_prefix("'rules'") {
+            rest
+        } else {
+            continue;
+        };
+        let rest_trimmed = after_key.trim_start();
+        if let Some(rest_after_colon) = rest_trimmed.strip_prefix(':') {
+            // A comment or value after the colon needs separating
+            // whitespace; `rules:#comment` is not a header at all (the
+            // whole line reads as a plain scalar).
+            if rest_after_colon.is_empty()
+                || rest_after_colon.starts_with(' ')
+                || rest_after_colon.starts_with('\t')
+            {
+                let rest_comment = rest_after_colon.trim();
+                if rest_comment.is_empty() || rest_comment.starts_with('#') {
+                    return Some(i + 1);
+                }
+            }
+            return None;
+        }
+    }
+    None
+}
+
+/// Whether the item at `item_pos` really ended: the next significant line
+/// is a new item at the same indentation, a top-level key, or end of input.
+/// A following more-indented line would fold into the scalar (plain
+/// multiline scalar) or nest under it, so it does not count as ended.
+fn rules_item_ended(lines: &[&str], item_pos: usize, item_indent: usize) -> bool {
+    let mut j = item_pos + 1;
+    while let Some(&next) = lines.get(j) {
+        let next_trimmed = next.trim_start();
+        if next_trimmed.is_empty() || next_trimmed.starts_with('#') {
+            j += 1;
+            continue;
+        }
+        let next_indent = next.len() - next_trimmed.len();
+        if next_indent == item_indent {
+            return next_trimmed == "-" || next_trimmed.starts_with("- ") || item_indent == 0;
+        }
+        if next_indent == 0 && next_trimmed != "-" && !next_trimmed.starts_with("- ") {
+            return true;
+        }
+        return false;
+    }
+    true
+}
+
+/// Fast-path line scanner for extracting policy group names from `rules:`.
+/// Avoids allocating and parsing large subscription YAML ASTs for typical rule files.
+///
+/// The scanner returns a name only for shapes it can read exactly like
+/// `serde_yaml` would. Anything unusual — aliases, mappings, nested or
+/// mixed-indentation sequences, multiline scalars, quoted escapes, tab
+/// indentation — aborts the fast path so the caller falls back to the full
+/// parser. A candidate name is only returned once the next significant line
+/// proves its item ended, so a folded continuation line cannot silently
+/// truncate the name.
+/// Outcome of the fast-path scan: a name, proof that no rule yields one,
+/// or "cannot tell" (fall back to the full parser). The middle case matters
+/// because a fully read but nameless section makes the fallback parse
+/// provably redundant — common for subscriptions opening with more than
+/// ten generic rules.
+enum FastScan {
+    Found(String),
+    NoName,
+    Unknown,
+}
+
+fn extract_name_from_rules_fast(content: &str) -> FastScan {
+    let lines: Vec<&str> = content.lines().collect();
+    let Some(mut pos) = rules_header_end(&lines) else {
+        return FastScan::Unknown;
+    };
+
+    let mut scanned_count = 0;
+    let mut item_indent_len: Option<usize> = None;
+    while let Some(&line) = lines.get(pos) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            pos += 1;
+            continue;
+        }
+        let indent_len = line.len() - trimmed.len();
+        if indent_len == 0 {
+            // An indentless list item belongs to the sequence only when the
+            // sequence itself started indentless (as `serde_yaml::to_string`
+            // emits). An unindented non-item line ends the section, so the
+            // answer is definitively "no name"; an indentless item after
+            // indented items is not a clean section end, so fall back.
+            let is_item = trimmed == "-" || trimmed.starts_with("- ");
+            if !is_item {
+                return FastScan::NoName;
+            }
+            match item_indent_len {
+                None => item_indent_len = Some(0),
+                Some(0) => {}
+                Some(_) => return FastScan::Unknown,
+            }
+        } else {
+            if line.as_bytes().iter().take(indent_len).any(|&b| b == b'\t') {
+                return FastScan::Unknown;
+            }
+            match item_indent_len {
+                None => item_indent_len = Some(indent_len),
+                Some(prev) if prev != indent_len => return FastScan::Unknown,
+                _ => {}
+            }
+        }
+
+        // `-` must be followed by a space or end of line; `-foo` is a plain
+        // scalar, not a sequence item.
+        let item_str = if trimmed == "-" {
+            ""
+        } else if let Some(rest) = trimmed.strip_prefix("- ") {
+            rest.trim()
+        } else {
+            // Not a list item line: a continuation or nested line, which
+            // only the full parser can read.
+            return FastScan::Unknown;
+        };
+
+        scanned_count += 1;
+        if scanned_count > 10 {
+            // The full parser only looks at the first ten rules too, so a
+            // nameless first ten means the answer is definitively "no name".
+            return FastScan::NoName;
+        }
+
+        // Aliases resolve to earlier scalars; skipping one would change
+        // first-match order, so fall back.
+        if item_str.starts_with('*') {
+            return FastScan::Unknown;
+        }
+        // Flow collections are not plain rule strings.
+        if item_str.starts_with('{') || item_str.starts_with('[') {
+            return FastScan::Unknown;
+        }
+        // Indicators that change how the node is read — anchors, tags,
+        // block scalars, explicit keys, directives, reserved characters —
+        // or a nested sequence item: only the full parser can read these,
+        // so fall back rather than misreading them as plain rule strings.
+        if matches!(
+            item_str.chars().next(),
+            Some('&' | '!' | '|' | '>' | '?' | '%' | '@' | '`' | ':' | ',')
+        ) || item_str == "-"
+            || item_str.starts_with("- ")
+        {
+            return FastScan::Unknown;
+        }
+
+        // Decode the scalar the way YAML would, or fall back.
+        let scalar: std::borrow::Cow<'_, str> =
+            if item_str.starts_with('"') || item_str.starts_with('\'') {
+                match unquote_item_scalar(item_str) {
+                    Some(s) => std::borrow::Cow::Owned(s),
+                    None => return FastScan::Unknown,
+                }
+            } else {
+                let s = strip_yaml_comment(item_str);
+                // A `:` followed by a space or tab (or a trailing `:`)
+                // makes this a mapping item, not a rule string; only the
+                // full parser can read it.
+                if s.contains(": ") || s.contains(":\t") || s.ends_with(':') {
+                    return FastScan::Unknown;
+                }
+                std::borrow::Cow::Borrowed(s)
+            };
+
+        let Some(name) = scalar.split(',').nth(2).map(str::trim) else {
+            pos += 1;
+            continue;
+        };
+
+        let upper = name.to_uppercase();
+        if upper.is_empty()
+            || upper == "DIRECT"
+            || upper == "REJECT"
+            || upper == "MATCH"
+            || upper == "PROXY"
+            || upper == "PASS"
+            || upper == "DROP"
+        {
+            pos += 1;
+            continue;
+        }
+
+        if name.len() > 64 {
+            pos += 1;
+            continue;
+        }
+        let is_safe = name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c.is_ascii_whitespace());
+        if !is_safe {
+            pos += 1;
+            continue;
+        }
+
+        if !rules_item_ended(&lines, pos, item_indent_len.unwrap_or(0)) {
+            return FastScan::Unknown;
+        }
+        return FastScan::Found(name.to_owned());
+    }
+
+    FastScan::NoName
+}
+
 /// Extract a name from the rules' policy-group field.
 /// Scans up to 10 rules, returns the first non-generic policy-group name.
 #[must_use]
 pub fn extract_name_from_rules(content: &str) -> Option<String> {
+    // Fast path: scan rules lines directly to avoid full serde_yaml AST allocations.
+    match extract_name_from_rules_fast(content) {
+        FastScan::Found(name) => return Some(name),
+        FastScan::NoName => return None,
+        FastScan::Unknown => {}
+    }
+
     let yaml: serde_yaml::Value = serde_yaml::from_str(content).ok()?;
 
     let rules_seq = yaml.get("rules").and_then(|r| r.as_sequence())?;
@@ -1375,6 +1653,205 @@ mod tests {
         let yaml = r#"short-id: "abc123""#;
         let result = quote_short_id_values(yaml);
         assert_eq!(result, r#"short-id: "abc123""#);
+    }
+
+    #[test]
+    fn test_extract_name_from_rules() {
+        // Standard unquoted rules
+        let yaml_simple = "rules:\n  - DOMAIN-SUFFIX,example.com,Airport-1\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_simple),
+            Some("Airport-1".to_owned())
+        );
+
+        // Quoted rules (double and single quotes)
+        let yaml_quoted = "rules:\n  - \"DOMAIN-SUFFIX,example.com,Airport-Double\"\n  - 'DOMAIN-SUFFIX,example.com,Airport-Single'\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_quoted),
+            Some("Airport-Double".to_owned())
+        );
+
+        // Generic policy names skipped
+        let yaml_generic = "rules:\n  - DOMAIN-SUFFIX,site1.com,DIRECT\n  - DOMAIN-SUFFIX,site2.com,REJECT\n  - DOMAIN-SUFFIX,site3.com,Airport-Custom\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_generic),
+            Some("Airport-Custom".to_owned())
+        );
+
+        // Skips invalid characters / names > 64 chars
+        let long_name = "A".repeat(65);
+        let yaml_long = format!("rules:\n  - DOMAIN-SUFFIX,site1.com,{long_name}\n  - DOMAIN-SUFFIX,site2.com,ValidGroup\n");
+        assert_eq!(
+            extract_name_from_rules(&yaml_long),
+            Some("ValidGroup".to_owned())
+        );
+
+        // Empty rules or missing rules section
+        assert_eq!(extract_name_from_rules("rules: []"), None);
+        assert_eq!(extract_name_from_rules("port: 7890\n"), None);
+
+        // Fallback parity when rules section has unusual layout
+        let yaml_unusual = "rules: [ 'DOMAIN-SUFFIX,site1.com,UnusualGroup' ]\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_unusual),
+            Some("UnusualGroup".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_extract_name_from_rules_fast_path_parity() {
+        // `#` without preceding whitespace is scalar content, not a comment:
+        // `Group#1` fails the safety check, so the next rule wins.
+        let yaml_hash =
+            "rules:\n  - DOMAIN-SUFFIX,example.com,Group#1\n  - DOMAIN-SUFFIX,example.com,Backup\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_hash),
+            Some("Backup".to_owned())
+        );
+
+        // Quoted scalar followed by a comment still decodes to the scalar.
+        let yaml_quoted_comment = "rules:\n  - \"DOMAIN-SUFFIX,example.com,Airport-A\" # note\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_quoted_comment),
+            Some("Airport-A".to_owned())
+        );
+
+        // Quotes around the third field are part of a plain scalar, so the
+        // field is rejected and the next rule wins.
+        let yaml_quoted_field =
+            "rules:\n  - DOMAIN-SUFFIX,example.com,\"My Group\"\n  - DOMAIN-SUFFIX,example.com,Backup\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_quoted_field),
+            Some("Backup".to_owned())
+        );
+
+        // A folded plain scalar continuation belongs to the first rule.
+        let yaml_folded = "rules:\n  - DOMAIN-SUFFIX,example.com,Airport\n    Extra\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_folded),
+            Some("Airport Extra".to_owned())
+        );
+
+        // A multiline quoted scalar belongs to the first rule.
+        let yaml_multiline = "rules:\n  - \"DOMAIN-SUFFIX,example.com,Airport\n    Premium\"\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_multiline),
+            Some("Airport Premium".to_owned())
+        );
+
+        // An alias resolves to the anchored scalar, not the next rule.
+        let yaml_alias = "anchors:\n  - &main DOMAIN-SUFFIX,example.com,Primary\nrules:\n  - *main\n  - DOMAIN-SUFFIX,example.com,Backup\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_alias),
+            Some("Primary".to_owned())
+        );
+
+        // Indentless items (as `serde_yaml::to_string` emits) use the fast path.
+        let yaml_indentless = "rules:\n- DOMAIN-SUFFIX,example.com,Airport-1\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_indentless),
+            Some("Airport-1".to_owned())
+        );
+
+        // A nested sequence item is not a rule string.
+        let yaml_nested = "rules:\n  -\n    - DOMAIN-SUFFIX,example.com,Nested\n";
+        assert_eq!(extract_name_from_rules(yaml_nested), None);
+
+        // `-foo` is a plain scalar, not a sequence item, so `rules` is not
+        // a sequence at all.
+        let yaml_dash = "rules:\n  -DOMAIN-SUFFIX,example.com,Primary\n";
+        assert_eq!(extract_name_from_rules(yaml_dash), None);
+
+        // A mapping item is skipped, not split on commas.
+        let yaml_mapping = "rules:\n  - name: foo,bar,Baz\n  - DOMAIN-SUFFIX,example.com,Backup\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_mapping),
+            Some("Backup".to_owned())
+        );
+
+        // A double-quoted escape decodes via the full parser.
+        let yaml_escape = "rules:\n  - \"DOMAIN-SUFFIX,example.com,A\\u0041irport\"\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_escape),
+            Some("AAirport".to_owned())
+        );
+
+        // A doubled single quote decodes to one apostrophe, which then fails
+        // the safety check.
+        let yaml_single_escape = "rules:\n  - 'DOMAIN-SUFFIX,example.com,It''s'\n";
+        assert_eq!(extract_name_from_rules(yaml_single_escape), None);
+
+        // Anchors and tags in front of a scalar decode to the scalar.
+        let yaml_anchor_quoted =
+            "rules:\n  - &a \"DOMAIN-SUFFIX,example.com,First\"\n  - DOMAIN-SUFFIX,example.com,Second\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_anchor_quoted),
+            Some("First".to_owned())
+        );
+        let yaml_anchor_plain =
+            "rules:\n  - &a DOMAIN-SUFFIX,example.com,First\n  - DOMAIN-SUFFIX,example.com,Second\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_anchor_plain),
+            Some("First".to_owned())
+        );
+        let yaml_tagged =
+            "rules:\n  - !!str \"DOMAIN-SUFFIX,example.com,First\"\n  - DOMAIN-SUFFIX,example.com,Second\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_tagged),
+            Some("First".to_owned())
+        );
+
+        // A nested sequence item is not a rule string.
+        let yaml_nested_item = "rules:\n  - - a,b,Name\n  - DOMAIN-SUFFIX,example.com,Backup\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_nested_item),
+            Some("Backup".to_owned())
+        );
+
+        // An explicit-key item is a mapping, not a rule string.
+        let yaml_explicit_key =
+            "rules:\n  - ? DOMAIN-SUFFIX,example.com,First\n  - DOMAIN-SUFFIX,example.com,Second\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_explicit_key),
+            Some("Second".to_owned())
+        );
+
+        // A colon followed by a tab also separates a mapping key.
+        let yaml_colon_tab =
+            "rules:\n  - name:\tfoo,bar,Baz\n  - DOMAIN-SUFFIX,example.com,Backup\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_colon_tab),
+            Some("Backup".to_owned())
+        );
+
+        // A block scalar item still decodes via the full parser.
+        let yaml_block_scalar =
+            "rules:\n  - |\n    DOMAIN-SUFFIX,example.com,First\n  - DOMAIN-SUFFIX,example.com,Second\n";
+        assert_eq!(
+            extract_name_from_rules(yaml_block_scalar),
+            Some("First".to_owned())
+        );
+
+        // `rules:#comment` is not a header at all: the whole line reads as
+        // a plain scalar, so there is no rules sequence.
+        let yaml_header_comment = "rules:#comment\n  - DOMAIN-SUFFIX,example.com,First\n";
+        assert_eq!(extract_name_from_rules(yaml_header_comment), None);
+
+        // Only the first ten rules are scanned: a valid eleventh rule loses.
+        let mut yaml_eleven = String::from("rules:\n");
+        for _ in 0..10 {
+            yaml_eleven.push_str("  - DOMAIN-SUFFIX,example.com,DIRECT\n");
+        }
+        yaml_eleven.push_str("  - DOMAIN-SUFFIX,example.com,Eleventh\n");
+        assert_eq!(extract_name_from_rules(&yaml_eleven), None);
+
+        // ...while a valid tenth rule still wins.
+        let mut yaml_ten = String::from("rules:\n");
+        for _ in 0..9 {
+            yaml_ten.push_str("  - DOMAIN-SUFFIX,example.com,DIRECT\n");
+        }
+        yaml_ten.push_str("  - DOMAIN-SUFFIX,example.com,Tenth\n");
+        assert_eq!(extract_name_from_rules(&yaml_ten), Some("Tenth".to_owned()));
     }
 
     #[test]
