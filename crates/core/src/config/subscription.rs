@@ -101,14 +101,11 @@ fn extract_name_from_rules_fast(content: &str) -> Option<String> {
             }
 
             // Unquote outer quotes if present
-            let mut s = if (item_str.starts_with('"') && item_str.ends_with('"'))
-                || (item_str.starts_with('\'') && item_str.ends_with('\''))
+            let mut s = if ((item_str.starts_with('"') && item_str.ends_with('"'))
+                || (item_str.starts_with('\'') && item_str.ends_with('\'')))
+                && item_str.len() >= 2
             {
-                if item_str.len() >= 2 {
-                    &item_str[1..item_str.len() - 1]
-                } else {
-                    item_str
-                }
+                &item_str[1..item_str.len() - 1]
             } else {
                 item_str
             };
@@ -126,12 +123,11 @@ fn extract_name_from_rules_fast(content: &str) -> Option<String> {
             };
 
             // Strip quotes around field 3 if present
-            if (raw_name.starts_with('"') && raw_name.ends_with('"'))
-                || (raw_name.starts_with('\'') && raw_name.ends_with('\''))
+            if ((raw_name.starts_with('"') && raw_name.ends_with('"'))
+                || (raw_name.starts_with('\'') && raw_name.ends_with('\'')))
+                && raw_name.len() >= 2
             {
-                if raw_name.len() >= 2 {
-                    raw_name = &raw_name[1..raw_name.len() - 1];
-                }
+                raw_name = &raw_name[1..raw_name.len() - 1];
             }
 
             let name = raw_name.trim();
