@@ -70,6 +70,84 @@ fn extract_valid_group_name(rule_str: &str) -> Option<String> {
     Some(name.to_owned())
 }
 
+/// Helper to parse a single rule sequence item's string value, stripping quotes and comments.
+fn parse_rule_item_str(rest_raw: &str) -> Option<&str> {
+    if let Some(rest_q) = rest_raw.strip_prefix('"') {
+        let close_idx = rest_q.find('"')?;
+        let inner = &rest_q[..close_idx];
+        if inner.contains('\\') {
+            return None;
+        }
+        let trailing = rest_q[close_idx + 1..].trim();
+        if !trailing.is_empty() && !trailing.starts_with('#') {
+            return None;
+        }
+        Some(inner)
+    } else if let Some(rest_q) = rest_raw.strip_prefix('\'') {
+        let close_idx = rest_q.find('\'')?;
+        let inner = &rest_q[..close_idx];
+        if inner.contains('\'') {
+            return None;
+        }
+        let trailing = rest_q[close_idx + 1..].trim();
+        if !trailing.is_empty() && !trailing.starts_with('#') {
+            return None;
+        }
+        Some(inner)
+    } else {
+        let mut val = rest_raw;
+        if val.contains('\t')
+            || val.starts_with('{')
+            || val.starts_with('[')
+            || val.starts_with('|')
+            || val.starts_with('>')
+            || val.starts_with('&')
+            || val.starts_with('*')
+            || val.starts_with('!')
+        {
+            return None;
+        }
+        if let Some(comment_pos) = val.find(" #") {
+            val = val[..comment_pos].trim();
+        } else if val.starts_with('#') {
+            val = "";
+        }
+        Some(val.trim())
+    }
+}
+
+/// Pre-check if content contains features requiring full YAML AST parsing.
+fn is_complex_rules_doc(content: &str) -> bool {
+    if content.contains("<<") || content.contains("%YAML") || content.starts_with('\u{FEFF}') {
+        return true;
+    }
+
+    let mut saw_unindented = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || line.starts_with(' ')
+            || line.starts_with('\t')
+        {
+            continue;
+        }
+        saw_unindented = true;
+        if trimmed.starts_with('{')
+            || trimmed.starts_with("\"rules\"")
+            || trimmed.starts_with("'rules'")
+        {
+            return true;
+        }
+        if let Some(rest) = trimmed.strip_prefix("rules") {
+            if !rest.starts_with(':') && rest.trim_start_matches([' ', '\t']).starts_with(':') {
+                return true;
+            }
+        }
+    }
+    !saw_unindented
+}
+
 /// Fast-path extraction for policy-group name from rules section without full YAML AST parsing.
 ///
 /// Avoids parsing the entire YAML document (which can take 15-20ms for 1000-proxy subscription configs)
@@ -79,34 +157,7 @@ fn extract_valid_group_name(rule_str: &str) -> Option<String> {
 /// `Some(None)` if line scanning completed rules inspection and determined no valid name exists,
 /// or `None` if complex YAML features require falling back to full `serde_yaml` parsing.
 fn extract_name_from_rules_fast(content: &str) -> Option<Option<String>> {
-    if content.contains("<<") || content.contains("%YAML") || content.starts_with('\u{FEFF}') {
-        return None;
-    }
-
-    // Check if document could contain a quoted `rules` key or top-level flow structure
-    let mut saw_unindented_line = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        if line.starts_with(' ') || line.starts_with('\t') {
-            continue;
-        }
-        saw_unindented_line = true;
-        if trimmed.starts_with('{')
-            || trimmed.starts_with("\"rules\"")
-            || trimmed.starts_with("'rules'")
-        {
-            return None;
-        }
-        if let Some(rest) = trimmed.strip_prefix("rules") {
-            if !rest.starts_with(':') && rest.trim_start_matches([' ', '\t']).starts_with(':') {
-                return None;
-            }
-        }
-    }
-    if !saw_unindented_line {
+    if is_complex_rules_doc(content) {
         return None;
     }
 
@@ -170,68 +221,13 @@ fn extract_name_from_rules_fast(content: &str) -> Option<Option<String>> {
 
                 let child_indent = *expected_indent.get_or_insert(indent);
 
-                if indent < child_indent {
-                    return None;
-                }
-                if indent > child_indent {
-                    // Lines indented further than the sequence level (e.g. multi-line rule)
+                if indent != child_indent {
                     return None;
                 }
 
                 let indented = next_line.trim_start();
-                if !indented.starts_with('-') {
-                    return None;
-                }
-
-                let rest_raw = indented[1..].trim();
-                let rule_str = if let Some(rest_q) = rest_raw.strip_prefix('"') {
-                    if let Some(close_idx) = rest_q.find('"') {
-                        let inner = &rest_q[..close_idx];
-                        if inner.contains('\\') {
-                            return None;
-                        }
-                        let trailing = rest_q[close_idx + 1..].trim();
-                        if !trailing.is_empty() && !trailing.starts_with('#') {
-                            return None;
-                        }
-                        inner
-                    } else {
-                        return None;
-                    }
-                } else if let Some(rest_q) = rest_raw.strip_prefix('\'') {
-                    if let Some(close_idx) = rest_q.find('\'') {
-                        let inner = &rest_q[..close_idx];
-                        if inner.contains('\'') {
-                            return None;
-                        }
-                        let trailing = rest_q[close_idx + 1..].trim();
-                        if !trailing.is_empty() && !trailing.starts_with('#') {
-                            return None;
-                        }
-                        inner
-                    } else {
-                        return None;
-                    }
-                } else {
-                    let mut val = rest_raw;
-                    if val.contains('\t')
-                        || val.starts_with('{')
-                        || val.starts_with('[')
-                        || val.starts_with('|')
-                        || val.starts_with('>')
-                        || val.starts_with('&')
-                        || val.starts_with('*')
-                        || val.starts_with('!')
-                    {
-                        return None;
-                    }
-                    if let Some(comment_pos) = val.find(" #") {
-                        val = val[..comment_pos].trim();
-                    } else if val.starts_with('#') {
-                        val = "";
-                    }
-                    val.trim()
-                };
+                let rest_raw = indented.strip_prefix('-')?.trim();
+                let rule_str = parse_rule_item_str(rest_raw)?;
 
                 lines.next();
                 scan_count += 1;
@@ -247,12 +243,7 @@ fn extract_name_from_rules_fast(content: &str) -> Option<Option<String>> {
         }
     }
 
-    if saw_rules_block {
-        Some(None)
-    } else {
-        // No top-level `rules:` key found
-        Some(None)
-    }
+    Some(None)
 }
 
 /// Extract a name from the rules' policy-group field.
