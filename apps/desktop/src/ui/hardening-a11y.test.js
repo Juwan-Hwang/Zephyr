@@ -363,3 +363,23 @@ describe('pluginExecuteHook', () => {
         expect(invokeMock).toHaveBeenCalledWith('plugin_execute_hook', { hookName: 'on_config_load', config: {}, hookData: {} });
     });
 });
+
+describe('kv store and plugin action buttons accessibility', () => {
+    it('kv store action buttons carry title and aria-label attributes', () => {
+        const src = read('ui/plugins-smart.js');
+        expect(src).toContain('class="kv-delete-key-btn');
+        expect(src).toMatch(/class="kv-delete-key-btn[^>]*title="Delete key"/);
+        expect(src).toMatch(/class="kv-delete-key-btn[^>]*aria-label="\${escapeAttr\(`Delete key \${String\(e\.key \?\? ''\)\}`\)}"/);
+
+        expect(src).toContain('class="kv-edit-btn');
+        expect(src).toMatch(/class="kv-edit-btn[^>]*title="Edit value"/);
+        expect(src).toMatch(/class="kv-edit-btn[^>]*aria-label="\${escapeAttr\(`Edit value for \${String\(e\.key \?\? ''\)\}`\)}"/);
+    });
+
+    it('plugin list action buttons carry title and aria-label attributes', () => {
+        const src = read('ui/plugins-smart.js');
+        expect(src).toMatch(/data-action="\${isLoaded \? 'unload' : 'load'}"[^>]*aria-label=/);
+        expect(src).toMatch(/data-action="execute"[^>]*aria-label=/);
+        expect(src).toMatch(/data-action="delete"[^>]*aria-label=/);
+    });
+});

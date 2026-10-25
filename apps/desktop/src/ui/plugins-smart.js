@@ -11,7 +11,7 @@ import * as prism from './prism.js';
 import { Bus, Events } from './events.js';
 import { showNotification, showConfirmModal } from './notifications.js';
 import { t } from '../i18n.js';
-import { escapeHtml } from '../utils/sanitize.js';
+import { escapeHtml, escapeAttr } from '../utils/sanitize.js';
 import { queueSmartConfigWrite, smartEnabledOf, smartFormErrors } from './settings/auto-switch.js';
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -131,13 +131,13 @@ async function renderPluginsList(plugins) {
                     </div>
                 </div>
                 <div class="flex items-center gap-1">
-                    <button class="p-action-btn btn-ghost text-2xs" data-id="${escapeHtml(String(id ?? ''))}" data-action="${isLoaded ? 'unload' : 'load'}">
+                    <button class="p-action-btn btn-ghost text-2xs" data-id="${escapeHtml(String(id ?? ''))}" data-action="${isLoaded ? 'unload' : 'load'}" title="${isLoaded ? 'Unload plugin' : 'Load plugin'}" aria-label="${escapeAttr(`${isLoaded ? 'Unload' : 'Load'} plugin ${String(p.name || id)}`)}">
                         ${isLoaded ? 'Unload' : 'Load'}
                     </button>
-                    <button class="p-action-btn btn-ghost text-2xs" data-id="${escapeHtml(String(id ?? ''))}" data-action="execute" title="Run entry script">
+                    <button class="p-action-btn btn-ghost text-2xs" data-id="${escapeHtml(String(id ?? ''))}" data-action="execute" title="Run entry script" aria-label="${escapeAttr(`Run entry script for plugin ${String(p.name || id)}`)}">
                         Run
                     </button>
-                    <button class="p-action-btn btn-ghost text-2xs text-red-400" data-id="${escapeHtml(String(id ?? ''))}" data-action="delete">Delete</button>
+                    <button class="p-action-btn btn-ghost text-2xs text-red-400" data-id="${escapeHtml(String(id ?? ''))}" data-action="delete" title="Delete plugin" aria-label="${escapeAttr(`Delete plugin ${String(p.name || id)}`)}">Delete</button>
                 </div>
             </div>
         </div>`;
@@ -270,8 +270,8 @@ async function loadKvStore() {
                     <span class="text-2xs text-[var(--text-tertiary)] ms-2 truncate">${escapeHtml(JSON.stringify(e.value)?.slice(0, 60) || 'null')}</span>
                 </div>
                 <div class="flex items-center gap-1 ms-2">
-                    <button class="kv-edit-btn text-2xs text-blue-400 hover:text-blue-300" data-key="${escapeHtml(String(e.key ?? ''))}">edit</button>
-                    <button class="kv-delete-key-btn text-2xs text-red-400 hover:text-red-300" data-key="${escapeHtml(String(e.key ?? ''))}">✕</button>
+                    <button class="kv-edit-btn text-2xs text-blue-400 hover:text-blue-300" data-key="${escapeHtml(String(e.key ?? ''))}" title="Edit value" aria-label="${escapeAttr(`Edit value for ${String(e.key ?? '')}`)}">edit</button>
+                    <button class="kv-delete-key-btn text-2xs text-red-400 hover:text-red-300" data-key="${escapeHtml(String(e.key ?? ''))}" title="Delete key" aria-label="${escapeAttr(`Delete key ${String(e.key ?? '')}`)}">✕</button>
                 </div>
             </div>
         `).join('');
