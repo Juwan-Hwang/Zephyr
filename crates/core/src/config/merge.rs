@@ -55,9 +55,10 @@ pub fn restore_security_settings(yaml: &mut YamlValue, settings: &SecuritySettin
     // written with an explicit tag (`!!str secret`) that mihomo resolves to the
     // same key; otherwise both would survive and the config would carry two
     // conflicting controller/secret settings.
-    remove_keys_resolved(map, &["external-controller"]);
     if settings.secret.is_some() {
-        remove_keys_resolved(map, &["secret"]);
+        remove_keys_resolved(map, &["external-controller", "secret"]);
+    } else {
+        remove_keys_resolved(map, &["external-controller"]);
     }
 
     // Restore external-controller: always bind to localhost
