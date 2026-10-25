@@ -89,7 +89,9 @@ pub fn restore_security_settings(yaml: &mut YamlValue, settings: &SecuritySettin
 
     // Protect TUN state - only allow changes through proper UI toggle
     if !settings.tun_enabled {
-        if let Some(YamlValue::Mapping(ref mut tun_map)) = map.get_mut("tun") {
+        if let Some(YamlValue::Mapping(ref mut tun_map)) =
+            map.get_mut(YamlValue::String("tun".to_owned()))
+        {
             tun_map.insert(
                 YamlValue::String("enable".to_owned()),
                 YamlValue::Bool(false),
@@ -101,7 +103,7 @@ pub fn restore_security_settings(yaml: &mut YamlValue, settings: &SecuritySettin
 /// Remove the `secret` field from a YAML value to prevent credential leakage.
 pub fn strip_secret_from_yaml(yaml: &mut YamlValue) {
     if let YamlValue::Mapping(ref mut map) = yaml {
-        map.remove("secret");
+        map.remove(YamlValue::String("secret".to_owned()));
     }
 }
 
