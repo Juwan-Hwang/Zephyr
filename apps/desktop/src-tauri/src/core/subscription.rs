@@ -2941,6 +2941,10 @@ async fn download_sub_inner_raw(
         }
     }
 
+    // Only content that went through the YAML parse below may supply a
+    // rule-derived name: unvalidated node-list content never yielded one
+    // from the full parser, and must not gain one from the fast path.
+    let mut content_is_parsed_yaml = false;
     if content.contains("proxies:") || content.contains("proxy-groups:") {
         // Quote short-id values before parsing to prevent scientific notation corruption
         content = quote_short_id_values(&content);
@@ -2952,6 +2956,7 @@ async fn download_sub_inner_raw(
 
                 content = serde_yaml::to_string(&yaml_val)
                     .map_err(|e| format!("Failed to serialize sanitized subscription: {e}"))?;
+                content_is_parsed_yaml = true;
             }
             Err(e) => {
                 return Err(format!("Invalid YAML structure in subscription: {e}"));
@@ -2975,7 +2980,11 @@ async fn download_sub_inner_raw(
     // Only apply enhanced naming (Content-Disposition / rules) for new subscriptions.
     // When updating (overwrite == true), always use the frontend-provided name directly.
     if !overwrite {
-        let rule_name = extract_name_from_rules(&content);
+        let rule_name = if content_is_parsed_yaml {
+            extract_name_from_rules(&content)
+        } else {
+            None
+        };
 
         // Priority 1: Content-Disposition filename
         if let Some(dfn) = &disp_filename {
