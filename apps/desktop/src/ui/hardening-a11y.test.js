@@ -41,6 +41,27 @@ describe('home and settings page switches and theme swatches accessibility', () 
             expect(doc.getElementById(descId), descId).toBeTruthy();
         }
 
+        const modalSwitches = [
+            { file: 'ui/global-shortcut.js', toggleId: 'shortcut-enable-toggle', labelId: 'shortcut-enable-label' },
+            { file: 'ui/settings.js', toggleId: 'log-app-toggle', labelId: 'log-app-label' },
+            { file: 'ui/settings.js', toggleId: 'log-core-toggle', labelId: 'log-core-label' },
+        ];
+        for (const { file, toggleId, labelId } of modalSwitches) {
+            const src = read(file);
+            expect(src, file).toContain(`id="${labelId}"`);
+            // The association must live on the toggle input itself: a bare
+            // string search would stay green if the attribute moved to some
+            // other element, so find the input tag by id and check its own
+            // aria-labelledby.
+            const inputTag = src
+                .match(/<input[^>]*>/g)
+                ?.find((tag) => tag.includes(`id="${toggleId}"`));
+            expect(inputTag, `${file}:${toggleId}`).toBeTruthy();
+            expect(inputTag, `${file}:${toggleId}`).toContain(
+                `aria-labelledby="${labelId}"`,
+            );
+        }
+
         const portBtn = doc.getElementById('port-config-btn');
         expect(portBtn).toBeTruthy();
         expect(portBtn?.getAttribute('aria-labelledby')).toBe('setting-port-title current-port-display');

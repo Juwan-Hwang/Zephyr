@@ -2436,6 +2436,19 @@ pub(crate) async fn download_sub_inner_with_budget(
         .map_err(redact_url_in_string)
 }
 
+/// Whether `content` may supply a rule-derived name: either it went through
+/// the YAML parse-and-reserialize step below, or it parses on its own as a
+/// mapping with a `rules` sequence. The second arm matters because content
+/// accepted as a node list (anything starting with `http`) may still be a
+/// Clash YAML config (e.g. one starting with `http-port:`); genuine node
+/// lists fail this parse and keep `None`, matching the full parser.
+fn content_may_supply_rule_name(content_is_parsed_yaml: bool, content: &str) -> bool {
+    content_is_parsed_yaml
+        || serde_yaml::from_str::<serde_yaml::Value>(content)
+            .ok()
+            .is_some_and(|v| v.get("rules").is_some_and(|r| r.is_sequence()))
+}
+
 #[allow(clippy::cognitive_complexity)]
 async fn download_sub_inner_raw(
     app: &AppHandle,
@@ -2941,6 +2954,10 @@ async fn download_sub_inner_raw(
         }
     }
 
+    // Only parsed YAML may supply a rule-derived name: unvalidated
+    // node-list content never yielded one from the full parser, and must
+    // not gain one from the fast path. See `content_may_supply_rule_name`.
+    let mut content_is_parsed_yaml = false;
     if content.contains("proxies:") || content.contains("proxy-groups:") {
         // Quote short-id values before parsing to prevent scientific notation corruption
         content = quote_short_id_values(&content);
@@ -2952,6 +2969,7 @@ async fn download_sub_inner_raw(
 
                 content = serde_yaml::to_string(&yaml_val)
                     .map_err(|e| format!("Failed to serialize sanitized subscription: {e}"))?;
+                content_is_parsed_yaml = true;
             }
             Err(e) => {
                 return Err(format!("Invalid YAML structure in subscription: {e}"));
@@ -2975,7 +2993,11 @@ async fn download_sub_inner_raw(
     // Only apply enhanced naming (Content-Disposition / rules) for new subscriptions.
     // When updating (overwrite == true), always use the frontend-provided name directly.
     if !overwrite {
-        let rule_name = extract_name_from_rules(&content);
+        let rule_name = if content_may_supply_rule_name(content_is_parsed_yaml, &content) {
+            extract_name_from_rules(&content)
+        } else {
+            None
+        };
 
         // Priority 1: Content-Disposition filename
         if let Some(dfn) = &disp_filename {
@@ -3346,6 +3368,26 @@ pub async fn fetch_text(app: AppHandle, url: String) -> Result<String, String> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    #[test]
+    fn test_content_may_supply_rule_name() {
+        // A Clash YAML config starting with `http-port:` is accepted as a
+        // node list by the branch above, but it is still parsed YAML with
+        // a rules sequence, so it keeps its rule-derived name.
+        let http_port_yaml = "http-port: 7890\nrules:\n  - DOMAIN-SUFFIX,example.com,Airport-1\n";
+        assert!(content_may_supply_rule_name(false, http_port_yaml));
+        assert_eq!(
+            extract_name_from_rules(http_port_yaml),
+            Some("Airport-1".to_owned())
+        );
+
+        // A genuine node list fails the parse and keeps `None`.
+        let node_list = "vmess://eyJhZGQiOiIxLjIuMy40In0=\nvmess://eyJhZGQiOiI1LjYuNy44In0=\n";
+        assert!(!content_may_supply_rule_name(false, node_list));
+
+        // Content from the parse-and-reserialize branch is admitted by
+        // the flag alone, whatever it looks like now.
+        assert!(content_may_supply_rule_name(true, node_list));
+    }
     use zephyr_core::config::subscription::{
         is_private_host, is_private_ip, quote_short_id_values, validate_public_host_addrs,
         validate_subscription_name, validate_subscription_url_with_ip,
