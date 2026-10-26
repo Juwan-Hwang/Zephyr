@@ -43,7 +43,11 @@ pub fn quote_short_id_values(content: &str) -> String {
         if let Some(whole_match) = caps.get(0) {
             let prefix = &caps[1];
             let value = &caps[2];
-            let newline = if whole_match.as_str().starts_with('\n') { "\n" } else { "" };
+            let newline = if whole_match.as_str().starts_with('\n') {
+                "\n"
+            } else {
+                ""
+            };
 
             result.push_str(&content[last_end..whole_match.start()]);
             result.push_str(newline);
