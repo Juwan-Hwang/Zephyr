@@ -8,8 +8,8 @@ use crate::core_manager::core::fetch_util::fetch_url_content;
 use crate::core_manager::core::MAX_RESPONSE_SIZE;
 use crate::core_manager::write_file_secure;
 use crate::prism::types::{
-    check_input_size, count_rules, detect_source, ensure_prism_ext, normalize_to_prism_yaml,
-    resolve_rule_path, sanitize_filename, RuleFileInfo,
+    check_input_size, check_name_size, count_rules, detect_source, ensure_prism_ext,
+    normalize_to_prism_yaml, resolve_rule_path, sanitize_filename, RuleFileInfo,
 };
 use crate::prism::PrismState;
 use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
@@ -104,6 +104,7 @@ pub fn rule_create(
     name: String,
     content: String,
 ) -> Result<String, String> {
+    check_name_size(&name, "Rule name")?;
     check_input_size(&content, "Rule content")?;
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
@@ -160,6 +161,7 @@ pub fn rule_rename(
     old_filename: String,
     new_filename: String,
 ) -> Result<String, String> {
+    check_name_size(&new_filename, "Rule name")?;
     let prism_dir = state.get_prism_workspace()?;
     let safe_old = sanitize_filename(&old_filename)?;
     if !safe_old.ends_with(".prism.yaml") {
@@ -203,6 +205,7 @@ pub fn rule_extract_from_profile(
     profile_id: String,
     name: String,
 ) -> Result<String, String> {
+    check_name_size(&name, "Rule name")?;
     let raw = state.with_ext(|ext| ext.read_raw_profile(&profile_id))?;
 
     // Parse YAML and extract rules section
@@ -296,6 +299,7 @@ pub fn rule_import_text(
     text: String,
     name: String,
 ) -> Result<String, String> {
+    check_name_size(&name, "Rule name")?;
     // Same cap as importing a file by path: the text may be a whole picked file.
     let max = crate::core_manager::core::MAX_RESPONSE_SIZE;
     if text.len() > max {
@@ -329,6 +333,7 @@ pub fn rule_import_file(
     file_path: String,
     name: String,
 ) -> Result<String, String> {
+    check_name_size(&name, "Rule name")?;
     // C-2: Validate and restrict the file path
     let path = std::path::Path::new(&file_path);
 
@@ -405,6 +410,7 @@ pub async fn rule_import_url(
     name: String,
 ) -> Result<String, String> {
     state.check_rate_limit("rule_import_url")?;
+    check_name_size(&name, "Rule name")?;
 
     // Use unified fetch function for consistent security measures
     let raw = fetch_url_content(&url, Some(&state.app)).await?;
