@@ -4,7 +4,9 @@
 
 use tauri::State;
 
-use clash_prism_core::failover::{FailoverTracker, NodeFailPolicy};
+use clash_prism_core::failover::FailoverTracker;
+#[cfg(test)]
+use clash_prism_core::failover::NodeFailPolicy;
 
 use crate::prism::types::check_name_size;
 use crate::prism::PrismState;
@@ -67,7 +69,7 @@ pub fn failover_set_policy(
             return Err("Cooldown must be at least 1 second".to_owned());
         }
     }
-    if let Some(ref g) = fallback_group {
+    if let Some(g) = &fallback_group {
         check_name_size(g, "Fallback group")?;
     }
 
