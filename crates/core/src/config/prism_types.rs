@@ -58,19 +58,72 @@ pub fn check_input_size(input: &str, label: &str) -> Result<(), AppError> {
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 pub fn validate_plugin_id(plugin_id: &str) -> Result<(), AppError> {
     const MAX_PLUGIN_ID_LEN: usize = 128;
+    // Per Microsoft's file-naming documentation: COM0/LPT0 and the
+    // superscript-digit forms (COM¹-COM³, LPT¹-LPT³) are reserved too,
+    // since Windows reads ¹, ², ³ as digits in device names.
+    const RESERVED_NAMES: &[&str] = &[
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM0",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "COM\u{b9}",
+        "COM\u{b2}",
+        "COM\u{b3}",
+        "LPT0",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9",
+        "LPT\u{b9}",
+        "LPT\u{b2}",
+        "LPT\u{b3}",
+    ];
+
     // Decode URL-encoded characters first to prevent bypass via %2e%2e etc.
     let decoded = url_decode_complete(plugin_id);
-    if decoded.is_empty()
+    // Trim both ends: a leading dot/space must not smuggle a reserved name
+    // (e.g. ".CON") or the plugins directory itself (".") past validation.
+    let trimmed = decoded.trim_matches([' ', '.']);
+
+    if trimmed.is_empty()
+        || decoded != trimmed
         || decoded.len() > MAX_PLUGIN_ID_LEN
         || decoded.contains('/')
         || decoded.contains('\\')
+        || decoded.contains(':')
         || decoded.contains("..")
         || decoded.contains('\0')
+        || decoded.chars().any(char::is_control)
     {
         return Err(AppError::ConfigError(
             "Invalid plugin ID: contains unsafe characters or exceeds length limit".to_owned(),
         ));
     }
+
+    // Windows treats a device name followed by an extension as the device
+    // itself ("NUL.txt", "CON.json"), so compare the stem before the first dot.
+    let stem = trimmed.split('.').next().unwrap_or(trimmed);
+    if RESERVED_NAMES.contains(&stem.to_ascii_uppercase().as_str()) {
+        return Err(AppError::ConfigError(format!(
+            "Invalid plugin ID: '{plugin_id}' is a reserved Windows device name"
+        )));
+    }
+
     Ok(())
 }
 
@@ -331,11 +384,28 @@ mod tests {
     #[test]
     fn test_validate_plugin_id_ok() {
         assert!(validate_plugin_id("my-plugin").is_ok());
+        assert!(validate_plugin_id("plugin_123").is_ok());
     }
 
     #[test]
-    fn test_validate_plugin_id_traversal() {
+    fn test_validate_plugin_id_traversal_and_unsafe_chars() {
         assert!(validate_plugin_id("../etc/passwd").is_err());
+        assert!(validate_plugin_id("plugin:stream").is_err());
+        assert!(validate_plugin_id("plugin\r\n").is_err());
+        assert!(validate_plugin_id("CON").is_err());
+        assert!(validate_plugin_id("nul").is_err());
+        assert!(validate_plugin_id("C:").is_err());
+        assert!(validate_plugin_id("plugin. ").is_err());
+        // Reserved names stay reserved with an extension or leading dot/space.
+        assert!(validate_plugin_id("nul.plugin").is_err());
+        assert!(validate_plugin_id("CON.txt").is_err());
+        assert!(validate_plugin_id("COM1.log").is_err());
+        assert!(validate_plugin_id(".CON").is_err());
+        assert!(validate_plugin_id(".").is_err());
+        assert!(validate_plugin_id("COM0").is_err());
+        assert!(validate_plugin_id("LPT0").is_err());
+        assert!(validate_plugin_id("COM\u{b9}").is_err());
+        assert!(validate_plugin_id("LPT\u{b3}.txt").is_err());
     }
 
     #[test]
