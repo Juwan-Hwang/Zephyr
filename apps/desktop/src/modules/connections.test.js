@@ -146,6 +146,17 @@ describe('connections page list rendering', () => {
         expect(list().querySelector('#connections-empty')).toBeNull();
     });
 
+    it('has proper aria-label and data-i18n-aria-label attributes on search input', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [] });
+        initConnectionsPage();
+        await flush();
+        const input = /** @type {HTMLInputElement} */ (document.getElementById('connections-search-input'));
+        expect(input.getAttribute('aria-label')).toBe('Search connections...');
+        expect(input.getAttribute('data-i18n-aria-label')).toBe('searchConnections');
+        const actionIcon = document.getElementById('action-btn-icon');
+        expect(actionIcon?.getAttribute('aria-hidden')).toBe('true');
+    });
+
     it('says a search found nothing and clears it from the box or the empty state', async () => {
         mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0), conn('2', 'b.example', 0)] });
         initConnectionsPage();

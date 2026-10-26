@@ -97,14 +97,14 @@ const PAGE_HTML = `
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
             </div>
-            <input type="text" id="connections-search-input" placeholder="Search connections..." data-i18n-placeholder="searchConnections" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full h-8 py-0 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-[var(--zephyr-time-standard)] focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner pe-9">
+            <input type="text" id="connections-search-input" placeholder="Search connections..." data-i18n-placeholder="searchConnections" aria-label="Search connections..." data-i18n-aria-label="searchConnections" class="bg-[var(--zephyr-bg-muted)] border border-[var(--zephyr-border-default)] rounded-full h-8 py-0 px-5 ps-11 text-[var(--text-primary)] text-xs w-52 transition-all duration-[var(--zephyr-time-standard)] focus:outline-none focus:border-[var(--zephyr-border-strong)] focus:bg-[var(--zephyr-bg-input)] focus:w-72 placeholder:text-[var(--text-secondary)] shadow-inner pe-9">
             <button id="connections-search-clear" type="button" class="conn-search-clear hidden" data-i18n-title="clearSearch" data-i18n-aria-label="clearSearch" title="Clear search" aria-label="Clear search">
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
         <!-- Close All / Clear All Button -->
         <button id="close-all-conns-btn" class="btn-danger">
-            <svg id="action-btn-icon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <svg id="action-btn-icon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             <span id="action-btn-text" data-i18n="closeAll">Close All</span>
         </button>
         <!-- Pause / resume the 2 s refresh (rows stop moving so one can be clicked) -->
