@@ -1396,7 +1396,7 @@ rules:
 
         #[test]
         fn rule_name_size_validation_rejects_oversized_name() {
-            use super::super::types::{check_name_size, MAX_NAME_SIZE};
+            use crate::prism::types::{check_name_size, MAX_NAME_SIZE};
 
             let oversized_name = "r".repeat(MAX_NAME_SIZE + 1);
             let res = check_name_size(&oversized_name, "Rule name");
