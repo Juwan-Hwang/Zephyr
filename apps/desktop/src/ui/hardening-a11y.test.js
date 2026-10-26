@@ -76,6 +76,22 @@ describe('home and settings page switches and theme swatches accessibility', () 
         }
     });
 
+    it('DNS and Port configuration modal inputs have valid aria-describedby associations', () => {
+        const doc = parseIndex();
+        const modalFields = [
+            { inputId: 'dns-nameservers-input', descId: 'dns-nameservers-hint' },
+            { inputId: 'dns-fallbacks-input', descId: 'dns-fallbacks-hint' },
+            { inputId: 'port-mixed-input', descId: 'port-mixed-hint' },
+            { inputId: 'port-socks-input', descId: 'port-socks-hint' },
+        ];
+        for (const { inputId, descId } of modalFields) {
+            const input = doc.getElementById(inputId);
+            expect(input, inputId).toBeTruthy();
+            expect(input?.getAttribute('aria-describedby')).toBe(descId);
+            expect(doc.getElementById(descId), descId).toBeTruthy();
+        }
+    });
+
     it('settings segmented controls carry role="group" and translatable aria-labels', () => {
         const doc = parseIndex();
         const controls = [
