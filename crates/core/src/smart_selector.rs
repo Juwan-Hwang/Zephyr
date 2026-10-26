@@ -86,8 +86,8 @@ pub fn compute_smart_score(
     success_records: Vec<bool>,
 ) -> f64 {
     let mut history = NodeHistory::new("node");
-    for (lat, success) in latency_records.into_iter().zip(success_records) {
-        history.add_record(lat, success);
+    for (lat, success) in latency_records.iter().zip(success_records.iter()) {
+        history.add_record(*lat, *success);
     }
     let scorer = SmartScorer::with_config(
         ScoreWeights {
@@ -126,13 +126,14 @@ pub fn compute_smart_rank(
     );
 
     let mut histories: Vec<NodeHistory> = Vec::with_capacity(node_names.len());
-    for (name, (latency, success)) in node_names
-        .into_iter()
-        .zip(node_latency_records.into_iter().zip(node_success_records))
-    {
-        let mut history = NodeHistory::new(&name);
-        for (lat, suc) in latency.into_iter().zip(success) {
-            history.add_record(lat, suc);
+    for (i, name) in node_names.iter().enumerate() {
+        let mut history = NodeHistory::new(name);
+        if let (Some(latency), Some(success)) =
+            (node_latency_records.get(i), node_success_records.get(i))
+        {
+            for (lat, suc) in latency.iter().zip(success.iter()) {
+                history.add_record(*lat, *suc);
+            }
         }
         histories.push(history);
     }
