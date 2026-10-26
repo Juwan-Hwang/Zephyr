@@ -443,6 +443,14 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
                         return Err(format!("Unsafe path in backup archive: {}", entry.path));
                     }
 
+                    if entry.path.starts_with("profiles/") {
+                        let file_name = entry.path.strip_prefix("profiles/").unwrap_or(&entry.path);
+                        zephyr_core::config::sanitizer::sanitize_config_file_name(
+                            file_name.to_owned(),
+                        )
+                        .map_err(|e| format!("Invalid profile filename in backup: {e}"))?;
+                    }
+
                     // Find the entry in the ZIP by name — use by_name for O(1) lookup
                     let zip_entry = archive.by_name(&entry.path).map_err(|_zip| {
                         format!(
@@ -505,6 +513,52 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
                     // Verify checksum
                     verify_sha256(&dest_path, &entry.sha256)?;
 
+                    // Sanitize YAML content for profile YAMLs and run_config.yaml.
+                    // Fail closed: any failure here aborts the import instead of
+                    // committing the original, unsanitized file. Only mapping
+                    // documents can carry dangerous keys; an encrypted profile
+                    // arrives as a single base64 scalar and must be left
+                    // byte-for-byte untouched, since re-serializing it would
+                    // append a newline and break the strict base64 decoder.
+                    if entry.path.starts_with("profiles/") || entry.path == "run_config.yaml" {
+                        let content = fs::read_to_string(&dest_path)
+                            .map_err(|e| format!("Failed to read extracted {}: {e}", entry.path))?;
+                        let mut yaml_value = serde_yaml::from_str::<serde_yaml::Value>(&content)
+                            .map_err(|e| {
+                                format!("Invalid YAML in backup file {}: {e}", entry.path)
+                            })?;
+                        // A tagged root (e.g. `!profile` on a mapping) parses
+                        // as a Tagged value, not a Mapping: sanitize the
+                        // tagged document itself, not just untagged roots.
+                        // A clean mapping is left untouched: re-serializing it
+                        // would discard comments (including subscription URLs
+                        // stored as comments) even when nothing was removed.
+                        let target = unwrap_tagged(&mut yaml_value);
+                        if matches!(target, serde_yaml::Value::Mapping(_)) {
+                            let before = target.clone();
+                            zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(
+                                target, false,
+                            );
+                            if *target != before {
+                                let mut sanitized_content = serde_yaml::to_string(&yaml_value)
+                                    .map_err(|e| {
+                                        format!("Failed to serialize sanitized {}: {e}", entry.path)
+                                    })?;
+                                // Re-serialization drops every comment, but
+                                // the subscription URL / info lines are
+                                // functional metadata for legacy profiles
+                                // (the app reads them back as `# URL: ` /
+                                // `# SUB_INFO: `). Keep those lines when the
+                                // sanitizer had to rewrite the file.
+                                sanitized_content =
+                                    preserve_subscription_comments(&content, sanitized_content);
+                                fs::write(&dest_path, sanitized_content).map_err(|e| {
+                                    format!("Failed to write sanitized {}: {e}", entry.path)
+                                })?;
+                            }
+                        }
+                    }
+
                     // Validate settings.json structure before commit so a
                     // corrupt archive doesn't overwrite the user's working
                     // settings file.
@@ -564,6 +618,32 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
         // Map relative paths to absolute destinations
         let dest_map = build_dest_map(&paths_clone, &manifest);
 
+        // Two archive entries can sanitize to the same destination (e.g.
+        // "profiles/foo.yaml" and "profiles/%66oo.yaml"): reject the import
+        // rather than letting the second silently overwrite the first.
+        {
+            // On Windows/macOS filesystems "Work.yaml" and "work.yaml" are
+            // the same file, so compare case-insensitively there; on Linux
+            // they are distinct files and must both restore.
+            let mut seen = std::collections::HashSet::new();
+            for (_, dest_abs) in &dest_map {
+                let raw_key = dest_abs.as_os_str().to_string_lossy();
+                let key = if cfg!(windows) || cfg!(target_os = "macos") {
+                    raw_key.to_lowercase()
+                } else {
+                    raw_key.into_owned()
+                };
+                if !seen.insert(key) {
+                    let _ = fs::remove_dir_all(&staging_dir);
+                    let _ = fs::remove_dir_all(&backup_dir);
+                    return Err(format!(
+                        "Duplicate destination in backup archive: {}",
+                        dest_abs.display()
+                    ));
+                }
+            }
+        }
+
         // Commit phase: back up current files, then swap staged files in.
         // Wrapped in a closure so that any error triggers rollback + cleanup
         // in a single, centralized location.
@@ -573,7 +653,7 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
             // Back up current files that will be replaced
             for (rel_path, dest_abs) in &dest_map {
                 if dest_abs.exists() {
-                    let backup_path = backup_dir.join(rel_path);
+                    let backup_path = backup_path_for(&backup_dir, rel_path, dest_abs);
                     if let Some(parent) = backup_path.parent() {
                         fs::create_dir_all(parent)
                             .map_err(|e| format!("Failed to create backup dir: {e}"))?;
@@ -595,7 +675,7 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
                         .map_err(|e| format!("Failed to create dest dir: {e}"))?;
                 }
 
-                let is_new = !backup_dir.join(rel_path).exists();
+                let is_new = !backup_path_for(&backup_dir, rel_path, dest_abs).exists();
                 if is_new {
                     newly_created.push(dest_abs.clone());
                 }
@@ -694,6 +774,53 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
     ))
 }
 
+/// Subscription metadata lives in `# URL: ` / `# SUB_INFO: ` comment lines
+/// that YAML re-serialization would discard. When a file had to be
+/// rewritten, carry those lines over to the new text (in original order,
+/// ahead of the document); other comments are not functional metadata and
+/// are not preserved.
+fn preserve_subscription_comments(original: &str, serialized: String) -> String {
+    let kept: Vec<&str> = original
+        .lines()
+        .filter(|line| line.starts_with("# URL: ") || line.starts_with("# SUB_INFO: "))
+        .collect();
+    if kept.is_empty() {
+        return serialized;
+    }
+    let mut out = String::new();
+    for line in kept {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str(&serialized);
+    out
+}
+
+/// Unwrap YAML tag layers to reach the document itself: a root like
+/// `!profile` on a mapping parses as `Value::Tagged`, not `Value::Mapping`.
+fn unwrap_tagged(value: &mut serde_yaml::Value) -> &mut serde_yaml::Value {
+    let mut current = value;
+    while let serde_yaml::Value::Tagged(tagged) = current {
+        current = &mut tagged.value;
+    }
+    current
+}
+
+/// Path under `backup_dir` where the pre-existing file at `dest_abs` is
+/// stored during commit. For profiles this must be the sanitized
+/// destination name, not the raw archive name: rollback walks the backup
+/// directory and maps names back to destinations, so storing a raw name
+/// like "profiles/foo.yaml." would restore the original to the wrong file
+/// and lose the file that was actually overwritten.
+fn backup_path_for(backup_dir: &Path, rel_path: &str, dest_abs: &Path) -> PathBuf {
+    if rel_path.starts_with("profiles/") {
+        if let Some(name) = dest_abs.file_name() {
+            return backup_dir.join("profiles").join(name);
+        }
+    }
+    backup_dir.join(rel_path)
+}
+
 /// Map manifest relative paths to absolute destination paths.
 fn build_dest_map(paths: &AppPaths, manifest: &BackupManifest) -> Vec<(String, PathBuf)> {
     manifest
@@ -702,7 +829,10 @@ fn build_dest_map(paths: &AppPaths, manifest: &BackupManifest) -> Vec<(String, P
         .filter_map(|entry| {
             let dest = if entry.path.starts_with("profiles/") {
                 let file_name = entry.path.strip_prefix("profiles/").unwrap_or(&entry.path);
-                paths.profiles_dir.join(file_name)
+                let safe_name =
+                    zephyr_core::config::sanitizer::sanitize_config_file_name(file_name.to_owned())
+                        .ok()?;
+                paths.profiles_dir.join(safe_name)
             } else if entry.path == "settings.json" {
                 paths.app_data_dir.join("settings.json")
             } else if entry.path == "run_config.yaml" {
@@ -801,5 +931,59 @@ fn map_rel_to_dest(rel: &Path, paths: &AppPaths) -> Option<PathBuf> {
         Some(paths.profiles_dir.join("metadata.json"))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_safe_archive_path() {
+        assert!(is_safe_archive_path("settings.json"));
+        assert!(is_safe_archive_path("profiles/my-sub.yaml"));
+        assert!(!is_safe_archive_path("../settings.json"));
+        assert!(!is_safe_archive_path("profiles/../settings.json"));
+        assert!(!is_safe_archive_path("/etc/passwd"));
+        assert!(!is_safe_archive_path("C:\\Windows\\system32"));
+        assert!(!is_safe_archive_path("profiles\\sub.yaml"));
+        assert!(!is_safe_archive_path("profiles/\0sub.yaml"));
+    }
+
+    #[test]
+    fn test_backup_profile_filename_validation() {
+        let paths = AppPaths {
+            app_data_dir: PathBuf::from("/app_data"),
+            core_dir: PathBuf::from("/core"),
+            profiles_dir: PathBuf::from("/profiles"),
+        };
+
+        // Valid profile name
+        let manifest = BackupManifest {
+            version: 1,
+            app_version: "1.0.0".to_owned(),
+            created_at: "".to_owned(),
+            files: vec![ManifestEntry {
+                path: "profiles/valid-sub.yaml".to_owned(),
+                sha256: "abc".to_owned(),
+                size: 10,
+            }],
+        };
+        let dest_map = build_dest_map(&paths, &manifest);
+        assert_eq!(dest_map.len(), 1);
+
+        // Invalid profile name (e.g. non-yaml or reserved name)
+        let manifest_invalid = BackupManifest {
+            version: 1,
+            app_version: "1.0.0".to_owned(),
+            created_at: "".to_owned(),
+            files: vec![ManifestEntry {
+                path: "profiles/invalid_ext.txt".to_owned(),
+                sha256: "abc".to_owned(),
+                size: 10,
+            }],
+        };
+        let dest_map_invalid = build_dest_map(&paths, &manifest_invalid);
+        assert_eq!(dest_map_invalid.len(), 0);
     }
 }

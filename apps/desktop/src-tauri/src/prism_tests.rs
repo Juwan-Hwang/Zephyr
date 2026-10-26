@@ -1395,6 +1395,18 @@ rules:
         }
 
         #[test]
+        fn rule_name_size_validation_rejects_oversized_name() {
+            use crate::prism::types::{check_name_size, MAX_NAME_SIZE};
+
+            let oversized_name = "r".repeat(MAX_NAME_SIZE + 1);
+            let res = check_name_size(&oversized_name, "Rule name");
+            assert!(res.is_err());
+            assert!(res.unwrap_err().contains("Rule name too large"));
+
+            assert!(check_name_size("valid_rule_name", "Rule name").is_ok());
+        }
+
+        #[test]
         fn remove_dangerous_keys_strips_script_and_control_plane_from_prism_rule_yaml() {
             use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
 

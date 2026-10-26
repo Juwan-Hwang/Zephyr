@@ -626,7 +626,10 @@ async function saveFailoverPolicy() {
             enabled: getCheckboxValue('failover-enabled-toggle'),
             threshold: getNumberInput('failover-threshold', 3),
             cooldownSecs: getNumberInput('failover-cooldown', 60),
-            fallbackGroup: getStringInput('failover-fallback-group') || undefined,
+            // Send '' (not undefined) when cleared: the policy command
+            // preserves any field it is not given, so undefined would leave
+            // a previously set fallback group in place instead of clearing it.
+            fallbackGroup: getStringInput('failover-fallback-group'),
         };
         // Same queue as the settings switch, which reads the policy and writes it
         // back: neither may land between the other's read and write.

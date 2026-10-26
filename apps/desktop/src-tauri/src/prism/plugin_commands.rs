@@ -90,12 +90,17 @@ pub fn plugin_enable(
 #[tauri::command]
 pub fn plugin_delete(state: State<PrismState>, plugin_id: String) -> Result<(), String> {
     validate_plugin_id(&plugin_id)?;
+    let dir = plugins_dir(&state)?;
+    let plugin_path = dir.join(&plugin_id);
+    // Security: ensure the resolved plugin path is strictly inside the plugins
+    // directory BEFORE unloading: a rejected deletion must not leave the
+    // plugin unloaded (e.g. a symlink whose target lives outside plugins/).
+    zephyr_core::config::sanitizer::validate_path_within_dir(&plugin_path, &dir)
+        .map_err(|e| format!("Delete failed: {e}"))?;
     {
         let mut lock = state.lock_inner()?;
         lock.plugin_loader.unload(&plugin_id);
     }
-    let dir = plugins_dir(&state)?;
-    let plugin_path = dir.join(&plugin_id);
     if plugin_path.exists() {
         std::fs::remove_dir_all(&plugin_path).map_err(|e| format!("Delete failed: {e}"))?;
     }

@@ -253,11 +253,31 @@ async function listen(event, handler) {
  * @returns {Promise<void>}
  */
 async function openUrl(url) {
-  const trimmed = typeof url === 'string' ? url.trim() : '';
-  if (!/^https?:\/\//i.test(trimmed)) {
+  const raw = typeof url === 'string' ? url : '';
+  // Strip leading/trailing Unicode whitespace AND control characters: the
+  // old String.trim() missed controls like U+0001, while a <=0x20-only loop
+  // missed Unicode padding like U+00A0/U+FEFF.
+  const trimmed = raw.replace(/^[\s\u0000-\u0020]+|[\s\u0000-\u0020]+$/g, '');
+
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
     throw new ApiError('openUrl only supports http and https URLs');
   }
-  return invoke('plugin:opener|open_url', { url: trimmed });
+
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    !parsed.hostname ||
+    !/^https?:\/\/[^/\\]/i.test(trimmed)
+  ) {
+    throw new ApiError('openUrl only supports http and https URLs');
+  }
+
+  // Forward the parsed, normalized URL — never the raw input: the WHATWG
+  // parser silently drops embedded tab/LF/CR, so forwarding the raw string
+  // would hand the OS handler a different URL than the one validated here.
+  return invoke('plugin:opener|open_url', { url: parsed.href });
 }
 
 /** Get a lightweight current-window handle (manual IPC wrapper) */
