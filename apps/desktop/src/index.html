@@ -1373,23 +1373,23 @@
                 <div>
                     <label for="dns-nameservers-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="dnsNameservers">Nameservers (DoH)</label>
                     <div class="textarea-paste-wrapper">
-                        <textarea id="dns-nameservers-input" rows="3" class="form-control form-control-md form-control-mono resize-none w-full" placeholder="https://doh.pub/dns-query&#10;https://dns.alidns.com/dns-query"></textarea>
+                        <textarea id="dns-nameservers-input" rows="3" class="form-control form-control-md form-control-mono resize-none w-full" placeholder="https://doh.pub/dns-query&#10;https://dns.alidns.com/dns-query" aria-describedby="dns-nameservers-hint"></textarea>
                         <button type="button" id="dns-nameservers-paste-btn" class="btn-paste-base btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
                             <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
                         </button>
                     </div>
-                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsNameserversHint">One URL per line. Used for domestic resolution.</p>
+                    <p id="dns-nameservers-hint" class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsNameserversHint">One URL per line. Used for domestic resolution.</p>
                 </div>
 
                 <div>
                     <label for="dns-fallbacks-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="dnsFallbacks">Fallback Servers (DoH)</label>
                     <div class="textarea-paste-wrapper">
-                        <textarea id="dns-fallbacks-input" rows="3" class="form-control form-control-md form-control-mono resize-none w-full" placeholder="https://dns.cloudflare.com/dns-query&#10;https://dns.google/dns-query"></textarea>
+                        <textarea id="dns-fallbacks-input" rows="3" class="form-control form-control-md form-control-mono resize-none w-full" placeholder="https://dns.cloudflare.com/dns-query&#10;https://dns.google/dns-query" aria-describedby="dns-fallbacks-hint"></textarea>
                         <button type="button" id="dns-fallbacks-paste-btn" class="btn-paste-base btn-textarea-paste" title="Paste" data-i18n-title="paste" aria-label="Paste" data-i18n-aria-label="paste">
                             <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
                         </button>
                     </div>
-                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsFallbacksHint">One URL per line. Used as fallback for international domains.</p>
+                    <p id="dns-fallbacks-hint" class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="dnsFallbacksHint">One URL per line. Used as fallback for international domains.</p>
                 </div>
             </div>
 
@@ -1410,14 +1410,14 @@
                 <div class="grid grid-cols-2 gap-3">
                 <div>
                     <label for="port-mixed-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="mixedPort">Mixed Port</label>
-                    <input id="port-mixed-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="7890">
-                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="mixedPortHint">HTTP & SOCKS5 combined port (0 to disable)</p>
+                    <input id="port-mixed-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="7890" aria-describedby="port-mixed-hint">
+                    <p id="port-mixed-hint" class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="mixedPortHint">HTTP & SOCKS5 combined port (0 to disable)</p>
                 </div>
 
                 <div>
                     <label for="port-socks-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="socksPort">SOCKS5 Port</label>
-                    <input id="port-socks-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="7891">
-                    <p class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="socksPortHint">Standalone SOCKS5 proxy port (0 to disable)</p>
+                    <input id="port-socks-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="7891" aria-describedby="port-socks-hint">
+                    <p id="port-socks-hint" class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="socksPortHint">Standalone SOCKS5 proxy port (0 to disable)</p>
                 </div>
                 </div>
                 <p class="text-2xs text-[var(--text-muted)] -mt-1 ms-1" data-i18n="portZeroHint">0 = off</p>
