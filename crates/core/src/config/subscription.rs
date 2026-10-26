@@ -24,6 +24,11 @@ const fn decode_hex_digit(byte: u8) -> Option<u8> {
 /// Quote `short-id` values in YAML content before parsing.
 /// This prevents YAML from interpreting hex-like values (e.g., "34010e92") as scientific notation.
 pub fn quote_short_id_values(content: &str) -> String {
+    // Fast path: skip regex search entirely if "short-id" is not in the string.
+    if !content.contains("short-id") {
+        return content.to_owned();
+    }
+
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
         match regex::Regex::new(r#"(?:^|\n)(\s*short-id:\s*)([^\s"'\n][^\s\n]*)"#) {
@@ -31,13 +36,32 @@ pub fn quote_short_id_values(content: &str) -> String {
             Err(e) => unreachable!("short-id regex is statically valid: {e}"),
         }
     });
-    re.replace_all(content, |caps: &regex::Captures| {
-        let prefix = &caps[1];
-        let value = &caps[2];
-        let newline = if caps[0].starts_with('\n') { "\n" } else { "" };
-        format!("{newline}{prefix}\"{value}\"")
-    })
-    .into_owned()
+
+    let mut result = String::with_capacity(content.len() + 32);
+    let mut last_end = 0;
+    for caps in re.captures_iter(content) {
+        if let Some(whole_match) = caps.get(0) {
+            let prefix = &caps[1];
+            let value = &caps[2];
+            let newline = if whole_match.as_str().starts_with('\n') { "\n" } else { "" };
+
+            result.push_str(&content[last_end..whole_match.start()]);
+            result.push_str(newline);
+            result.push_str(prefix);
+            result.push('"');
+            result.push_str(value);
+            result.push('"');
+            last_end = whole_match.end();
+        }
+    }
+
+    // If no unquoted short-id matches were found, return the input directly.
+    if last_end == 0 {
+        return content.to_owned();
+    }
+
+    result.push_str(&content[last_end..]);
+    result
 }
 
 /// Strip a YAML `#` comment from an unquoted scalar. In YAML, `#` only
