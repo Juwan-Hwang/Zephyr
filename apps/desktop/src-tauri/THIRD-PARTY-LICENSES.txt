@@ -11736,7 +11736,7 @@ MIT License (SPDX: MIT):
 
 MIT License (SPDX: MIT):
   * tokio-util 0.7.18 — https://github.com/tokio-rs/tokio
-  * tokio 1.52.3 — https://github.com/tokio-rs/tokio
+  * tokio 1.54.1 — https://github.com/tokio-rs/tokio
 
 MIT License (SPDX: MIT):
   * simd-adler32 0.3.9 — https://github.com/mcountryman/simd-adler32
