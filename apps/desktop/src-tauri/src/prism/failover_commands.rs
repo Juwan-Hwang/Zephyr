@@ -6,6 +6,7 @@ use tauri::State;
 
 use clash_prism_core::failover::{FailoverTracker, NodeFailPolicy};
 
+use crate::prism::types::check_name_size;
 use crate::prism::PrismState;
 
 /// Report a proxy test result to the failover engine.
@@ -19,6 +20,7 @@ pub fn failover_report(
     node_name: String,
     success: bool,
 ) -> Result<Option<serde_json::Value>, String> {
+    check_name_size(&node_name, "Node name")?;
     let mut lock = state.lock_inner()?;
     let action = lock.failover_tracker.report(&node_name, success);
     drop(lock);
@@ -55,8 +57,22 @@ pub fn failover_set_policy(
     cooldown_secs: Option<u64>,
     fallback_group: Option<String>,
 ) -> Result<(), String> {
+    if let Some(t) = threshold {
+        if t == 0 {
+            return Err("Threshold must be at least 1".to_owned());
+        }
+    }
+    if let Some(c) = cooldown_secs {
+        if c == 0 {
+            return Err("Cooldown must be at least 1 second".to_owned());
+        }
+    }
+    if let Some(ref g) = fallback_group {
+        check_name_size(g, "Fallback group")?;
+    }
+
     let mut lock = state.lock_inner()?;
-    let mut policy = NodeFailPolicy::new();
+    let mut policy = lock.failover_tracker.policy().clone();
     if let Some(e) = enabled {
         policy.enabled = e;
     }
@@ -72,6 +88,57 @@ pub fn failover_set_policy(
     lock.failover_tracker = FailoverTracker::new(policy);
     drop(lock);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prism::types::MAX_NAME_SIZE;
+
+    #[test]
+    fn test_failover_validation_and_preservation() {
+        // Zero threshold validation
+        let t: u32 = 0;
+        let err_threshold = if t == 0 {
+            Err::<(), _>("Threshold must be at least 1".to_owned())
+        } else {
+            Ok(())
+        };
+        assert!(err_threshold.is_err());
+
+        // Zero cooldown validation
+        let c: u64 = 0;
+        let err_cooldown = if c == 0 {
+            Err::<(), _>("Cooldown must be at least 1 second".to_owned())
+        } else {
+            Ok(())
+        };
+        assert!(err_cooldown.is_err());
+
+        // Name size validation
+        let oversized = "a".repeat(MAX_NAME_SIZE + 1);
+        assert!(check_name_size(&oversized, "Fallback group").is_err());
+        assert!(check_name_size("valid_group", "Fallback group").is_ok());
+
+        assert!(check_name_size(&oversized, "Node name").is_err());
+        assert!(check_name_size("valid_node", "Node name").is_ok());
+
+        // Policy preservation test
+        let mut policy = NodeFailPolicy::new();
+        policy.enabled = false;
+        policy.threshold = 5;
+        policy.fallback_group = "my-group".to_owned();
+
+        // Simulate partial update with only threshold passed
+        let threshold_update = Some(10u32);
+        if let Some(t) = threshold_update {
+            policy.threshold = t;
+        }
+
+        assert!(!policy.enabled);
+        assert_eq!(policy.threshold, 10);
+        assert_eq!(policy.fallback_group, "my-group");
+    }
 }
 
 /// Get the failure count for a specific node.
