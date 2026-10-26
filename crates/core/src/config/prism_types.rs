@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::sanitizer::{sanitize_base_filename, url_decode_complete};
+use super::sanitizer::{sanitize_base_filename, url_decode_complete, RESERVED_DEVICE_NAMES};
 use crate::error::AppError;
 
 /// Maximum allowed size for user-supplied text inputs (10 MB).
@@ -58,19 +58,37 @@ pub fn check_input_size(input: &str, label: &str) -> Result<(), AppError> {
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 pub fn validate_plugin_id(plugin_id: &str) -> Result<(), AppError> {
     const MAX_PLUGIN_ID_LEN: usize = 128;
+
     // Decode URL-encoded characters first to prevent bypass via %2e%2e etc.
     let decoded = url_decode_complete(plugin_id);
-    if decoded.is_empty()
+    // Trim both ends: a leading dot/space must not smuggle a reserved name
+    // (e.g. ".CON") or the plugins directory itself (".") past validation.
+    let trimmed = decoded.trim_matches([' ', '.']);
+
+    if trimmed.is_empty()
+        || decoded != trimmed
         || decoded.len() > MAX_PLUGIN_ID_LEN
         || decoded.contains('/')
         || decoded.contains('\\')
+        || decoded.contains(':')
         || decoded.contains("..")
         || decoded.contains('\0')
+        || decoded.chars().any(char::is_control)
     {
         return Err(AppError::ConfigError(
             "Invalid plugin ID: contains unsafe characters or exceeds length limit".to_owned(),
         ));
     }
+
+    // Windows treats a device name followed by an extension as the device
+    // itself ("NUL.txt", "CON.json"), so compare the stem before the first dot.
+    let stem = trimmed.split('.').next().unwrap_or(trimmed);
+    if RESERVED_DEVICE_NAMES.contains(&stem.to_ascii_uppercase().as_str()) {
+        return Err(AppError::ConfigError(format!(
+            "Invalid plugin ID: '{plugin_id}' is a reserved Windows device name"
+        )));
+    }
+
     Ok(())
 }
 
@@ -331,11 +349,30 @@ mod tests {
     #[test]
     fn test_validate_plugin_id_ok() {
         assert!(validate_plugin_id("my-plugin").is_ok());
+        assert!(validate_plugin_id("plugin_123").is_ok());
     }
 
     #[test]
-    fn test_validate_plugin_id_traversal() {
+    fn test_validate_plugin_id_traversal_and_unsafe_chars() {
         assert!(validate_plugin_id("../etc/passwd").is_err());
+        assert!(validate_plugin_id("plugin:stream").is_err());
+        assert!(validate_plugin_id("plugin\r\n").is_err());
+        assert!(validate_plugin_id("CON").is_err());
+        assert!(validate_plugin_id("nul").is_err());
+        assert!(validate_plugin_id("C:").is_err());
+        assert!(validate_plugin_id("plugin. ").is_err());
+        // Reserved names stay reserved with an extension or leading dot/space.
+        assert!(validate_plugin_id("nul.plugin").is_err());
+        assert!(validate_plugin_id("CON.txt").is_err());
+        assert!(validate_plugin_id("COM1.log").is_err());
+        assert!(validate_plugin_id(".CON").is_err());
+        assert!(validate_plugin_id(".").is_err());
+        assert!(validate_plugin_id("COM0").is_err());
+        assert!(validate_plugin_id("LPT0").is_err());
+        assert!(validate_plugin_id("COM\u{b9}").is_err());
+        assert!(validate_plugin_id("LPT\u{b3}.txt").is_err());
+        assert!(validate_plugin_id("CONIN$").is_err());
+        assert!(validate_plugin_id("conout$").is_err());
     }
 
     #[test]
