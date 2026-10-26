@@ -45,7 +45,11 @@ pub fn quote_short_id_values(content: &str) -> String {
             out.push_str(&content[last_match..m.start()]);
             let prefix = &caps[1];
             let value = &caps[2];
-            let newline = if m.as_str().starts_with('\n') { "\n" } else { "" };
+            let newline = if m.as_str().starts_with('\n') {
+                "\n"
+            } else {
+                ""
+            };
             out.push_str(newline);
             out.push_str(prefix);
             out.push('"');
