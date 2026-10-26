@@ -369,6 +369,46 @@ pub fn sanitize_base_filename(raw: String) -> Result<String, crate::error::AppEr
     Ok(filename)
 }
 
+/// Reserved Windows device names (Microsoft's file-naming documentation):
+/// the plain names, COM0/LPT0, the superscript-digit forms (Windows reads
+/// ¹, ², ³ as digits in device names), and CONIN$/CONOUT$. Shared by the
+/// config-filename check and the plugin-ID validators so the list cannot
+/// drift between call sites.
+pub const RESERVED_DEVICE_NAMES: &[&str] = &[
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "CONIN$",
+    "CONOUT$",
+    "COM0",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "COM\u{b9}",
+    "COM\u{b2}",
+    "COM\u{b3}",
+    "LPT0",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+    "LPT\u{b9}",
+    "LPT\u{b2}",
+    "LPT\u{b3}",
+];
+
 /// Sanitize configuration file name with comprehensive security checks
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 pub fn sanitize_config_file_name(config_path: String) -> Result<String, crate::error::AppError> {
@@ -388,16 +428,16 @@ pub fn sanitize_config_file_name(config_path: String) -> Result<String, crate::e
         ));
     }
 
-    // Check for reserved Windows names (even on other platforms for consistency)
+    // Check for reserved Windows names (even on other platforms for consistency).
+    // Windows treats the stem before the FIRST dot as the device name, so
+    // stripping only the final extension is not enough: "NUL.tar.yaml" is
+    // still NUL. The list matches the plugin-ID validators, including
+    // COM0/LPT0, the superscript-digit forms, and CONIN$/CONOUT$.
     let upper_name = config_file_name.to_uppercase();
-    let base_name = upper_name
-        .trim_end_matches(".YAML")
-        .trim_end_matches(".YML");
-    let reserved_names = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    ];
-    if reserved_names.contains(&base_name) {
+    // Windows ignores trailing spaces when matching device names, so
+    // "CON .yaml" is still CON: trim the stem before comparing.
+    let stem = upper_name.split('.').next().unwrap_or(&upper_name).trim();
+    if RESERVED_DEVICE_NAMES.contains(&stem) {
         return Err(crate::error::AppError::ConfigError(format!(
             "Reserved filename: '{config_file_name}' is not allowed"
         )));
@@ -508,6 +548,21 @@ mod tests {
         assert!(sanitize_config_file_name("foo/test.yaml".to_owned()).is_err());
         assert!(sanitize_config_file_name("foo\\test.yaml".to_owned()).is_err());
         assert!(sanitize_config_file_name("test.txt".to_owned()).is_err());
+    }
+
+    #[test]
+    fn test_sanitize_config_file_name_rejects_reserved_stems() {
+        // Reserved stem with any extensions attached, not just the final one.
+        assert!(sanitize_config_file_name("NUL.yaml".to_owned()).is_err());
+        assert!(sanitize_config_file_name("NUL.tar.yaml".to_owned()).is_err());
+        assert!(sanitize_config_file_name("con.txt.yaml".to_owned()).is_err());
+        assert!(sanitize_config_file_name("COM0.yaml".to_owned()).is_err());
+        assert!(sanitize_config_file_name("COM\u{b9}.yaml".to_owned()).is_err());
+        assert!(sanitize_config_file_name("CONIN$.yaml".to_owned()).is_err());
+        // Trailing spaces before the extension do not save a reserved stem.
+        assert!(sanitize_config_file_name("CON .yaml".to_owned()).is_err());
+        assert!(sanitize_config_file_name("NUL .yml".to_owned()).is_err());
+        assert!(sanitize_config_file_name("config.backup.yml".to_owned()).is_ok());
     }
 
     #[test]

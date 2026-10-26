@@ -616,6 +616,9 @@ describe('openUrl', () => {
         await expect(openUrl('javascript:alert(1)')).rejects.toThrow('openUrl only supports http and https URLs');
         await expect(openUrl('data:text/html,hello')).rejects.toThrow('openUrl only supports http and https URLs');
         await expect(openUrl('powershell:Start-Process calc')).rejects.toThrow('openUrl only supports http and https URLs');
+        await expect(openUrl('vbscript:msgbox(1)')).rejects.toThrow('openUrl only supports http and https URLs');
+        await expect(openUrl('http:///missing-hostname')).rejects.toThrow('openUrl only supports http and https URLs');
+        await expect(openUrl(' \u0001 javascript:alert(1) \u0001 ')).rejects.toThrow('openUrl only supports http and https URLs');
         await expect(openUrl(/** @type {any} */ (null))).rejects.toThrow('openUrl only supports http and https URLs');
     });
 
@@ -631,8 +634,15 @@ describe('openUrl', () => {
         await api.openUrl('  https://example.com/test  ');
         expect(invokeSpy).toHaveBeenCalledWith('plugin:opener|open_url', { url: 'https://example.com/test' });
 
+        // A bare host normalizes to a trailing slash: the opener receives
+        // exactly the URL that passed validation, not the raw input.
         await api.openUrl('http://127.0.0.1:8080');
-        expect(invokeSpy).toHaveBeenCalledWith('plugin:opener|open_url', { url: 'http://127.0.0.1:8080' });
+        expect(invokeSpy).toHaveBeenCalledWith('plugin:opener|open_url', { url: 'http://127.0.0.1:8080/' });
+
+        // Embedded tab/CR/LF are stripped by the URL parser and must not
+        // reach the OS handler inside the forwarded string.
+        await api.openUrl('http://exa\tmple.com');
+        expect(invokeSpy).toHaveBeenCalledWith('plugin:opener|open_url', { url: 'http://example.com/' });
 
         vi.unstubAllGlobals();
     });
