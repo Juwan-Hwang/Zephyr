@@ -11691,6 +11691,7 @@ MIT License (SPDX: MIT):
   * windows-strings 0.5.1 — https://github.com/microsoft/windows-rs
   * windows-sys 0.45.0 — https://github.com/microsoft/windows-rs
   * windows-sys 0.48.0 — https://github.com/microsoft/windows-rs
+  * windows-sys 0.52.0 — https://github.com/microsoft/windows-rs
   * windows-sys 0.59.0 — https://github.com/microsoft/windows-rs
   * windows-sys 0.60.2 — https://github.com/microsoft/windows-rs
   * windows-sys 0.61.2 — https://github.com/microsoft/windows-rs
@@ -11736,7 +11737,7 @@ MIT License (SPDX: MIT):
 
 MIT License (SPDX: MIT):
   * tokio-util 0.7.18 — https://github.com/tokio-rs/tokio
-  * tokio 1.52.3 — https://github.com/tokio-rs/tokio
+  * tokio 1.54.1 — https://github.com/tokio-rs/tokio
 
 MIT License (SPDX: MIT):
   * simd-adler32 0.3.9 — https://github.com/mcountryman/simd-adler32
