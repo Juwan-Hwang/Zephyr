@@ -125,12 +125,15 @@ pub fn compute_smart_rank(
         },
     );
 
+    // Optimization: Moving owned node names directly avoids string allocation, while consuming
+    // record iterators sequentially eliminates indexed bounds checks (`.get(i)`).
     let mut histories: Vec<NodeHistory> = Vec::with_capacity(node_names.len());
-    for (i, name) in node_names.iter().enumerate() {
+    let mut latency_iter = node_latency_records.into_iter();
+    let mut success_iter = node_success_records.into_iter();
+
+    for name in node_names {
         let mut history = NodeHistory::new(name);
-        if let (Some(latency), Some(success)) =
-            (node_latency_records.get(i), node_success_records.get(i))
-        {
+        if let (Some(latency), Some(success)) = (latency_iter.next(), success_iter.next()) {
             for (lat, suc) in latency.iter().zip(success.iter()) {
                 history.add_record(*lat, *suc);
             }
