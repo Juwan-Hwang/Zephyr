@@ -24,3 +24,8 @@
 **Vulnerability:** `write_config_file` stored user-edited or imported YAML content directly to disk without running `remove_dangerous_keys`, potentially allowing dangerous keys (`script`, `external-controller-*`, `external-ui`, provider `path`) to be persisted in profile YAML files.
 **Learning:** Direct file editing/saving commands exposed over IPC must apply the same sanitization pipelines as initial config import paths.
 **Prevention:** Always sanitize YAML content before persisting configuration files in `write_config_file_inner`.
+
+## 2026-07-18 - Missing Plugin ID Validation in Script Sandbox Commands
+**Vulnerability:** `script_grant_plugin`, `script_revoke_plugin`, and `script_check_plugin_permission` accepted `plugin_id` parameters without running `validate_plugin_id`, allowing unvalidated or malformed plugin identifiers to mutate sandbox configurations.
+**Learning:** IPC endpoints that manipulate plugin-specific permissions or state must strictly validate `plugin_id` parameters even if they only index in-memory hash maps or configs.
+**Prevention:** Always invoke `validate_plugin_id` on any IPC command receiving a `plugin_id` parameter before processing or granting sandbox privileges.

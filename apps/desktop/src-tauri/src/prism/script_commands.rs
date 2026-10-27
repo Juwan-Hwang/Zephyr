@@ -7,7 +7,7 @@ use tauri::State;
 use clash_prism_script::{SandboxConfig, ScriptContext, ScriptRuntime};
 
 use crate::prism::pipeline::{execute_write_pipeline, pipeline_result_to_json};
-use crate::prism::types::check_input_size;
+use crate::prism::types::{check_input_size, validate_plugin_id};
 use crate::prism::PrismState;
 
 /// Execute a JavaScript script inside the Prism sandbox.
@@ -281,6 +281,7 @@ pub fn script_grant_plugin(
     allow_network: bool,
     allow_filesystem: bool,
 ) -> Result<(), String> {
+    validate_plugin_id(&plugin_id)?;
     let mut lock = state.lock_inner()?;
     let mut plugin_config = SandboxConfig::strict();
     plugin_config.allow_network = allow_network;
@@ -293,6 +294,7 @@ pub fn script_grant_plugin(
 /// Revoke sandbox permissions for a specific plugin.
 #[tauri::command]
 pub fn script_revoke_plugin(state: State<PrismState>, plugin_id: String) -> Result<(), String> {
+    validate_plugin_id(&plugin_id)?;
     let mut lock = state.lock_inner()?;
     lock.sandbox_config.revoke(&plugin_id);
     drop(lock);
@@ -306,6 +308,7 @@ pub fn script_check_plugin_permission(
     plugin_id: String,
     permission: String,
 ) -> Result<bool, String> {
+    validate_plugin_id(&plugin_id)?;
     let lock = state.lock_inner()?;
     let sp = match permission.as_str() {
         "network" => clash_prism_script::sandbox::SandboxPermission::Network,
@@ -359,5 +362,12 @@ mod tests {
         assert!(validate_script_limits(None, Some(MAX_MEMORY_BYTES + 1), None, None).is_err());
         assert!(validate_script_limits(None, None, Some(MAX_LOOP_ITERATIONS + 1), None).is_err());
         assert!(validate_script_limits(None, None, None, Some(MAX_RECURSION_DEPTH + 1)).is_err());
+    }
+
+    #[test]
+    fn test_script_plugin_commands_validate_plugin_id() {
+        assert!(validate_plugin_id("../invalid_plugin").is_err());
+        assert!(validate_plugin_id("CON").is_err());
+        assert!(validate_plugin_id("valid-plugin-id").is_ok());
     }
 }
