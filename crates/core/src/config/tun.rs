@@ -16,6 +16,9 @@ use crate::error::AppError;
 /// Falls back to `serde_yaml::from_str` if complex YAML features (directives, tags,
 /// anchors, aliases, multiline block scalars) or ambiguous structures are present.
 fn extract_top_level_scalar_fast<'a>(content: &'a str, key: &str) -> Option<&'a str> {
+    if !content.contains(key) {
+        return None;
+    }
     if content.contains("<<") || content.contains("%YAML") {
         return None;
     }
@@ -23,8 +26,12 @@ fn extract_top_level_scalar_fast<'a>(content: &'a str, key: &str) -> Option<&'a 
     let mut result = None;
     let mut matched = false;
 
-    let lines: Vec<&str> = content.lines().collect();
-    for (i, line) in lines.iter().enumerate() {
+    let mut lines = content.lines();
+    while let Some(line) = lines.next() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+
         let trimmed_line = line.trim();
         if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
             continue;
@@ -137,7 +144,7 @@ fn extract_top_level_scalar_fast<'a>(content: &'a str, key: &str) -> Option<&'a 
                 // A more-indented following line continues a multi-line
                 // plain scalar (`secret: foo` + `  bar` folds to `foo bar`);
                 // the fast path only reads the first line, so fall back.
-                for next in lines.iter().skip(i + 1) {
+                for next in lines.clone() {
                     let t = next.trim();
                     if t.is_empty() || t.starts_with('#') {
                         continue;
@@ -302,6 +309,9 @@ where
 /// Scans for top-level `tun:` block and inspects indented `enable:` keys without
 /// parsing the full YAML tree. Falls back to `serde_yaml` for complex YAML.
 fn extract_tun_enabled_fast(content: &str) -> Option<bool> {
+    if !content.contains("tun") {
+        return Some(false);
+    }
     if content.contains("<<") || content.contains("%YAML") {
         return None;
     }
@@ -316,11 +326,11 @@ fn extract_tun_enabled_fast(content: &str) -> Option<bool> {
     }
     let mut saw_unindented_line = false;
     for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
+        if line.starts_with(' ') || line.starts_with('\t') {
             continue;
         }
-        if line.starts_with(' ') || line.starts_with('\t') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
         saw_unindented_line = true;
