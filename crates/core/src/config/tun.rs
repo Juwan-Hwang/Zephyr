@@ -9,6 +9,296 @@ use yaml::Value as YamlValue;
 
 use crate::error::AppError;
 
+/// Whether a line opens a quoted mapping key that could name `key` —
+/// literally, or via escapes the line scanner cannot decode. An
+/// unterminated quote also counts: only the full parser can decide.
+fn quoted_key_could_name(line: &str, key: &str) -> bool {
+    if let Some(after_quote) = line.strip_prefix('"') {
+        return match after_quote.find('"') {
+            Some(close) => {
+                let quoted = &after_quote[..close];
+                quoted.contains('\\') || quoted == key
+            }
+            None => true,
+        };
+    }
+    if let Some(after_quote) = line.strip_prefix('\'') {
+        // Single-quoted keys: the only escape is '' for a literal quote,
+        // so the key can be decoded exactly.
+        let mut decoded = String::new();
+        let mut chars = after_quote.chars();
+        let closed = loop {
+            match chars.next() {
+                None => break false,
+                Some('\'') => {
+                    if chars.clone().next() == Some('\'') {
+                        chars.next();
+                        decoded.push('\'');
+                    } else {
+                        break true;
+                    }
+                }
+                Some(c) => decoded.push(c),
+            }
+        };
+        return !closed || decoded == key;
+    }
+    false
+}
+
+/// Index of the mapping colon in a single entry body (leading
+/// indentation already removed), or `None` when the body has no
+/// mapping colon. The separator is a colon followed by a space, a
+/// tab, or the end of the line; a colon followed by anything else is
+/// part of the plain scalar around it (`a:b: c` is the key `a:b`
+/// with value `c`). Colons inside quoted spans do not count either:
+/// a quoted key may itself contain one (`"a:#": v`, where the colon
+/// after `#` is part of the key, not the separator — reading it as
+/// the separator would mistake the value for a comment). A quote
+/// only opens a span at the very start of the body, where a key
+/// token begins; an interior quote in a plain key (`don't`,
+/// `name 'x`) is ordinary text.
+fn mapping_colon_index(body: &str) -> Option<usize> {
+    let mut quote: Option<u8> = None;
+    let mut prev: Option<u8> = None;
+    let mut bytes = body.bytes().enumerate().peekable();
+    while let Some((i, b)) = bytes.next() {
+        match quote {
+            Some(b'"') => {
+                if b == b'\\' {
+                    // Skip the escaped character entirely.
+                    if let Some((_, escaped)) = bytes.next() {
+                        prev = Some(escaped);
+                        continue;
+                    }
+                } else if b == b'"' {
+                    quote = None;
+                }
+            }
+            Some(b'\'') => {
+                if b == b'\'' {
+                    // '' is an escaped quote inside single-quoted spans;
+                    // a lone ' closes the span.
+                    if bytes.peek().is_some_and(|&(_, next)| next == b'\'') {
+                        bytes.next();
+                        prev = Some(b'\'');
+                        continue;
+                    }
+                    quote = None;
+                }
+            }
+            _ => {
+                if (b == b'"' || b == b'\'') && i == 0 {
+                    quote = Some(b);
+                } else if b == b':'
+                    && bytes
+                        .peek()
+                        .is_none_or(|&(_, next)| next == b' ' || next == b'\t')
+                {
+                    return Some(i);
+                } else if b == b'#' && (i == 0 || prev.is_some_and(|p| p == b' ' || p == b'\t')) {
+                    // A comment ahead of the separator colon: this body
+                    // carries no mapping entry at all.
+                    return None;
+                }
+            }
+        }
+        prev = Some(b);
+    }
+    None
+}
+
+/// Whether an entry body is a mapping entry carrying an inline value
+/// (`key: value`), as opposed to one that opens a nested block
+/// (`key:`) or carries only a comment (`key: # …`).
+fn key_line_has_inline_value(body: &str) -> bool {
+    // A sequence entry is not itself a mapping entry; callers unwrap
+    // it (see `content_line_frame`) before asking about its first key.
+    if body.starts_with("- ") || body == "-" {
+        return false;
+    }
+    let Some(colon) = mapping_colon_index(body) else {
+        return false;
+    };
+    let after = body[colon + 1..].trim();
+    !after.is_empty() && !after.starts_with('#')
+}
+
+/// Whether the flow collection starting at the beginning of `text`
+/// closes on the same line and nothing but whitespace or a comment
+/// follows the closing bracket (anything else is an error to the
+/// parser: the collection is the whole entry or value). Quoted
+/// spans are tracked (their braces are content), each closer must
+/// match its opener, and a comment start ends the line's meaningful
+/// content: braces after it are comment text, so the collection
+/// cannot close there.
+fn flow_collection_closes_on_line(text: &str) -> bool {
+    let mut closers: Vec<u8> = Vec::new();
+    let mut quote: Option<u8> = None;
+    let mut prev: Option<u8> = None;
+    let mut bytes = text.bytes().enumerate().peekable();
+    while let Some((i, b)) = bytes.next() {
+        match quote {
+            Some(b'"') => {
+                if b == b'\\' {
+                    bytes.next();
+                } else if b == b'"' {
+                    quote = None;
+                }
+            }
+            Some(b'\'') => {
+                if b == b'\'' {
+                    if bytes.peek().is_some_and(|&(_, next)| next == b'\'') {
+                        bytes.next();
+                    } else {
+                        quote = None;
+                    }
+                }
+            }
+            _ => {
+                if b == b'#' && prev.is_some_and(|p| p == b' ' || p == b'\t') {
+                    return false;
+                }
+                match b {
+                    b'"' | b'\'' => quote = Some(b),
+                    b'{' => closers.push(b'}'),
+                    b'[' => closers.push(b']'),
+                    b'}' | b']' => {
+                        if closers.pop() != Some(b) {
+                            return false;
+                        }
+                        if closers.is_empty() {
+                            let rest = text[i + 1..].trim();
+                            return rest.is_empty() || rest.starts_with('#');
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        prev = Some(b);
+    }
+    false
+}
+
+/// Whether an entry body's value is a plain scalar that itself
+/// contains a mapping colon (`key: true x: y`), or a flow collection
+/// that does not close on the same line. Plain scalars may never
+/// contain a colon followed by separation (a space or a tab) or end
+/// with one, so the full parser rejects such documents; an
+/// unclosed flow collection instead runs onto the following lines,
+/// which the scanners would misread as new entries. Either way the
+/// scanners must not skip the line and read on. Quoted and
+/// block-style values are exempt (their contents follow other
+/// rules), as is anything past a ` #` comment start, and so is a
+/// flow collection that closes on the same line (its colons are
+/// flow syntax, not mapping separators).
+fn plain_value_has_mapping_colon(body: &str) -> bool {
+    let entry = body.strip_prefix("- ").unwrap_or(body);
+    if entry.starts_with('{') || entry.starts_with('[') {
+        return !flow_collection_closes_on_line(entry);
+    }
+    let Some(colon) = mapping_colon_index(entry) else {
+        return false;
+    };
+    let value = entry[colon + 1..].trim_start();
+    if value.is_empty() {
+        return false;
+    }
+    if value.starts_with('{') || value.starts_with('[') {
+        return !flow_collection_closes_on_line(value);
+    }
+    if value.starts_with(['"', '\'', '|', '>', '&', '*', '!']) {
+        return false;
+    }
+    let before_comment = value
+        .split_once(" #")
+        .map_or(value, |(head, _)| head)
+        .trim_end();
+    before_comment.contains(": ") || before_comment.contains(":\t") || before_comment.ends_with(':')
+}
+
+/// Whether a content line's body (leading indentation removed) is a
+/// bare plain scalar: no mapping colon, not a sequence entry, not a
+/// flow collection or block scalar header, not quoted. Such a line
+/// begins (or continues) a plain scalar whose extent the line
+/// scanners cannot judge — an entry line at the same indentation
+/// after it is an error to the parser, while a deeper line may be a
+/// legal continuation — so the scanners fall back whenever an
+/// indented bare-scalar line appears.
+fn is_bare_scalar_line(body: &str) -> bool {
+    !body.starts_with("- ")
+        && body != "-"
+        && !body.starts_with(['{', '[', '|', '>', '"', '\''])
+        && mapping_colon_index(body).is_none()
+}
+
+/// The frame one content line establishes for the depth tracking in
+/// the scanners: the indentation its mapping key effectively sits
+/// at, and whether that key carries an inline value. Sequence
+/// entries are unwrapped — their first key sits two columns past
+/// the dash, which is also where the entry's own content lines sit,
+/// so ordinary sequence content does not look "deeper" than the key.
+fn content_line_frame(line: &str) -> (usize, bool) {
+    let indent = line.len() - line.trim_start().len();
+    let body = line.trim_start();
+    if let Some(entry) = body.strip_prefix("- ") {
+        // A flow entry is a self-contained value on the dash line
+        // itself: frame it at the dash's indentation, so that any
+        // deeper following line falls back (it cannot be content of
+        // the entry the way a block entry's lines can).
+        if entry.starts_with('{') || entry.starts_with('[') {
+            return (indent, true);
+        }
+        (indent + 2, key_line_has_inline_value(entry))
+    } else if body == "-" {
+        (indent, false)
+    } else {
+        (indent, key_line_has_inline_value(body))
+    }
+}
+
+/// Judges one indented line for the scalar scanner below, updating
+/// the frame state in `last_content`. Returns `true` when the line
+/// forces a fallback to the full parser.
+fn indented_line_forces_fallback(
+    line: &str,
+    saw_unindented_line: bool,
+    last_content: &mut Option<(usize, bool)>,
+) -> bool {
+    let indent = line.len() - line.trim_start().len();
+    let trimmed_start = line.trim_start();
+    // An indented explicit mapping key (same rule as the unindented
+    // check in the caller).
+    if trimmed_start.starts_with('?') {
+        return true;
+    }
+    if trimmed_start.is_empty() || trimmed_start.starts_with('#') {
+        return false;
+    }
+    // A bare plain-scalar line begins (or continues) a scalar value
+    // whose extent this helper cannot judge (see `is_bare_scalar_line`).
+    if is_bare_scalar_line(trimmed_start) {
+        return true;
+    }
+    // A tab anywhere in the indentation prefix is never legal YAML
+    // indentation; content ahead of the first top-level key means the
+    // root block itself is indented, a frame the caller cannot judge;
+    // a line deeper than an inline-valued previous line is the
+    // ambiguous shape described at `last_content`; and a plain value
+    // containing its own mapping colon is rejected by the parser
+    // outright. All four are for the full parser to decide.
+    if line[..indent].contains('\t')
+        || !saw_unindented_line
+        || matches!(*last_content, Some((prev_indent, true)) if indent > prev_indent)
+        || plain_value_has_mapping_colon(trimmed_start)
+    {
+        return true;
+    }
+    *last_content = Some(content_line_frame(line));
+    false
+}
+
 /// Fast-path extraction for simple top-level scalar YAML values (`key: value`).
 ///
 /// Avoids parsing the full YAML AST (which can take tens of milliseconds for large
@@ -16,19 +306,48 @@ use crate::error::AppError;
 /// Falls back to `serde_yaml::from_str` if complex YAML features (directives, tags,
 /// anchors, aliases, multiline block scalars) or ambiguous structures are present.
 fn extract_top_level_scalar_fast<'a>(content: &'a str, key: &str) -> Option<&'a str> {
+    if !content.contains(key) {
+        return None;
+    }
     if content.contains("<<") || content.contains("%YAML") {
+        return None;
+    }
+    // A leading BOM hides the first line's key from the scanner (trim
+    // does not remove it) while the full parser strips it; fall back,
+    // as the TUN scanner below does.
+    if content.starts_with('\u{FEFF}') {
         return None;
     }
 
     let mut result = None;
     let mut matched = false;
+    let mut saw_unindented_line = false;
+    // Frame of the most recent content line, at any depth (see
+    // `content_line_frame`): a content line sitting DEEPER than a
+    // previous line whose key carried an inline value cannot be
+    // judged locally — it may be a legal plain-scalar continuation,
+    // but it may also be a nested entry, which a scalar value cannot
+    // have, so the parser would reject the document. Rather than
+    // tell the two apart, fall back whenever that shape appears.
+    let mut last_content: Option<(usize, bool)> = None;
 
-    let lines: Vec<&str> = content.lines().collect();
-    for (i, line) in lines.iter().enumerate() {
+    let mut lines = content.lines();
+    while let Some(line) = lines.next() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            // Indented lines are nested content this scanner does not
+            // read, but they still take part in the frame tracking,
+            // and some shapes force the full parser outright.
+            if indented_line_forces_fallback(line, saw_unindented_line, &mut last_content) {
+                return None;
+            }
+            continue;
+        }
+
         let trimmed_line = line.trim();
         if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
             continue;
         }
+        saw_unindented_line = true;
 
         // Directives or doc start/end markers requiring full parser
         if line.starts_with("---") || line.starts_with("...") {
@@ -37,8 +356,49 @@ fn extract_top_level_scalar_fast<'a>(content: &'a str, key: &str) -> Option<&'a 
 
         // Explicit mapping keys (`? key` / `: value`) are legal YAML that
         // this line scanner cannot parse; fall back to the full parser.
-        if trimmed_line.starts_with('?') {
+        // A line opening a flow collection is likewise outside the
+        // block structure this scanner reads: it may span lines, and
+        // its later lines would be mistaken for top-level keys.
+        if trimmed_line.starts_with('?')
+            || trimmed_line.starts_with('{')
+            || trimmed_line.starts_with('[')
+        {
             return None;
+        }
+
+        // A bare plain-scalar line at the top level means the
+        // document root is a scalar (or the document is malformed);
+        // either way the full parser decides.
+        if is_bare_scalar_line(line) {
+            return None;
+        }
+
+        // A plain value containing its own mapping colon is rejected
+        // by the parser; do not read past it.
+        if plain_value_has_mapping_colon(line) {
+            return None;
+        }
+
+        // Track this line's frame; the indented branch above consults
+        // the state for the lines that follow.
+        last_content = Some(content_line_frame(line));
+
+        // Quoted keys are invisible to the strip_prefix match below:
+        // fall back when one could name the requested key — the parser
+        // would read it as this key (or reject the document for defining
+        // it twice), and the scanner cannot tell which.
+        if quoted_key_could_name(trimmed_line, key) {
+            return None;
+        }
+
+        // A spaced twin of the requested key (`secret : x`) is the
+        // same key to the parser, so it can be a duplicate the
+        // exact-prefix match below would silently skip; fall back,
+        // mirroring the TUN scanner's `tun :` check.
+        if let Some(rest) = line.strip_prefix(key) {
+            if !rest.starts_with(':') && rest.trim_start_matches([' ', '\t']).starts_with(':') {
+                return None;
+            }
         }
 
         // Top-level key must have no leading whitespace
@@ -137,7 +497,7 @@ fn extract_top_level_scalar_fast<'a>(content: &'a str, key: &str) -> Option<&'a 
                 // A more-indented following line continues a multi-line
                 // plain scalar (`secret: foo` + `  bar` folds to `foo bar`);
                 // the fast path only reads the first line, so fall back.
-                for next in lines.iter().skip(i + 1) {
+                for next in lines.clone() {
                     let t = next.trim();
                     if t.is_empty() || t.starts_with('#') {
                         continue;
@@ -201,6 +561,7 @@ where
 {
     let mut expected_indent: Option<usize> = None;
     let mut found: Option<bool> = None;
+    let mut last_content: Option<(usize, bool)> = None;
 
     while let Some(&next_line) = lines.peek() {
         // YAML forbids tabs in indentation; such a document fails full
@@ -214,17 +575,29 @@ where
             continue;
         }
 
+        let indent = next_line.len() - next_line.trim_start().len();
+        // The same tab rule for the rest of the indentation prefix
+        // (a space followed by a tab is still tab indentation).
+        if next_line[..indent].contains('\t') {
+            return None;
+        }
+
         // Explicit mapping keys (`? key` / `: value`) are legal YAML that
         // this line scanner cannot parse; fall back to the full parser.
         if next_trimmed.starts_with('?') {
             return None;
         }
 
-        let indent = next_line.len() - next_line.trim_start().len();
-
         // If line is not indented at all, the `tun:` block has ended.
         if indent == 0 {
             break;
+        }
+
+        // A bare plain-scalar line inside the block begins (or
+        // continues) a scalar value whose extent this scanner cannot
+        // judge (see `is_bare_scalar_line`); fall back.
+        if is_bare_scalar_line(next_line.trim_start()) {
+            return None;
         }
 
         // Establish the child indentation level of the `tun:` mapping
@@ -232,6 +605,20 @@ where
 
         // If this line is indented further than the child level, it's inside a sub-mapping
         if indent > child_indent {
+            // …unless a previous line at any depth inside the block
+            // carried an inline value: a more-indented line after such
+            // an entry may be a nested entry, which a scalar value
+            // cannot have (the parser would reject the document); the
+            // scanner cannot tell, so fall back instead of skipping
+            // the line and reading the rest of the block. A deeper
+            // line whose own plain value contains a mapping colon is
+            // rejected by the parser for the same reason.
+            if matches!(last_content, Some((prev_indent, true)) if indent > prev_indent)
+                || plain_value_has_mapping_colon(next_line.trim_start())
+            {
+                return None;
+            }
+            last_content = Some(content_line_frame(next_line));
             lines.next();
             continue;
         }
@@ -245,6 +632,11 @@ where
         }
 
         let indented = next_line.trim_start();
+        // A child whose plain value contains its own mapping colon is
+        // rejected by the parser; do not read past it.
+        if plain_value_has_mapping_colon(indented) {
+            return None;
+        }
         // A quoted key (`"enable": true`) is still the `enable` key in
         // YAML; the fast path cannot match it safely, so fall back to
         // the full parser rather than misreading it as disabled.
@@ -291,6 +683,8 @@ where
             }
         }
 
+        last_content = Some(content_line_frame(next_line));
+
         lines.next();
     }
 
@@ -315,15 +709,49 @@ fn extract_tun_enabled_fast(content: &str) -> Option<bool> {
         return None;
     }
     let mut saw_unindented_line = false;
+    let mut last_content: Option<(usize, bool)> = None;
     for line in content.lines() {
+        let indent = line.len() - line.trim_start().len();
+        if indent > 0 {
+            let t = line.trim();
+            if t.is_empty() || t.starts_with('#') {
+                continue;
+            }
+            // A tab anywhere in the indentation prefix is never legal
+            // YAML indentation; indented content ahead of the first
+            // top-level key means the root block itself is indented,
+            // which the parser rejects; a line deeper than an
+            // inline-valued previous line cannot be told apart locally
+            // from a nested entry, which the parser would likewise
+            // reject; and a plain value containing its own mapping
+            // colon is rejected outright. Fall back for all four (same
+            // rules as the scalar scanner above).
+            if line[..indent].contains('\t')
+                || !saw_unindented_line
+                || matches!(last_content, Some((prev_indent, true)) if indent > prev_indent)
+                || plain_value_has_mapping_colon(line.trim_start())
+                || is_bare_scalar_line(line.trim_start())
+            {
+                return None;
+            }
+            last_content = Some(content_line_frame(line));
+            continue;
+        }
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        if line.starts_with(' ') || line.starts_with('\t') {
-            continue;
-        }
         saw_unindented_line = true;
+        if let Some(after_quote) = trimmed.strip_prefix('"') {
+            // An escaped double-quoted key (`"t\u0075n":`) can decode to
+            // `tun` where the scanner cannot see it; the parser must
+            // decide whenever the quoted key text carries an escape.
+            if let Some(close) = after_quote.find('"') {
+                if after_quote[..close].contains('\\') {
+                    return None;
+                }
+            }
+        }
         if trimmed.starts_with('{')
             || trimmed.starts_with("\"tun\"")
             || trimmed.starts_with("'tun'")
@@ -335,6 +763,18 @@ fn extract_tun_enabled_fast(content: &str) -> Option<bool> {
                 return None;
             }
         }
+        // A bare plain-scalar line at the top level means the
+        // document root is a scalar (or the document is malformed);
+        // either way the full parser decides.
+        if is_bare_scalar_line(trimmed) {
+            return None;
+        }
+        // A plain value containing its own mapping colon is rejected
+        // by the parser; do not read past it.
+        if plain_value_has_mapping_colon(trimmed) {
+            return None;
+        }
+        last_content = Some(content_line_frame(line));
     }
     if !saw_unindented_line {
         return None;
@@ -809,6 +1249,99 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_tun_enabled_escaped_key() {
+        // The key decodes to `tun` only after YAML unescaping, so the fast
+        // path must defer to the full parser instead of reporting disabled.
+        let content = "\"t\\u0075n\":\n  enable: true\n";
+        assert!(extract_tun_enabled_from_yaml(content));
+    }
+
+    #[test]
+    fn test_extract_secret_malformed_indented_explicit_key() {
+        // The indented explicit key makes the document malformed; the fast
+        // path must defer to the full parser (which rejects it) instead of
+        // returning the secret.
+        let content = "secret: token\nnested:\n  ? [unterminated\n";
+        assert_eq!(extract_secret_from_yaml(content), None);
+    }
+
+    #[test]
+    fn test_extract_tun_enabled_escaped_key_with_literal_tun_elsewhere() {
+        // The escaped key decodes to `tun`; the literal substring showing
+        // up in an unrelated value must not let the fast path answer.
+        let content = "\"t\\u0075n\":\n  enable: true\nname: tun-test\n";
+        assert_eq!(extract_tun_enabled_fast(content), None);
+        assert!(extract_tun_enabled_from_yaml(content));
+    }
+
+    #[test]
+    fn test_extract_tun_fast_path_unrelated_quoted_value() {
+        // No tun anywhere and only an unrelated quoted value: the fast
+        // path still answers directly instead of invoking the full parser.
+        assert_eq!(
+            extract_tun_enabled_fast("mode: \"rule\"\nport: 7890\n"),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn test_extract_secret_escaped_duplicate_key() {
+        // The escaped key decodes to `secret`, so the parser rejects the
+        // document as a duplicate; no secret may be returned from it.
+        let content = "secret: real\n\"s\\u0065cret\": other\n";
+        assert_eq!(extract_secret_from_yaml(content), None);
+    }
+
+    #[test]
+    fn test_extract_tun_enabled_explicit_escaped_key() {
+        // An explicit key (`? ...`) spelling `tun` with escapes is only
+        // decidable by the full parser; the fast path must defer.
+        let content = "? \"t\\u0075n\"\n:\n  enable: true\n";
+        assert_eq!(extract_tun_enabled_fast(content), None);
+        assert!(extract_tun_enabled_from_yaml(content));
+    }
+
+    #[test]
+    fn test_extract_secret_indented_root_block() {
+        // An indented root block followed by a column-0 key is malformed
+        // for the parser; the fast path must not answer from it.
+        let content = "  secret: x\nsecret: real\n";
+        assert_eq!(extract_secret_from_yaml(content), None);
+    }
+
+    #[test]
+    fn test_extract_tun_enabled_tab_indented_quoted_key() {
+        // A tab-indented quoted `tun` line is never legal indentation;
+        // the fast path defers and the parser rejects the document.
+        let content = "\t\"tun\": x\ntun:\n  enable: true\n";
+        assert_eq!(extract_tun_enabled_fast(content), None);
+        assert!(!extract_tun_enabled_from_yaml(content));
+    }
+
+    #[test]
+    fn test_extract_secret_bom_prefixed_duplicate() {
+        // The BOM hides the first `secret:` line from the scanner; the
+        // parser strips the BOM and rejects the duplicate key.
+        let content = "\u{FEFF}secret: a\nsecret: b\n";
+        assert_eq!(extract_secret_from_yaml(content), None);
+    }
+
+    #[test]
+    fn test_extract_secret_single_quoted_keys() {
+        // A single-quoted twin is a duplicate for the parser, so no
+        // secret may be returned; a sole single-quoted key still reads
+        // through the parser fallback.
+        assert_eq!(
+            extract_secret_from_yaml("secret: real\n'secret': other\n"),
+            None
+        );
+        assert_eq!(
+            extract_secret_from_yaml("'secret': real\n"),
+            Some("real".to_owned())
+        );
+    }
+
+    #[test]
     fn test_extract_secret_with_quotes_and_comments() {
         let content_double = "secret: \"my_secret\" # comment\nport: 9090\n";
         assert_eq!(
@@ -906,6 +1439,327 @@ mod tests {
         assert!(!extract_tun_enabled_from_yaml("tun: false\n"));
         // Ordinary configs keep the fast path: no `tun` key means disabled.
         assert!(!extract_tun_enabled_from_yaml("mode: rule\nport: 7890\n"));
+    }
+
+    #[test]
+    fn test_fast_path_indented_line_after_inline_value() {
+        // An indented content line after a mapping entry that carries an
+        // inline scalar value belongs to no legal structure (a scalar
+        // value grows no nested mapping): serde_yaml rejects all of
+        // these documents, so both fast paths must fall back instead of
+        // skipping the indented line and reading on.
+        let secret_doc = "mode: rule\n  secret: x\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(secret_doc).is_err());
+        assert_eq!(extract_top_level_scalar_fast(secret_doc, "secret"), None);
+        assert_eq!(extract_secret_from_yaml(secret_doc), None);
+
+        let tun_doc = "mode: rule\n  x: y\ntun:\n  enable: true\n";
+        assert!(yaml::from_str::<YamlValue>(tun_doc).is_err());
+        assert_eq!(extract_tun_enabled_fast(tun_doc), None);
+        assert!(!extract_tun_enabled_from_yaml(tun_doc));
+
+        // Same shape with the indented entry ahead of any top-level key:
+        // the root frame itself is broken, which the parser rejects too.
+        let root_doc = "  x: y\ntun:\n  enable: true\n";
+        assert!(yaml::from_str::<YamlValue>(root_doc).is_err());
+        assert_eq!(extract_tun_enabled_fast(root_doc), None);
+        assert!(!extract_tun_enabled_from_yaml(root_doc));
+
+        // The same shape inside a `tun:` block: a deeper-indented line
+        // after a child entry with an inline value.
+        let block_doc = "tun:\n  enable: true\n  stack: system\n    enable: false\n";
+        assert!(yaml::from_str::<YamlValue>(block_doc).is_err());
+        assert_eq!(extract_tun_enabled_fast(block_doc), None);
+        assert!(!extract_tun_enabled_from_yaml(block_doc));
+
+        // Entries that open a nested block (no inline value) keep their
+        // indented children: results stay exactly as the parser's.
+        assert_eq!(
+            extract_secret_from_yaml("proxies:\n  - name: a\nsecret: abc\n").as_deref(),
+            Some("abc")
+        );
+        assert!(extract_tun_enabled_from_yaml(
+            "dns:\n  enable: false\ntun:\n  enable: true\n"
+        ));
+        // A block scalar before the target key still resolves to the
+        // parser's answer (via the fallback).
+        assert_eq!(
+            extract_secret_from_yaml("foo: |\n  text\nsecret: abc\n").as_deref(),
+            Some("abc")
+        );
+    }
+
+    #[test]
+    fn test_fast_path_flow_entries_and_colon_keys() {
+        // A key may itself contain a colon not followed by a space
+        // (`a:b` is one plain scalar); the separator is the colon
+        // followed by separation. Such entries keep the fast path.
+        let colon_key = "a:b: c\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(colon_key).is_ok());
+        assert_eq!(
+            extract_top_level_scalar_fast(colon_key, "secret"),
+            Some("real")
+        );
+
+        // A complete flow collection as a sequence entry is a
+        // self-contained value; its colons are flow syntax, so the
+        // fast path keeps working on flow-style profile entries.
+        let flow_entry = "proxies:\n- {name: a, type: ss, server: x}\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(flow_entry).is_ok());
+        assert_eq!(
+            extract_top_level_scalar_fast(flow_entry, "secret"),
+            Some("real")
+        );
+        let flow_entry_tun = "proxies:\n- {name: a, type: ss}\ntun:\n  enable: true\n";
+        assert_eq!(extract_tun_enabled_fast(flow_entry_tun), Some(true));
+
+        // The same entry left unclosed runs onto the following
+        // lines; the parser rejects the document and neither scanner
+        // may read the next line as a top-level entry.
+        let unclosed_entry = "proxies:\n- {name: a, type: ss\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(unclosed_entry).is_err());
+        assert_eq!(
+            extract_top_level_scalar_fast(unclosed_entry, "secret"),
+            None
+        );
+        assert_eq!(extract_secret_from_yaml(unclosed_entry), None);
+
+        // An unclosed flow VALUE does the same from a plain key.
+        let unclosed_value = "foo: {a: b\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(unclosed_value).is_err());
+        assert_eq!(
+            extract_top_level_scalar_fast(unclosed_value, "secret"),
+            None
+        );
+        assert_eq!(extract_secret_from_yaml(unclosed_value), None);
+
+        // A colon followed by a tab inside a plain value starts a
+        // mapping value for the parser, which rejects the document;
+        // the fast path must not read past it either.
+        let tab_in_value = "mode: foo:\tbar\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(tab_in_value).is_err());
+        assert_eq!(extract_top_level_scalar_fast(tab_in_value, "secret"), None);
+        assert_eq!(extract_secret_from_yaml(tab_in_value), None);
+    }
+
+    #[test]
+    fn test_fast_path_bare_scalars_trailing_colons_flow_comments() {
+        // A bare plain-scalar line inside a block begins a scalar
+        // value; an entry line at the same indentation after it is an
+        // error to the parser, so neither scanner may read past it.
+        let bare_scalar = "foo:\n  bar\n  x: y\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(bare_scalar).is_err());
+        assert_eq!(extract_top_level_scalar_fast(bare_scalar, "secret"), None);
+        assert_eq!(extract_secret_from_yaml(bare_scalar), None);
+        let bare_in_tun = "tun:\n  stack:\n    gvisor\n    x: y\n  enable: true\n";
+        assert!(yaml::from_str::<YamlValue>(bare_in_tun).is_err());
+        assert_eq!(extract_tun_enabled_fast(bare_in_tun), None);
+        assert!(!extract_tun_enabled_from_yaml(bare_in_tun));
+        // A plain scalar that legally starts on the next line falls
+        // back too (its extent cannot be judged locally); the public
+        // result stays correct through the full parser.
+        let next_line_scalar = "foo:\n  bar baz\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(next_line_scalar).is_ok());
+        assert_eq!(
+            extract_top_level_scalar_fast(next_line_scalar, "secret"),
+            None
+        );
+        assert_eq!(
+            extract_secret_from_yaml(next_line_scalar).as_deref(),
+            Some("real")
+        );
+
+        // A plain value ending with a colon carries a mapping
+        // indicator; the parser rejects such documents.
+        let trailing_colon = "mode: foo:\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(trailing_colon).is_err());
+        assert_eq!(
+            extract_top_level_scalar_fast(trailing_colon, "secret"),
+            None
+        );
+        assert_eq!(extract_secret_from_yaml(trailing_colon), None);
+        let trailing_colon_tun = "tun:\n  stack: a:\n  enable: true\n";
+        assert!(yaml::from_str::<YamlValue>(trailing_colon_tun).is_err());
+        assert_eq!(extract_tun_enabled_fast(trailing_colon_tun), None);
+        assert!(!extract_tun_enabled_from_yaml(trailing_colon_tun));
+
+        // A closing brace inside a flow comment is comment text, not
+        // the end of the collection: the collection is unclosed on
+        // this line and the document falls back.
+        for doc in [
+            "proxies:\n- {name: a # }\nsecret: real\n",
+            "foo: {a: b # }\nsecret: real\n",
+        ] {
+            assert!(yaml::from_str::<YamlValue>(doc).is_err());
+            assert_eq!(extract_top_level_scalar_fast(doc, "secret"), None);
+            assert_eq!(extract_secret_from_yaml(doc), None);
+        }
+    }
+
+    #[test]
+    fn test_fast_path_flow_trailing_junk() {
+        // A complete flow collection followed by junk on the same
+        // line is an error to the parser (the collection is the
+        // whole entry or value); the fast path must not accept the
+        // line and read on.
+        for doc in [
+            "proxies:\n- {name: a} junk\nsecret: real\n",
+            "foo: {a: b} junk\nsecret: real\n",
+        ] {
+            assert!(yaml::from_str::<YamlValue>(doc).is_err());
+            assert_eq!(extract_top_level_scalar_fast(doc, "secret"), None);
+            assert_eq!(extract_secret_from_yaml(doc), None);
+        }
+        // A nested flow collection that closes mid-line, and a
+        // trailing comment after the outer close, stay on the fast
+        // path.
+        let nested = "foo: {a: {b: c}, d: e}\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(nested).is_ok());
+        assert_eq!(
+            extract_top_level_scalar_fast(nested, "secret"),
+            Some("real")
+        );
+        let commented = "proxies:\n- {name: a} # first\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(commented).is_ok());
+        assert_eq!(
+            extract_top_level_scalar_fast(commented, "secret"),
+            Some("real")
+        );
+    }
+
+    #[test]
+    fn test_fast_path_frames_at_any_depth() {
+        // A content line deeper than an inline-valued line at ANY
+        // nesting level is the same ambiguous shape the top-level
+        // tracking guards: the parser rejects such documents.
+        let nested_deeper = "dns:\n  enable: true\n   x: y\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(nested_deeper).is_err());
+        assert_eq!(extract_top_level_scalar_fast(nested_deeper, "secret"), None);
+        assert_eq!(extract_secret_from_yaml(nested_deeper), None);
+        // The same shape ahead of a `tun:` block.
+        let nested_deeper_tun = "dns:\n  enable: true\n   x: y\ntun:\n  enable: true\n";
+        assert!(yaml::from_str::<YamlValue>(nested_deeper_tun).is_err());
+        assert_eq!(extract_tun_enabled_fast(nested_deeper_tun), None);
+        assert!(!extract_tun_enabled_from_yaml(nested_deeper_tun));
+
+        // A plain value that itself contains a mapping colon is
+        // rejected by the parser, at any depth and in sequence
+        // entries alike; neither scanner may skip the line.
+        for doc in [
+            "dns:\n  enable: true x: y\nsecret: real\n",
+            "proxies:\n- name: a bar: baz\nsecret: real\n",
+            "secret: a: b\n",
+        ] {
+            assert!(yaml::from_str::<YamlValue>(doc).is_err());
+            assert_eq!(extract_top_level_scalar_fast(doc, "secret"), None);
+            assert_eq!(extract_secret_from_yaml(doc), None);
+        }
+        let colon_in_tun_block = "tun:\n  stack: a: b\n  enable: true\n";
+        assert!(yaml::from_str::<YamlValue>(colon_in_tun_block).is_err());
+        assert_eq!(extract_tun_enabled_fast(colon_in_tun_block), None);
+        assert!(!extract_tun_enabled_from_yaml(colon_in_tun_block));
+    }
+
+    #[test]
+    fn test_fast_path_quotes_flow_and_tab_prefixes() {
+        // An interior quote in a plain key is ordinary text, not a
+        // quoted span: the key still carries an inline value, so an
+        // indented line after it falls back like any other.
+        let interior_quote = "name 'x: y\n  secret: evil\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(interior_quote).is_err());
+        assert_eq!(
+            extract_top_level_scalar_fast(interior_quote, "secret"),
+            None
+        );
+        assert_eq!(extract_secret_from_yaml(interior_quote), None);
+
+        // A document opening a multi-line flow collection is not a
+        // block document: later lines are not top-level keys.
+        let flow_doc = "{a: 1,\nsecret: real}\n";
+        assert_eq!(
+            extract_top_level_scalar_fast(flow_doc, "secret"),
+            None,
+            "flow documents fall back to the full parser"
+        );
+        assert_eq!(
+            extract_secret_from_yaml(flow_doc).as_deref(),
+            Some("real"),
+            "the parser reads `secret` inside the flow mapping"
+        );
+
+        // A tab later in the indentation prefix (not just in first
+        // position) is still tab indentation, which the parser
+        // rejects wherever it appears.
+        for doc in [
+            "foo:\n \tsecret: x\nsecret: real\n",
+            "foo:\n \tx: y\ntun:\n  enable: true\n",
+            "tun:\n \tenable: true\n",
+        ] {
+            assert!(yaml::from_str::<YamlValue>(doc).is_err());
+            assert_eq!(extract_top_level_scalar_fast(doc, "secret"), None);
+            assert_eq!(extract_secret_from_yaml(doc), None);
+            assert_eq!(extract_tun_enabled_fast(doc), None);
+            assert!(!extract_tun_enabled_from_yaml(doc));
+        }
+
+        // Sanity: sequence entries still frame their content, so the
+        // fast paths keep working on ordinary profile shapes.
+        let ordinary = "proxies:\n- name: a\n  server: x\nsecret: real\ntun:\n  enable: true\n";
+        assert_eq!(
+            extract_top_level_scalar_fast(ordinary, "secret"),
+            Some("real")
+        );
+        assert_eq!(extract_tun_enabled_fast(ordinary), Some(true));
+    }
+
+    #[test]
+    fn test_fast_path_spaced_key_and_sequence_frames() {
+        // A spaced twin of the requested key (`secret : x`) is the same
+        // key to the parser, so the document defines it twice and the
+        // parser rejects it; the fast path must fall back instead of
+        // returning the first value.
+        let spaced = "secret: real\nsecret : other\n";
+        assert!(yaml::from_str::<YamlValue>(spaced).is_err());
+        assert_eq!(extract_top_level_scalar_fast(spaced, "secret"), None);
+        assert_eq!(extract_secret_from_yaml(spaced), None);
+        assert_eq!(extract_mode_from_yaml("mode: rule\nmode : global\n"), None);
+
+        // Sequence entries at column 0 (the usual layout under a key)
+        // open their own frame: the indented lines that follow are the
+        // entries' content, so the fast paths stay in play.
+        let seq_secret = "proxies:\n- name: a\n  server: x\nsecret: abc\n";
+        assert_eq!(
+            extract_top_level_scalar_fast(seq_secret, "secret"),
+            Some("abc")
+        );
+        let seq_tun = "proxies:\n- name: a\n  server: x\ntun:\n  enable: true\n";
+        assert_eq!(extract_tun_enabled_fast(seq_tun), Some(true));
+
+        // A double-quoted key split by a backslash line-break is not a
+        // hidden `tun` for this parser: serde_yaml rejects such
+        // documents outright, and the fast path's "disabled" agrees.
+        assert!(yaml::from_str::<YamlValue>("\"tu\\\nn\":\n  enable: true\n").is_err());
+        assert!(!extract_tun_enabled_from_yaml(
+            "\"tu\\\nn\":\n  enable: true\n"
+        ));
+
+        // A colon inside a quoted key is part of the key, not the
+        // separator: `"other:#": foo` carries an inline value, so the
+        // malformed indented line after it must force the fallback —
+        // the parser rejects these documents.
+        let quoted_secret = "\"other:#\": foo\n  bar: baz\nsecret: real\n";
+        assert!(yaml::from_str::<YamlValue>(quoted_secret).is_err());
+        assert_eq!(extract_top_level_scalar_fast(quoted_secret, "secret"), None);
+        assert_eq!(extract_secret_from_yaml(quoted_secret), None);
+        let quoted_tun = "\"other:#\": foo\n  bar: baz\ntun:\n  enable: true\n";
+        assert!(yaml::from_str::<YamlValue>(quoted_tun).is_err());
+        assert_eq!(extract_tun_enabled_fast(quoted_tun), None);
+        assert!(!extract_tun_enabled_from_yaml(quoted_tun));
+        // …while an apostrophe inside a plain key starts no quoted
+        // span, so `don't` still counts as an inline-valued key.
+        assert!(key_line_has_inline_value("don't: panic"));
+        assert!(key_line_has_inline_value("\"a:#\": v"));
+        assert!(!key_line_has_inline_value("tun: # comment only"));
     }
 
     #[test]
