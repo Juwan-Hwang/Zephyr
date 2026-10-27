@@ -20,7 +20,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 cargo about generate --fail about.hbs -o "$TMP/rust-raw.txt"
-node scripts/generate-licenses-js.mjs "$TMP/js.txt"
+node scripts/generate-licenses-js.mjs > "$TMP/js.txt"
 
 # cargo about also gathers the workspace's own crates. They are not
 # third-party components, so drop their index lines; fail loudly if the

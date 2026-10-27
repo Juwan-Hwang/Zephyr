@@ -12,17 +12,18 @@
  * such a package by adding its text to
  * scripts/third-party-assets-licenses.txt with a note instead.
  *
- * Usage: node scripts/generate-licenses-js.mjs <output-file>
+ * Usage: node scripts/generate-licenses-js.mjs > <output-file>
  * Requires: pnpm install has been run for the workspace.
  */
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { accessSync, constants, readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const outPath = process.argv[2];
-if (!outPath) {
-    console.error('usage: generate-licenses-js.mjs <output-file>');
+// The generated text goes to stdout and the caller redirects it to the
+// output file; this script takes no path arguments of its own.
+if (process.argv.length > 2) {
+    console.error('usage: generate-licenses-js.mjs > <output-file>');
     process.exit(2);
 }
 
@@ -31,17 +32,58 @@ if (!outPath) {
 // left in), which breaks both the cwd below and the store lookups.
 const desktopDir = fileURLToPath(new URL('../apps/desktop/', import.meta.url));
 
+// Resolve pnpm to an absolute path up front instead of letting the
+// spawn search PATH at exec time; fail loudly when there is no pnpm.
+function isRunnableFile(candidate) {
+    try {
+        if (!statSync(candidate).isFile()) return false;
+        // Windows runs .exe/.cmd by extension; elsewhere the file must
+        // carry the executable bit, like an execvp PATH search requires.
+        if (process.platform !== 'win32') accessSync(candidate, constants.X_OK);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function resolvePnpm() {
+    const names = process.platform === 'win32' ? ['pnpm.exe', 'pnpm.cmd'] : ['pnpm'];
+    // The Node.js binary's own directory first: corepack shims live there.
+    const dirs = [dirname(process.execPath), ...(process.env.PATH ?? '').split(delimiter)];
+    for (const dir of dirs) {
+        if (!dir) continue;
+        for (const name of names) {
+            // Absolute-ize now: the spawn below runs with a different
+            // working directory, where a relative candidate would
+            // resolve against the wrong base.
+            const candidate = resolve(dir, name);
+            if (isRunnableFile(candidate)) return candidate;
+        }
+    }
+    return null;
+}
+
+const pnpmPath = resolvePnpm();
+if (!pnpmPath) {
+    console.error('pnpm not found; install pnpm before running this script.');
+    process.exit(2);
+}
+
+// pnpm is a .cmd shim on Windows, and Node cannot spawn .cmd/.bat files
+// without a shell (EINVAL since the CVE-2024-27980 fix). The arguments
+// are fixed literals, so a shell is safe here.
+const useShell = process.platform === 'win32' && !pnpmPath.endsWith('.exe');
 const raw = execFileSync(
-    'pnpm',
+    // With a shell, Node joins the command and its arguments into one
+    // unquoted string, so quote the path: it may contain spaces
+    // (the default Node.js install lives under C:\Program Files).
+    useShell ? `"${pnpmPath}"` : pnpmPath,
     ['licenses', 'list', '--prod', '--json'],
     {
         cwd: desktopDir,
         encoding: 'utf8',
         maxBuffer: 64 * 1024 * 1024,
-        // pnpm is a .cmd shim on Windows, and Node cannot spawn .cmd/.bat
-        // files without a shell (EINVAL since the CVE-2024-27980 fix).
-        // The arguments are fixed literals, so a shell is safe here.
-        shell: process.platform === 'win32',
+        shell: useShell,
     },
 );
 const byLicense = JSON.parse(raw);
@@ -181,5 +223,5 @@ reproduced verbatim from each package's own license files.
 
 `;
 
-writeFileSync(outPath, header + sections.join('\n\n') + '\n');
-console.log(`Wrote ${sections.length} JavaScript components to ${outPath}`);
+process.stdout.write(header + sections.join('\n\n') + '\n');
+console.error(`Wrote ${sections.length} JavaScript components to stdout`);
