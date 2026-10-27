@@ -15,6 +15,7 @@ import { toError } from '../types/guards.js';
 import { COMMANDS } from '@zephyr/shared';
 import { validateConfig } from './prism.js';
 import { translations, currentLang, t as tCount } from '../i18n.js';
+import { generateDomId } from '../utils/dom-id.js';
 
 // --- Helpers ---
 
@@ -467,6 +468,8 @@ function renderConfigItem(key, value, fullKey) {
 
     // The config key itself is the label (it is what the YAML says); no second, re-cased copy.
     const label = document.createElement('p');
+    const labelId = generateDomId('adv-item-label');
+    label.id = labelId;
     label.className = "text-xs font-medium font-mono text-[var(--text-secondary)] truncate";
     label.textContent = key || (fullKey.split('.').pop() || '');
     label.title = fullKey;
@@ -485,6 +488,7 @@ function renderConfigItem(key, value, fullKey) {
         const input = document.createElement('input');
         input.type = "checkbox";
         input.checked = value;
+        input.setAttribute('aria-labelledby', labelId);
         input.onchange = () => handleConfigUpdate(fullKey, input.checked);
 
         const slider = document.createElement('span');
@@ -498,6 +502,7 @@ function renderConfigItem(key, value, fullKey) {
         input.type = "number";
         input.value = String(value);
         input.className = "form-control form-control-md form-control-mono max-w-[100px] text-end";
+        input.setAttribute('aria-labelledby', labelId);
         input.onchange = () => handleConfigUpdate(fullKey, Number(input.value));
         valueContainer.appendChild(input);
     } else if (typeof value === 'string') {
@@ -505,6 +510,7 @@ function renderConfigItem(key, value, fullKey) {
         input.type = "text";
         input.value = value;
         input.className = "form-control form-control-md form-control-mono w-full max-w-[200px] text-end";
+        input.setAttribute('aria-labelledby', labelId);
         input.onchange = () => handleConfigUpdate(fullKey, input.value);
         valueContainer.appendChild(input);
     } else if (Array.isArray(value)) {
@@ -584,4 +590,4 @@ function renderConfigItem(key, value, fullKey) {
 }
 
 // Re-export helpers for use by other modules
-export { deepMerge, isPlainObject, isSafeMergeKey, getActiveConfigContent };
+export { deepMerge, isPlainObject, isSafeMergeKey, getActiveConfigContent, renderConfigItem };

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isPlainObject, isSafeMergeKey, deepMerge } from './advanced.js';
+import { isPlainObject, isSafeMergeKey, deepMerge, renderConfigItem } from './advanced.js';
 
 describe('isPlainObject', () => {
     it('returns true for plain objects', () => {
@@ -107,5 +107,27 @@ describe('deepMerge', () => {
         const sourceCopy = JSON.parse(JSON.stringify(source));
         deepMerge({}, source);
         expect(source).toEqual(sourceCopy);
+    });
+});
+
+describe('renderConfigItem accessibility', () => {
+    it('associates inputs with their label via aria-labelledby', () => {
+        const booleanItem = renderConfigItem('allow-lan', true, 'allow-lan');
+        const checkboxInput = booleanItem.querySelector('input[type="checkbox"]');
+        const labelEl = booleanItem.querySelector('p');
+        expect(labelEl?.id).toBeTruthy();
+        expect(checkboxInput?.getAttribute('aria-labelledby')).toBe(labelEl?.id);
+
+        const numberItem = renderConfigItem('port', 7890, 'port');
+        const numberInput = numberItem.querySelector('input[type="number"]');
+        const numberLabel = numberItem.querySelector('p');
+        expect(numberLabel?.id).toBeTruthy();
+        expect(numberInput?.getAttribute('aria-labelledby')).toBe(numberLabel?.id);
+
+        const stringItem = renderConfigItem('mode', 'rule', 'mode');
+        const stringInput = stringItem.querySelector('input[type="text"]');
+        const stringLabel = stringItem.querySelector('p');
+        expect(stringLabel?.id).toBeTruthy();
+        expect(stringInput?.getAttribute('aria-labelledby')).toBe(stringLabel?.id);
     });
 });
