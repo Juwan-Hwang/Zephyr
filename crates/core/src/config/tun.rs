@@ -9,6 +9,43 @@ use yaml::Value as YamlValue;
 
 use crate::error::AppError;
 
+/// Whether a line opens a quoted mapping key that could name `key` —
+/// literally, or via escapes the line scanner cannot decode. An
+/// unterminated quote also counts: only the full parser can decide.
+fn quoted_key_could_name(line: &str, key: &str) -> bool {
+    if let Some(after_quote) = line.strip_prefix('"') {
+        return match after_quote.find('"') {
+            Some(close) => {
+                let quoted = &after_quote[..close];
+                quoted.contains('\\') || quoted == key
+            }
+            None => true,
+        };
+    }
+    if let Some(after_quote) = line.strip_prefix('\'') {
+        // Single-quoted keys: the only escape is '' for a literal quote,
+        // so the key can be decoded exactly.
+        let mut decoded = String::new();
+        let mut chars = after_quote.chars();
+        let closed = loop {
+            match chars.next() {
+                None => break false,
+                Some('\'') => {
+                    if chars.clone().next() == Some('\'') {
+                        chars.next();
+                        decoded.push('\'');
+                    } else {
+                        break true;
+                    }
+                }
+                Some(c) => decoded.push(c),
+            }
+        };
+        return !closed || decoded == key;
+    }
+    false
+}
+
 /// Fast-path extraction for simple top-level scalar YAML values (`key: value`).
 ///
 /// Avoids parsing the full YAML AST (which can take tens of milliseconds for large
@@ -16,19 +53,50 @@ use crate::error::AppError;
 /// Falls back to `serde_yaml::from_str` if complex YAML features (directives, tags,
 /// anchors, aliases, multiline block scalars) or ambiguous structures are present.
 fn extract_top_level_scalar_fast<'a>(content: &'a str, key: &str) -> Option<&'a str> {
+    if !content.contains(key) {
+        return None;
+    }
     if content.contains("<<") || content.contains("%YAML") {
+        return None;
+    }
+    // A leading BOM hides the first line's key from the scanner (trim
+    // does not remove it) while the full parser strips it; fall back,
+    // as the TUN scanner below does.
+    if content.starts_with('\u{FEFF}') {
         return None;
     }
 
     let mut result = None;
     let mut matched = false;
+    let mut saw_unindented_line = false;
 
-    let lines: Vec<&str> = content.lines().collect();
-    for (i, line) in lines.iter().enumerate() {
+    let mut lines = content.lines();
+    while let Some(line) = lines.next() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            // Indented lines are nested content this scanner does not read,
+            // but an indented explicit mapping key still forces the full
+            // parser (same rule as the unindented check below).
+            let trimmed_start = line.trim_start();
+            if trimmed_start.starts_with('?') {
+                return None;
+            }
+            if !trimmed_start.is_empty() && !trimmed_start.starts_with('#') {
+                // Content ahead of the first top-level key means the root
+                // block itself is indented, a frame this scanner cannot
+                // judge; a tab-led line is never legal indentation at
+                // all. Both are for the full parser to decide.
+                if !saw_unindented_line || line.starts_with('\t') {
+                    return None;
+                }
+            }
+            continue;
+        }
+
         let trimmed_line = line.trim();
         if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
             continue;
         }
+        saw_unindented_line = true;
 
         // Directives or doc start/end markers requiring full parser
         if line.starts_with("---") || line.starts_with("...") {
@@ -38,6 +106,14 @@ fn extract_top_level_scalar_fast<'a>(content: &'a str, key: &str) -> Option<&'a 
         // Explicit mapping keys (`? key` / `: value`) are legal YAML that
         // this line scanner cannot parse; fall back to the full parser.
         if trimmed_line.starts_with('?') {
+            return None;
+        }
+
+        // Quoted keys are invisible to the strip_prefix match below:
+        // fall back when one could name the requested key — the parser
+        // would read it as this key (or reject the document for defining
+        // it twice), and the scanner cannot tell which.
+        if quoted_key_could_name(trimmed_line, key) {
             return None;
         }
 
@@ -137,7 +213,7 @@ fn extract_top_level_scalar_fast<'a>(content: &'a str, key: &str) -> Option<&'a 
                 // A more-indented following line continues a multi-line
                 // plain scalar (`secret: foo` + `  bar` folds to `foo bar`);
                 // the fast path only reads the first line, so fall back.
-                for next in lines.iter().skip(i + 1) {
+                for next in lines.clone() {
                     let t = next.trim();
                     if t.is_empty() || t.starts_with('#') {
                         continue;
@@ -316,14 +392,35 @@ fn extract_tun_enabled_fast(content: &str) -> Option<bool> {
     }
     let mut saw_unindented_line = false;
     for line in content.lines() {
+        // A tab-led content line is never legal block indentation; if one
+        // shows up (say a tab-indented quoted `tun` key ahead of a real
+        // block), the document is malformed in ways the scanner cannot
+        // judge, so let the parser decide.
+        if line.starts_with('\t') {
+            let t = line.trim();
+            if !t.is_empty() && !t.starts_with('#') {
+                return None;
+            }
+            continue;
+        }
+        if line.starts_with(' ') {
+            continue;
+        }
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        if line.starts_with(' ') || line.starts_with('\t') {
-            continue;
-        }
         saw_unindented_line = true;
+        if let Some(after_quote) = trimmed.strip_prefix('"') {
+            // An escaped double-quoted key (`"t\u0075n":`) can decode to
+            // `tun` where the scanner cannot see it; the parser must
+            // decide whenever the quoted key text carries an escape.
+            if let Some(close) = after_quote.find('"') {
+                if after_quote[..close].contains('\\') {
+                    return None;
+                }
+            }
+        }
         if trimmed.starts_with('{')
             || trimmed.starts_with("\"tun\"")
             || trimmed.starts_with("'tun'")
@@ -806,6 +903,99 @@ mod tests {
     fn test_extract_tun_missing_from_yaml() {
         let content = "port: 9090\n";
         assert!(!extract_tun_enabled_from_yaml(content));
+    }
+
+    #[test]
+    fn test_extract_tun_enabled_escaped_key() {
+        // The key decodes to `tun` only after YAML unescaping, so the fast
+        // path must defer to the full parser instead of reporting disabled.
+        let content = "\"t\\u0075n\":\n  enable: true\n";
+        assert!(extract_tun_enabled_from_yaml(content));
+    }
+
+    #[test]
+    fn test_extract_secret_malformed_indented_explicit_key() {
+        // The indented explicit key makes the document malformed; the fast
+        // path must defer to the full parser (which rejects it) instead of
+        // returning the secret.
+        let content = "secret: token\nnested:\n  ? [unterminated\n";
+        assert_eq!(extract_secret_from_yaml(content), None);
+    }
+
+    #[test]
+    fn test_extract_tun_enabled_escaped_key_with_literal_tun_elsewhere() {
+        // The escaped key decodes to `tun`; the literal substring showing
+        // up in an unrelated value must not let the fast path answer.
+        let content = "\"t\\u0075n\":\n  enable: true\nname: tun-test\n";
+        assert_eq!(extract_tun_enabled_fast(content), None);
+        assert!(extract_tun_enabled_from_yaml(content));
+    }
+
+    #[test]
+    fn test_extract_tun_fast_path_unrelated_quoted_value() {
+        // No tun anywhere and only an unrelated quoted value: the fast
+        // path still answers directly instead of invoking the full parser.
+        assert_eq!(
+            extract_tun_enabled_fast("mode: \"rule\"\nport: 7890\n"),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn test_extract_secret_escaped_duplicate_key() {
+        // The escaped key decodes to `secret`, so the parser rejects the
+        // document as a duplicate; no secret may be returned from it.
+        let content = "secret: real\n\"s\\u0065cret\": other\n";
+        assert_eq!(extract_secret_from_yaml(content), None);
+    }
+
+    #[test]
+    fn test_extract_tun_enabled_explicit_escaped_key() {
+        // An explicit key (`? ...`) spelling `tun` with escapes is only
+        // decidable by the full parser; the fast path must defer.
+        let content = "? \"t\\u0075n\"\n:\n  enable: true\n";
+        assert_eq!(extract_tun_enabled_fast(content), None);
+        assert!(extract_tun_enabled_from_yaml(content));
+    }
+
+    #[test]
+    fn test_extract_secret_indented_root_block() {
+        // An indented root block followed by a column-0 key is malformed
+        // for the parser; the fast path must not answer from it.
+        let content = "  secret: x\nsecret: real\n";
+        assert_eq!(extract_secret_from_yaml(content), None);
+    }
+
+    #[test]
+    fn test_extract_tun_enabled_tab_indented_quoted_key() {
+        // A tab-indented quoted `tun` line is never legal indentation;
+        // the fast path defers and the parser rejects the document.
+        let content = "\t\"tun\": x\ntun:\n  enable: true\n";
+        assert_eq!(extract_tun_enabled_fast(content), None);
+        assert!(!extract_tun_enabled_from_yaml(content));
+    }
+
+    #[test]
+    fn test_extract_secret_bom_prefixed_duplicate() {
+        // The BOM hides the first `secret:` line from the scanner; the
+        // parser strips the BOM and rejects the duplicate key.
+        let content = "\u{FEFF}secret: a\nsecret: b\n";
+        assert_eq!(extract_secret_from_yaml(content), None);
+    }
+
+    #[test]
+    fn test_extract_secret_single_quoted_keys() {
+        // A single-quoted twin is a duplicate for the parser, so no
+        // secret may be returned; a sole single-quoted key still reads
+        // through the parser fallback.
+        assert_eq!(
+            extract_secret_from_yaml("secret: real\n'secret': other\n"),
+            None
+        );
+        assert_eq!(
+            extract_secret_from_yaml("'secret': real\n"),
+            Some("real".to_owned())
+        );
     }
 
     #[test]
