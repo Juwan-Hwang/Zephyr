@@ -45,9 +45,11 @@ pub fn obfuscate_string(key: &[u8], plaintext: &str) -> Result<String, AppError>
         .encrypt(nonce, plaintext.as_bytes())
         .map_err(|e| AppError::CryptoError(format!("AES encryption failed: {e}")))?;
 
-    let mut result = b"v2:".to_vec();
-    result.extend(&nonce_bytes);
-    result.extend(ciphertext);
+    // Pre-allocate buffer for prefix (3 bytes), nonce (12 bytes), and ciphertext to avoid reallocations.
+    let mut result = Vec::with_capacity(15 + ciphertext.len());
+    result.extend_from_slice(b"v2:");
+    result.extend_from_slice(&nonce_bytes);
+    result.extend_from_slice(&ciphertext);
     Ok(base64::engine::general_purpose::STANDARD.encode(&result))
 }
 
