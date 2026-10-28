@@ -114,6 +114,7 @@ pub fn failover_set_policy(
 /// Get the failure count for a specific node.
 #[tauri::command]
 pub fn failover_failure_count(state: State<PrismState>, node_name: String) -> Result<u32, String> {
+    check_name_size(&node_name, "Node name")?;
     let lock = state.lock_inner()?;
     Ok(lock.failover_tracker.failure_count(&node_name))
 }
@@ -159,5 +160,15 @@ mod tests {
         assert!(
             merge_failover_policy(&base, None, None, None, Some("valid_group".to_owned())).is_ok()
         );
+    }
+
+    #[test]
+    fn test_failover_node_name_size_validation() {
+        let oversized_node = "n".repeat(MAX_NAME_SIZE + 1);
+        let res = check_name_size(&oversized_node, "Node name");
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("Node name too large"));
+
+        assert!(check_name_size("valid_node", "Node name").is_ok());
     }
 }
