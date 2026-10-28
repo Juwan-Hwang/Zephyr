@@ -23,41 +23,69 @@ const fn decode_hex_digit(byte: u8) -> Option<u8> {
 
 /// Quote `short-id` values in YAML content before parsing.
 /// This prevents YAML from interpreting hex-like values (e.g., "34010e92") as scientific notation.
+#[must_use]
 pub fn quote_short_id_values(content: &str) -> String {
     // Fast path: if "short-id:" is not present at all, return input immediately.
     if !content.contains("short-id:") {
         return content.to_owned();
     }
 
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        match regex::Regex::new(r#"(?:^|\n)(\s*short-id:\s*)([^\s"'\n][^\s\n]*)"#) {
-            Ok(re) => re,
-            Err(e) => unreachable!("short-id regex is statically valid: {e}"),
-        }
-    });
-
-    // Zero-allocation loop over captures using a single pre-allocated output buffer.
+    // Fast-path string search to avoid Regex engine overhead.
     let mut out = String::with_capacity(content.len() + 128);
     let mut last_match = 0;
-    for caps in re.captures_iter(content) {
-        if let Some(m) = caps.get(0) {
-            out.push_str(&content[last_match..m.start()]);
-            let prefix = &caps[1];
-            let value = &caps[2];
-            let newline = if m.as_str().starts_with('\n') {
-                "\n"
-            } else {
-                ""
-            };
-            out.push_str(newline);
-            out.push_str(prefix);
-            out.push('"');
-            out.push_str(value);
-            out.push('"');
-            last_match = m.end();
+
+    for (pos, _) in content.match_indices("short-id:") {
+        if pos < last_match {
+            continue;
         }
+
+        // Ensure "short-id:" is preceded only by spaces/tabs on its line
+        let line_start = content[..pos].rfind('\n').map_or(0, |i| i + 1);
+        let prefix_line = &content[line_start..pos];
+        if !prefix_line.bytes().all(|b| b == b' ' || b == b'\t') {
+            continue;
+        }
+
+        let after_key_idx = pos + "short-id:".len();
+        let rest = &content[after_key_idx..];
+
+        // Skip spaces and tabs after "short-id:"
+        let mut value_offset = 0;
+        let bytes = rest.as_bytes();
+        while value_offset < bytes.len()
+            && matches!(bytes.get(value_offset), Some(b' ' | b'\t'))
+        {
+            value_offset += 1;
+        }
+
+        let Some(&first_char) = bytes.get(value_offset) else {
+            continue;
+        };
+
+        // Value must not start with quotes, newline, carriage return, space, or tab
+        if matches!(first_char, b'"' | b'\'' | b'\n' | b'\r' | b' ' | b'\t') {
+            continue;
+        }
+
+        let val_start = after_key_idx + value_offset;
+        let mut val_end = val_start;
+        while val_end < content.len() {
+            let Some(&b) = content.as_bytes().get(val_end) else {
+                break;
+            };
+            if matches!(b, b' ' | b'\t' | b'\r' | b'\n') {
+                break;
+            }
+            val_end += 1;
+        }
+
+        out.push_str(&content[last_match..val_start]);
+        out.push('"');
+        out.push_str(&content[val_start..val_end]);
+        out.push('"');
+        last_match = val_end;
     }
+
     out.push_str(&content[last_match..]);
     out
 }
