@@ -121,7 +121,7 @@ fn sanitize_remove_dangerous_keys_string_api(bencher: Bencher, proxies: usize) {
 #[divan::bench(args = SIZES)]
 fn quote_short_ids(bencher: Bencher, proxies: usize) {
     let config = clash_config(proxies);
-    // Initialise the lazily compiled regex outside of the measurement.
+    // Warm up the scanner outside of the measurement.
     let _ = quote_short_id_values("short-id: 0");
     bencher.bench(|| quote_short_id_values(black_box(&config)));
 }

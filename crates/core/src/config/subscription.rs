@@ -21,45 +21,1052 @@ const fn decode_hex_digit(byte: u8) -> Option<u8> {
 
 // ── Pure functions for subscription content sanitization ─────────────────
 
+/// Whether the byte at `at` can start a YAML plain scalar. Indicator
+/// characters never start one, and `-`, `?`, `:` only do so when not
+/// followed by a separation space: anything else here (an alias, anchor,
+/// tag, flow collection, block scalar, or quoted scalar) is node syntax
+/// that quoting would corrupt, so it is left alone.
+fn starts_plain_scalar(bytes: &[u8], at: usize) -> bool {
+    let Some(&first) = bytes.get(at) else {
+        return false;
+    };
+    match first {
+        b'!' | b'&' | b'*' | b'{' | b'}' | b'[' | b']' | b',' | b'#' | b'|' | b'>' | b'"'
+        | b'\'' | b'%' | b'@' | b'`' => false,
+        b'-' | b'?' | b':' => !matches!(
+            bytes.get(at + 1),
+            Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r') | None
+        ),
+        _ => true,
+    }
+}
+
+/// Find a `short-id` value that continues on a following line.
+/// `cur` points at the line break (or inline comment) that ends the key
+/// line. In block context a plain scalar counts as the value only when
+/// it starts on a line indented more than the key itself (the YAML
+/// block rule); in flow context line breaks fold to spaces, so any
+/// following line's value counts regardless of indent. Blank and
+/// comment lines are skipped. Returns the value start, if any.
+fn short_id_continuation_value(
+    bytes: &[u8],
+    mut cur: usize,
+    key_indent: usize,
+    in_flow: bool,
+) -> Option<usize> {
+    loop {
+        let &b = bytes.get(cur)?;
+        if b == b'#' {
+            // Comment: skip to the end of its line, then keep looking.
+            while let Some(&c) = bytes.get(cur) {
+                if matches!(c, b'\n' | b'\r') {
+                    break;
+                }
+                cur += 1;
+            }
+        } else if matches!(b, b'\n' | b'\r') {
+            if b == b'\r' && bytes.get(cur + 1) == Some(&b'\n') {
+                cur += 2;
+            } else {
+                cur += 1;
+            }
+            let mut indent = 0;
+            while matches!(bytes.get(cur), Some(b' ' | b'\t')) {
+                cur += 1;
+                indent += 1;
+            }
+            match bytes.get(cur) {
+                // Blank or comment line: loop again for the next line.
+                Some(b'\n' | b'\r') | Some(b'#') => {}
+                Some(_) if (indent > key_indent || in_flow) && starts_plain_scalar(bytes, cur) => {
+                    return Some(cur);
+                }
+                _ => return None,
+            }
+        } else {
+            return None;
+        }
+    }
+}
+
+/// Index just past the previous non-space byte before `pos` (0 at input
+/// start): walking back over spaces/tabs from `pos`.
+fn back_over_spaces(bytes: &[u8], mut j: usize) -> usize {
+    while j > 0 && matches!(bytes.get(j - 1), Some(b' ') | Some(b'\t')) {
+        j -= 1;
+    }
+    j
+}
+
+/// Whether a `-` at `dash` starts a sequence entry: it is followed by
+/// a space (or a line break) and is itself at the start of its line,
+/// after indentation (possibly nested behind further `- ` entries).
+/// A dash glued to what follows (`-short-id`, `-'abc`, `-- x`) is
+/// plain scalar text, not a sequence marker.
+fn dash_starts_sequence(bytes: &[u8], dash: usize) -> bool {
+    if !matches!(
+        bytes.get(dash + 1),
+        None | Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r')
+    ) {
+        return false;
+    }
+    let mut j = dash;
+    loop {
+        j = back_over_spaces(bytes, j);
+        if j == 0 || matches!(bytes.get(j - 1), Some(b'\n') | Some(b'\r')) {
+            return true;
+        }
+        // A further `-` only counts as a sequence marker when it is
+        // itself followed by a space (`- - ` nesting, not `-- `).
+        if bytes.get(j - 1) == Some(&b'-') && matches!(bytes.get(j), Some(b' ') | Some(b'\t')) {
+            j -= 1;
+            continue;
+        }
+        return false;
+    }
+}
+
+/// Whether a node (a quoted scalar or a flow collection) starts at
+/// `pos`: at a line start, after `: `, after a sequence `- `, or after
+/// a flow indicator inside flow context. A quote or bracket inside a
+/// plain scalar (an apostrophe in `don't`, a `"` in `use " anywhere`,
+/// a `[` in `HK [Premium`) does not start one. A `:` counts when
+/// whitespace separates it from the node (`{a: "b"}`); without a
+/// space, only a collection indicator starts a node in flow
+/// (`{a:{…}}`), while a quote is plain scalar text there
+/// (`{a:"b"}` is one scalar key, not a mapping).
+fn node_starts_here(bytes: &[u8], pos: usize, in_flow: bool) -> bool {
+    node_starts_here_inner(bytes, pos, in_flow, true)
+}
+
+/// Inner node-start check. With `check_continuation` false, a marker
+/// at a line start counts as a node start directly instead of asking
+/// whether the previous line continues a scalar: that query is what
+/// `continues_plain_scalar` itself makes for a trailing anchor or tag,
+/// so allowing it here would recurse one frame per anchor-only line
+/// and overflow the stack on crafted input.
+fn node_starts_here_inner(
+    bytes: &[u8],
+    mut pos: usize,
+    in_flow: bool,
+    check_continuation: bool,
+) -> bool {
+    // Anchor/tag chains are followed iteratively, capped: a valid node
+    // needs at most an anchor plus a tag, and a hostile run of
+    // `&a&a...` must not grow the stack.
+    for _ in 0..64 {
+        let j = back_over_spaces(bytes, pos);
+        if j == 0 {
+            return true;
+        }
+        match bytes.get(j - 1).copied() {
+            Some(b'\n') | Some(b'\r') => {
+                return if check_continuation {
+                    !continues_plain_scalar(bytes, pos, j, in_flow)
+                } else {
+                    true
+                };
+            }
+            Some(b',') | Some(b'{') | Some(b'[') => return in_flow,
+            Some(b':') => {
+                // A space between the colon and the node always
+                // separates. Without one, only a collection indicator
+                // starts a node in flow (`{a:{…}}`); a quote is plain
+                // scalar text there (`{a:"b"}` is one scalar key).
+                return j < pos || (in_flow && matches!(bytes.get(pos), Some(b'{') | Some(b'[')));
+            }
+            Some(b'?') => {
+                // Explicit-key indicator: in flow after `{` or `,`,
+                // at a line start in either context, or after a
+                // sequence dash. A `?` inside a plain scalar (`foo?`)
+                // is not one.
+                let r = back_over_spaces(bytes, j - 1);
+                if r == 0
+                    || matches!(
+                        bytes.get(r - 1),
+                        Some(b'\n') | Some(b'\r') | Some(b'{') | Some(b',')
+                    )
+                {
+                    return true;
+                }
+                if bytes.get(r - 1) == Some(&b'-') {
+                    return dash_starts_sequence(bytes, r - 1);
+                }
+                return false;
+            }
+            Some(b'-') => return dash_starts_sequence(bytes, j - 1),
+            _ => match anchor_or_tag_start(bytes, j) {
+                Some(start) => pos = start,
+                None => return false,
+            },
+        }
+    }
+    false
+}
+
+/// Start of the anchor (`&name`) or tag (`!name`, `!!name`,
+/// `!<verbatim>`) ending just before `j` (the index past the previous
+/// non-space byte), or `None` when the preceding token is neither. A
+/// `&`/`!` inside a plain scalar (`foo&x`) yields its marker, but the
+/// caller still checks that the marker itself starts a node.
+fn anchor_or_tag_start(bytes: &[u8], j: usize) -> Option<usize> {
+    if j > 0 && bytes.get(j - 1) == Some(&b'>') {
+        // Verbatim tag: `!<...>` with no spaces inside. Walk back
+        // over the tag, stopping at any byte that cannot appear in
+        // one: a second `>` means this `>` is not a tag end, and a
+        // quote, bracket, comma or `#` means the token is not a tag
+        // at all. Each walk therefore covers only its own token, so
+        // a long run of `>` costs O(1) per byte instead of rescanning
+        // the whole run, and tags of any length are still recognised.
+        // Start past the terminator itself: only a second `>` further
+        // back means this `>` is not a tag end.
+        let mut k = j - 1;
+        loop {
+            if k == 0 {
+                return None;
+            }
+            let &c = bytes.get(k - 1)?;
+            match c {
+                // A separator ends the token without a tag; a second
+                // `>` means this `>` is not a tag end; `"` never
+                // appears in a tag URI. Commas, `#` and brackets stay
+                // walkable: the pipeline accepts tags like
+                // `!<tag:yaml.org,2002:map>`, comma included.
+                b' ' | b'\t' | b'\n' | b'\r' | b'>' | b'"' => return None,
+                b'<' => {
+                    // The tag's own `<` must follow `!`, and that `!`
+                    // must start the token.
+                    if k >= 2
+                        && bytes.get(k - 2) == Some(&b'!')
+                        && (k - 2 == 0
+                            || matches!(
+                                bytes.get(k - 3),
+                                Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r')
+                            ))
+                    {
+                        return Some(k - 2);
+                    }
+                    return None;
+                }
+                _ => k -= 1,
+            }
+        }
+    }
+    // Tag suffixes and anchor names may contain URI characters
+    // (`/`, `;`, …); `!` stays out so a bare `!` tag is still found
+    // by the arm below, `&` stays out so the walk stops at the
+    // anchor marker itself instead of eating it (a suffix `&` is an
+    // accepted miss), and flow indicators stay out since they end
+    // the token. The caller still checks that the marker itself
+    // starts a node, so widening cannot mistake `foo/bar` for a tag.
+    // Anchors and tags are short; bound the backward walk so long
+    // runs of word-like bytes cannot make tracking quadratic on
+    // untrusted input (a quote inside `a'a'a'…` would otherwise
+    // re-walk the whole run for every quote). A name longer than
+    // the bound is treated as no marker at all.
+    const MAX_NAME_WALK: usize = 256;
+    let mut k = j;
+    let mut steps = 0;
+    while k > 0 {
+        let Some(&b) = bytes.get(k - 1) else {
+            break;
+        };
+        if !(b.is_ascii_alphanumeric()
+            || matches!(
+                b,
+                b'-' | b'_'
+                    | b'.'
+                    | b'/'
+                    | b';'
+                    | b'?'
+                    | b':'
+                    | b'@'
+                    | b'='
+                    | b'+'
+                    | b'$'
+                    | b'~'
+                    | b'*'
+                    | b'\''
+                    | b'('
+                    | b')'
+                    | b'%'
+            ))
+        {
+            break;
+        }
+        if steps == MAX_NAME_WALK {
+            return None;
+        }
+        k -= 1;
+        steps += 1;
+    }
+    // A bare `!` is the non-specific tag: it still counts as a tag
+    // for the node that follows it (`! {…}`, `! |`). An `!` inside a
+    // word (`foo!`) is not one; the caller checks the marker's own
+    // start, and `!!` alone is not a tag either.
+    if j > 0
+        && k == j
+        && bytes.get(j - 1) == Some(&b'!')
+        && (j < 2 || bytes.get(j - 2) != Some(&b'!'))
+    {
+        return Some(j - 1);
+    }
+    if k == j || k == 0 {
+        return None;
+    }
+    let &mark = bytes.get(k - 1)?;
+    if mark == b'&' {
+        return Some(k - 1);
+    }
+    if mark == b'!' {
+        let mut tag_start = k - 1;
+        if tag_start > 0 && bytes.get(tag_start - 1) == Some(&b'!') {
+            tag_start -= 1;
+        }
+        return Some(tag_start);
+    }
+    None
+}
+
+/// Whether a node at the start of its line (at `pos`, with `j` the line
+/// start) continues a plain scalar from the previous line: the previous
+/// non-blank, non-comment line ends with a plain-scalar character and
+/// this line is indented. A quoted scalar value on its own line
+/// (`key:\n  "quoted"`) does not qualify: its previous line ends with
+/// `:`, not a plain character. A line ending with an anchor or tag
+/// awaiting its node does not qualify either.
+fn continues_plain_scalar(bytes: &[u8], pos: usize, j: usize, in_flow: bool) -> bool {
+    if pos == j {
+        return false; // Column 0 cannot continue a scalar.
+    }
+    let mut cur = j;
+    loop {
+        let Some((start, end)) = prev_line_span(bytes, cur) else {
+            return false;
+        };
+        let mut f = start;
+        while f < end && matches!(bytes.get(f), Some(b' ') | Some(b'\t')) {
+            f += 1;
+        }
+        if f >= end {
+            // Blank line: keep looking further back.
+            cur = start;
+            continue;
+        }
+        if bytes.get(f) == Some(&b'#') {
+            return false; // A comment line ends the scalar.
+        }
+        // Effective end: cut a trailing comment (`#` after a space).
+        let mut e = end;
+        let mut c = f;
+        while c < e {
+            if bytes.get(c) == Some(&b'#') && matches!(bytes.get(c - 1), Some(b' ') | Some(b'\t')) {
+                e = c;
+                break;
+            }
+            c += 1;
+        }
+        while e > f && matches!(bytes.get(e - 1), Some(b' ') | Some(b'\t')) {
+            e -= 1;
+        }
+        if e <= f {
+            return false;
+        }
+        // An anchor or tag awaiting its node is not plain-scalar text:
+        // a flow collection on the next line is the anchored node, not
+        // a continuation. The marker's own start rule applies (a `&`
+        // inside a word like `foo&x` is not an anchor). Depth cannot
+        // have changed between the marker and this line: only spaces,
+        // line breaks, blank lines and comments intervene.
+        if anchor_or_tag_start(bytes, e)
+            .is_some_and(|start| node_starts_here_inner(bytes, start, in_flow, false))
+        {
+            return false;
+        }
+        // A line ending with an explicit-key marker is not a plain
+        // scalar: the key itself follows on the next line. The marker
+        // must stand alone, follow a sequence dash, or follow a flow
+        // indicator; a `?` inside a word (`foo?`) is plain text.
+        if bytes.get(e - 1) == Some(&b'?') {
+            let r = back_over_spaces(bytes, e - 1);
+            if r == start
+                || (in_flow && matches!(bytes.get(r - 1), Some(b'{') | Some(b',')))
+                || (matches!(bytes.get(r - 1), Some(b'-')) && dash_starts_sequence(bytes, r - 1))
+            {
+                return false;
+            }
+        }
+        // A line starting with a quote is a quoted scalar (complete or
+        // still open), not a plain scalar: the next line is a new node,
+        // or string content the tracker already handles.
+        if matches!(bytes.get(f), Some(b'"') | Some(b'\'')) {
+            return false;
+        }
+        let Some(&last) = bytes.get(e - 1) else {
+            return false;
+        };
+        // Which endings keep the next line from continuing the scalar
+        // depends on context. In flow, every structural character
+        // does: `:` splits a pair and `,{}[]` move between entries.
+        // In block, only `:` (a key line) and `|`/`>` (a block header
+        // approximation) do: `{`, `[`, `}`, `]` and `,` are literal
+        // plain-scalar text there (`foo}`, `foo,`). A trailing quote,
+        // `&`, `*`, `!`, `%`, `@`, backtick or `#` inside plain text
+        // is literal in either context: `prefix"`, `foo&` and `foo#`
+        // are plain scalars, so the next line still continues them.
+        // Aliases are left out deliberately: a complete alias value
+        // cannot be followed by a continuation line in valid YAML,
+        // so treating it as one is the safer failure mode.
+        if in_flow {
+            if matches!(last, b':' | b',' | b'{' | b'[' | b'}' | b']' | b'|' | b'>') {
+                return false;
+            }
+        } else if matches!(last, b':' | b'|' | b'>') {
+            return false;
+        }
+        // A trailing `-` at the line start is a sequence marker, not a
+        // word character; elsewhere it is plain text (`foo-`).
+        if last == b'-' && f == e - 1 {
+            return false;
+        }
+        return true;
+    }
+}
+
+/// Span of the line before the line starting at `cur`: (start, end)
+/// where end is just past its last byte before the line break. None
+/// when there is no previous line.
+fn prev_line_span(bytes: &[u8], cur: usize) -> Option<(usize, usize)> {
+    if cur == 0 {
+        return None;
+    }
+    let mut i = cur - 1;
+    if bytes.get(i) == Some(&b'\n') && i > 0 && bytes.get(i - 1) == Some(&b'\r') {
+        i -= 1;
+    }
+    let mut start = i;
+    while start > 0 && !matches!(bytes.get(start - 1), Some(b'\n') | Some(b'\r')) {
+        start -= 1;
+    }
+    Some((start, i))
+}
+
+/// Best-effort flow tracking for subscription YAML: enough to tell
+/// whether a `short-id:` occurrence sits inside a flow collection, a
+/// block scalar, or a quoted scalar or comment (where it is not a key
+/// at all). This is not a full YAML lexer: quotes only open a scalar at
+/// a scalar start, and block scalar content is skipped by indent, so
+/// brackets and quotes inside literal text do not confuse it. Positions
+/// only move forward, so tracking stays linear in the input.
+#[derive(Default)]
+struct FlowTracker {
+    /// Bytes already scanned.
+    pos: usize,
+    /// Start of the current line.
+    line_start: usize,
+    /// Current flow nesting depth (`{`/`[` minus `}`/`]`).
+    depth: usize,
+    in_single: bool,
+    in_double: bool,
+    escaped: bool,
+    in_comment: bool,
+    /// Minimum indent of block scalar content lines, when inside a block
+    /// scalar (`|`/`>` header seen); `None` outside one.
+    block_min_indent: Option<usize>,
+    /// The current line is block scalar content: skip it wholesale.
+    block_content_line: bool,
+}
+
+/// Column of the pending parent for a block scalar header alone on
+/// its line: the key column of the previous content line when it ends
+/// with a pending key, sequence dash, or anchor/tag, and `None`
+/// otherwise. Blank and comment lines in between do not break the
+/// pending value; a complete value line ends it. The key column skips
+/// sequence dashes (`- key:` → the key, not the dash).
+fn pending_parent_indent(bytes: &[u8], header_line_start: usize) -> Option<usize> {
+    let mut cur = header_line_start;
+    loop {
+        let (start, end) = prev_line_span(bytes, cur)?;
+        let mut f = start;
+        while f < end && matches!(bytes.get(f), Some(b' ') | Some(b'\t')) {
+            f += 1;
+        }
+        if f >= end || bytes.get(f) == Some(&b'#') {
+            cur = start;
+            continue;
+        }
+        let mut e = end;
+        let mut c = f;
+        while c < e {
+            if bytes.get(c) == Some(&b'#') && matches!(bytes.get(c - 1), Some(b' ') | Some(b'\t')) {
+                e = c;
+                break;
+            }
+            c += 1;
+        }
+        while e > f && matches!(bytes.get(e - 1), Some(b' ') | Some(b'\t')) {
+            e -= 1;
+        }
+        if e <= f {
+            return None;
+        }
+        if bytes.get(e - 1) == Some(&b'-') && dash_starts_sequence(bytes, e - 1) {
+            return Some(e - 1 - start);
+        }
+        if bytes.get(e - 1) == Some(&b':')
+            || anchor_or_tag_start(bytes, e)
+                .is_some_and(|start| node_starts_here(bytes, start, false))
+        {
+            let mut k = f;
+            while bytes.get(k) == Some(&b'-')
+                && matches!(bytes.get(k + 1), Some(b' ') | Some(b'\t'))
+            {
+                k += 1;
+                while k < e && matches!(bytes.get(k), Some(b' ') | Some(b'\t')) {
+                    k += 1;
+                }
+            }
+            return Some(k - start);
+        }
+        return None;
+    }
+}
+
+impl FlowTracker {
+    /// Advance the scan to `target`.
+    fn advance_to(&mut self, bytes: &[u8], target: usize) {
+        while self.pos < target {
+            let Some(&b) = bytes.get(self.pos) else {
+                break;
+            };
+            // Block scalar content lines are literal text: nothing in
+            // them (brackets, quotes, apparent keys) affects tracking.
+            if self.block_content_line {
+                if matches!(b, b'\n' | b'\r') {
+                    self.block_content_line = false;
+                } else {
+                    self.pos += 1;
+                    continue;
+                }
+            }
+            self.step_byte(bytes, b);
+            if matches!(b, b'\n' | b'\r') {
+                self.step_line_break(bytes);
+            }
+            self.pos += 1;
+        }
+    }
+
+    /// One tracked byte: comment, quoted scalar, flow, and block header
+    /// state transitions. Line breaks are handled by `step_line_break`.
+    fn step_byte(&mut self, bytes: &[u8], b: u8) {
+        let prev = if self.pos == 0 {
+            None
+        } else {
+            bytes.get(self.pos - 1).copied()
+        };
+        if self.in_comment {
+            if matches!(b, b'\n' | b'\r') {
+                self.in_comment = false;
+            }
+        } else if self.in_single {
+            if b == b'\'' {
+                if bytes.get(self.pos + 1) == Some(&b'\'') {
+                    // Doubled quote: an escaped quote inside the scalar.
+                    self.pos += 1;
+                } else {
+                    self.in_single = false;
+                }
+            }
+        } else if self.in_double {
+            if self.escaped {
+                self.escaped = false;
+            } else if b == b'\\' {
+                self.escaped = true;
+            } else if b == b'"' {
+                self.in_double = false;
+            }
+        } else if b == b'#'
+            && matches!(
+                prev,
+                None | Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r')
+            )
+        {
+            self.in_comment = true;
+        } else if (b == b'\'' || b == b'"') && node_starts_here(bytes, self.pos, self.depth > 0) {
+            if b == b'\'' {
+                self.in_single = true;
+            } else {
+                self.in_double = true;
+            }
+        } else if (b == b'{' || b == b'[') && node_starts_here(bytes, self.pos, self.depth > 0) {
+            self.depth += 1;
+        } else if b == b'}' || b == b']' {
+            self.depth = self.depth.saturating_sub(1);
+        } else if (b == b'|' || b == b'>')
+            && self.depth == 0
+            && self.block_min_indent.is_none()
+            && self.block_header_start(bytes, self.pos)
+        {
+            self.enter_block_scalar(bytes);
+        }
+    }
+
+    /// A block scalar header: content lines are those indented past the
+    /// header line's entry (or past the explicit indent indicator, when
+    /// given). On a sequence-item line the entry is the mapping key
+    /// after the `- ` markers, not the `-` itself: a sibling key sits
+    /// at the key column, so measuring from the `-` would swallow it.
+    /// A bare sequence-item scalar (`- |`) has no key, so it measures
+    /// from the line indent instead.
+    fn enter_block_scalar(&mut self, bytes: &[u8]) {
+        let mut entry = self.line_start;
+        while matches!(bytes.get(entry), Some(b' ') | Some(b'\t')) {
+            entry += 1;
+        }
+        let line_indent = entry - self.line_start;
+        let mut dashed = false;
+        while entry < self.pos
+            && bytes.get(entry) == Some(&b'-')
+            && matches!(bytes.get(entry + 1), Some(b' ') | Some(b'\t'))
+        {
+            dashed = true;
+            entry += 1;
+            while matches!(bytes.get(entry), Some(b' ') | Some(b'\t')) {
+                entry += 1;
+            }
+        }
+        let header_indent = if entry == self.pos {
+            line_indent
+        } else {
+            entry - self.line_start
+        };
+        // A header alone on its line does not set the content
+        // indent: content need only exceed the pending parent's
+        // indent (`key:\n  |` allows content at column 1), while a
+        // header on the key's own line uses the key column.
+        let mut base = header_indent;
+        if entry == self.pos && !dashed {
+            if let Some(parent) = pending_parent_indent(bytes, self.line_start) {
+                base = parent;
+            }
+        }
+        let mut content_min = base + 1;
+        if let Some(d) = bytes.get(self.pos + 1).copied().filter(u8::is_ascii_digit) {
+            if (b'1'..=b'9').contains(&d) {
+                content_min = base + usize::from(d - b'0');
+            }
+        }
+        self.block_min_indent = Some(content_min);
+    }
+
+    /// A line break: move the line start, and inside a block scalar
+    /// decide whether the next line is still content or ends it.
+    fn step_line_break(&mut self, bytes: &[u8]) {
+        self.line_start = self.pos + 1;
+        if let Some(content_min) = self.block_min_indent {
+            let mut next = self.line_start;
+            while matches!(bytes.get(next), Some(b' ') | Some(b'\t')) {
+                next += 1;
+            }
+            match bytes.get(next) {
+                // Blank lines belong to the scalar.
+                Some(b'\n') | Some(b'\r') | None => {
+                    self.block_content_line = true;
+                }
+                Some(_) if next - self.line_start >= content_min => {
+                    self.block_content_line = true;
+                }
+                Some(_) => {
+                    self.block_min_indent = None;
+                }
+            }
+        }
+    }
+
+    /// Whether `pos` starts a block scalar header: `|`/`>` as a mapping
+    /// value (after `: `), a sequence value (after a line-start `- `),
+    /// a value after an anchor or tag (`&a |`, `!t |`), or alone on
+    /// its line as the value of a key, sequence entry, or anchor/tag
+    /// left pending on the previous content line (`key:\n  |`,
+    /// `key: &a\n  |`, `-\n  |`). A bare colon does not count
+    /// (`name: HK:>` is one plain scalar); block scalars never appear
+    /// in flow context, so no flow exception applies here.
+    fn block_header_start(&self, bytes: &[u8], pos: usize) -> bool {
+        let j = back_over_spaces(bytes, pos);
+        if j == 0 {
+            return false;
+        }
+        // A header alone on its line: the previous content line must
+        // end with a pending key, sequence dash, or anchor/tag.
+        if matches!(bytes.get(j - 1), Some(b'\n') | Some(b'\r')) {
+            return pending_parent_indent(bytes, j).is_some();
+        }
+        match bytes.get(j - 1).copied() {
+            Some(b':') => j < pos,
+            Some(b'-') => dash_starts_sequence(bytes, j - 1),
+            _ => anchor_or_tag_start(bytes, j)
+                .is_some_and(|start| node_starts_here(bytes, start, false)),
+        }
+    }
+
+    const fn line_start(&self) -> usize {
+        self.line_start
+    }
+
+    const fn in_flow(&self) -> bool {
+        self.depth > 0
+    }
+
+    const fn in_string_or_comment(&self) -> bool {
+        self.in_single || self.in_double || self.in_comment
+    }
+
+    const fn in_block_scalar(&self) -> bool {
+        self.block_min_indent.is_some()
+    }
+}
+
+/// Whether a plain scalar whose line ends at `cur` (a line break)
+/// continues onto a following line. Blank lines do not break it; a
+/// comment-only line ends it; a content line continues it when it is
+/// more indented than the key (block) or is not a flow separator
+/// (flow). A trailing comment on the value's own line already ended
+/// it, so this is only called for a bare line break.
+fn scalar_continues_on_following_line(
+    bytes: &[u8],
+    mut cur: usize,
+    key_col: usize,
+    in_flow: bool,
+) -> bool {
+    loop {
+        if bytes.get(cur) == Some(&b'\r') && bytes.get(cur + 1) == Some(&b'\n') {
+            cur += 2;
+        } else if matches!(bytes.get(cur), Some(b'\n') | Some(b'\r')) {
+            cur += 1;
+        } else {
+            return false;
+        }
+        let mut indent = 0;
+        while matches!(bytes.get(cur), Some(b' ') | Some(b'\t')) {
+            cur += 1;
+            indent += 1;
+        }
+        match bytes.get(cur) {
+            // Blank line: keep looking.
+            Some(b'\n') | Some(b'\r') => {}
+            // A comment-only line ends the scalar.
+            Some(b'#') | None => return false,
+            Some(&b) => {
+                if in_flow {
+                    return !matches!(b, b',' | b'}' | b']');
+                }
+                return indent > key_col;
+            }
+        }
+    }
+}
+
+/// Whether the line starting at `from` is a mapping entry rather than a
+/// plain scalar: it contains a `:` followed by a space, a line break, or
+/// the end of input, before any comment starts. A plain scalar cannot
+/// contain that combination, so such a line holds a (possibly nested)
+/// mapping, not a value to quote.
+fn line_is_mapping_entry(bytes: &[u8], mut i: usize) -> bool {
+    let mut prev = None;
+    while let Some(&b) = bytes.get(i) {
+        if matches!(b, b'\n' | b'\r') {
+            return false;
+        }
+        if b == b'#' && matches!(prev, Some(b' ') | Some(b'\t')) {
+            return false;
+        }
+        if b == b':' {
+            match bytes.get(i + 1) {
+                Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r') | None => return true,
+                _ => {}
+            }
+        }
+        prev = Some(b);
+        i += 1;
+    }
+    false
+}
+
+/// Indentation of a `short-id:` key at `pos`, when the key is eligible:
+/// in block context it must start its line apart from indentation; in
+/// flow context it may also follow an opening bracket, a separator,
+/// or an explicit-key `?`; as a sequence entry it may follow `- `.
+/// The walk back covers
+/// spaces/tabs only, so it stays linear even when many occurrences
+/// share one very long line. For a sequence entry the indent returned
+/// is the key column, since a sequence item mapping is indented at
+/// its key, not at its `-`.
+fn key_indent_at(bytes: &[u8], pos: usize, in_flow: bool) -> Option<usize> {
+    let mut line_pos = pos;
+    while line_pos > 0 && matches!(bytes.get(line_pos - 1), Some(b' ' | b'\t')) {
+        line_pos -= 1;
+    }
+    let prev = if line_pos == 0 {
+        None
+    } else {
+        bytes.get(line_pos - 1).copied()
+    };
+    if line_pos == 0
+        || matches!(prev, Some(b'\n') | Some(b'\r'))
+        || (in_flow && matches!(prev, Some(b',') | Some(b'{') | Some(b'[')))
+    {
+        return Some(pos - line_pos);
+    }
+    // Explicit key in flow context: `{? short-id: ...}`. The `?` must
+    // itself follow a flow indicator or a line break.
+    if in_flow && prev == Some(b'?') {
+        let q = line_pos - 1;
+        let r = back_over_spaces(bytes, q);
+        if r == 0
+            || matches!(
+                bytes.get(r - 1),
+                Some(b'\n') | Some(b'\r') | Some(b'{') | Some(b',')
+            )
+        {
+            return Some(pos - line_pos);
+        }
+    }
+    // Sequence entry: `- short-id:` (possibly nested `- - short-id:`).
+    // The indent is the key column, so continuation lines compare
+    // against it. This walk runs only on the rare sequence path.
+    if prev == Some(b'-') && dash_starts_sequence(bytes, line_pos - 1) {
+        let mut line_start = line_pos - 1;
+        while line_start > 0 && !matches!(bytes.get(line_start - 1), Some(b'\n') | Some(b'\r')) {
+            line_start -= 1;
+        }
+        return Some(pos - line_start);
+    }
+    None
+}
+
+/// Plain scalar after an anchor at `cursor` (whose byte is `&`): the
+/// anchor name is kept, and the scalar after it is quoted, inline or on
+/// a continuation line. An empty name, a tag, an alias, or any other
+/// node syntax after the name is left alone.
+fn anchored_scalar_start(
+    bytes: &[u8],
+    cursor: usize,
+    key_indent: usize,
+    in_flow: bool,
+) -> Option<usize> {
+    let mut cur = cursor + 1;
+    while let Some(&b) = bytes.get(cur) {
+        if matches!(
+            b,
+            b' ' | b'\t' | b'\n' | b'\r' | b',' | b'[' | b']' | b'{' | b'}'
+        ) {
+            break;
+        }
+        cur += 1;
+    }
+    if cur == cursor + 1 {
+        return None;
+    }
+    while matches!(bytes.get(cur), Some(b' ') | Some(b'\t')) {
+        cur += 1;
+    }
+    match bytes.get(cur) {
+        Some(b'\n' | b'\r') | Some(b'#') => {
+            short_id_continuation_value(bytes, cur, key_indent, in_flow)
+        }
+        Some(_) if starts_plain_scalar(bytes, cur) => Some(cur),
+        _ => None,
+    }
+}
+
+/// Append a plain scalar wrapped in double quotes, escaping `"` and `\`
+/// for double-quoted style. Tokens without those bytes take the fast
+/// path so the hot path on large documents stays a plain copy.
+fn push_quoted(out: &mut String, token: &str) {
+    out.push('"');
+    if token.bytes().any(|b| b == b'"' || b == b'\\') {
+        for c in token.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                _ => out.push(c),
+            }
+        }
+    } else {
+        out.push_str(token);
+    }
+    out.push('"');
+}
+
 /// Quote `short-id` values in YAML content before parsing.
 /// This prevents YAML from interpreting hex-like values (e.g., "34010e92") as scientific notation.
+#[must_use]
 pub fn quote_short_id_values(content: &str) -> String {
     // Fast path: if "short-id:" is not present at all, return input immediately.
     if !content.contains("short-id:") {
         return content.to_owned();
     }
 
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        match regex::Regex::new(r#"(?:^|\n)(\s*short-id:\s*)([^\s"'\n][^\s\n]*)"#) {
-            Ok(re) => re,
-            Err(e) => unreachable!("short-id regex is statically valid: {e}"),
-        }
-    });
-
-    // Zero-allocation loop over captures using a single pre-allocated output buffer.
+    // Fast-path string search to avoid Regex engine overhead.
     let mut out = String::with_capacity(content.len() + 128);
     let mut last_match = 0;
-    for caps in re.captures_iter(content) {
-        if let Some(m) = caps.get(0) {
-            out.push_str(&content[last_match..m.start()]);
-            let prefix = &caps[1];
-            let value = &caps[2];
-            let newline = if m.as_str().starts_with('\n') {
-                "\n"
-            } else {
-                ""
-            };
-            out.push_str(newline);
-            out.push_str(prefix);
-            out.push('"');
-            out.push_str(value);
-            out.push('"');
-            last_match = m.end();
+
+    let all_bytes = content.as_bytes();
+    let mut tracker = FlowTracker::default();
+    for (pos, _) in content.match_indices("short-id:") {
+        if pos < last_match {
+            continue;
         }
+        tracker.advance_to(all_bytes, pos);
+        // Inside a quoted scalar, a comment, or block scalar content,
+        // this is not a key at all.
+        if tracker.in_string_or_comment() || tracker.in_block_scalar() {
+            continue;
+        }
+
+        let Some(key_indent) = key_indent_at(all_bytes, pos, tracker.in_flow()) else {
+            continue;
+        };
+
+        // The colon separates key from value only when followed by a
+        // separation space, a line break, or the end of input; in
+        // flow context a separator, a closing bracket, or a
+        // collection indicator also counts. A quote, anchor, tag, or
+        // alias directly after the colon does not: `{short-id:&a x}`
+        // is one scalar key, not a pair.
+        // Otherwise the whole `short-id:...` is one plain scalar,
+        // not a key: `[short-id:34010e92]` is a scalar item, and
+        // `{short-id:34010e92}` is a key with no value.
+        let after_key = pos + "short-id:".len();
+        let next = all_bytes.get(after_key);
+        let separator = matches!(
+            next,
+            None | Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r')
+        ) || (tracker.in_flow()
+            && matches!(
+                next,
+                Some(b',') | Some(b'}') | Some(b']') | Some(b'{') | Some(b'[')
+            ));
+        if !separator {
+            continue;
+        }
+
+        // Skip spaces and tabs after "short-id:".
+        let mut cursor = pos + "short-id:".len();
+        while matches!(all_bytes.get(cursor), Some(b' ' | b'\t')) {
+            cursor += 1;
+        }
+
+        // Find the value start, if this occurrence has a quotable one.
+        // A plain scalar may continue on a following line, but only when
+        // that line is indented more than the key itself (the YAML block
+        // rule): `short-id:\n  34010e92` quotes, while a sibling key at
+        // the same or lower indent is left alone. In flow context line
+        // breaks fold to spaces, so the indent rule does not apply.
+        let candidate = match all_bytes.get(cursor) {
+            Some(b'\n' | b'\r') | Some(b'#') => {
+                short_id_continuation_value(all_bytes, cursor, key_indent, tracker.in_flow())
+            }
+            // An anchor keeps its name; quote an eligible plain scalar
+            // after it, inline or on a continuation line.
+            Some(b'&') => anchored_scalar_start(all_bytes, cursor, key_indent, tracker.in_flow()),
+            // Inline value on the same line, when it is a plain scalar.
+            Some(_) if starts_plain_scalar(all_bytes, cursor) => Some(cursor),
+            // Anything else (quoted, block scalar, alias, tag, flow
+            // collection, or nothing after the key) is left alone.
+            _ => None,
+        };
+        let Some(val_start) = candidate else {
+            continue;
+        };
+
+        let Some(new_last) = quote_candidate(
+            content, all_bytes, &tracker, &mut out, last_match, val_start, pos,
+        ) else {
+            continue;
+        };
+        last_match = new_last;
     }
+
     out.push_str(&content[last_match..]);
     out
+}
+
+/// Quote one candidate value: append the untouched span plus the quoted
+/// token to `out` and return the new `last_match`, or return `None`
+/// when the candidate must be left alone.
+fn quote_candidate(
+    content: &str,
+    all_bytes: &[u8],
+    tracker: &FlowTracker,
+    out: &mut String,
+    last_match: usize,
+    val_start: usize,
+    key_pos: usize,
+) -> Option<usize> {
+    let mut val_end = val_start;
+    while val_end < content.len() {
+        let Some(&b) = content.as_bytes().get(val_end) else {
+            break;
+        };
+        if matches!(b, b' ' | b'\t' | b'\r' | b'\n') {
+            break;
+        }
+        // In flow context a plain scalar also ends at a separator or
+        // a closing bracket, so the separator stays outside the quotes.
+        if tracker.in_flow() && matches!(b, b',' | b'}' | b']') {
+            break;
+        }
+        val_end += 1;
+    }
+
+    // A token containing a flow indicator (`,`, `[`, `]`, `{`, `}`)
+    // is left alone: in block context it parses to the same string
+    // quoted or not, and in flow context quoting it would swallow
+    // the separator (changing the value, or breaking the mapping).
+    if content[val_start..val_end]
+        .bytes()
+        .any(|b| matches!(b, b',' | b'[' | b']' | b'{' | b'}'))
+    {
+        return None;
+    }
+
+    // In block context, a line holding a mapping entry (a token
+    // followed by `: `) is a nested mapping, not a scalar value.
+    if !tracker.in_flow() && line_is_mapping_entry(all_bytes, val_start) {
+        return None;
+    }
+
+    // A plain scalar runs to the end of its line and may continue
+    // onto following lines: if more text follows the first token,
+    // on this line or a more-indented one, the value is multi-word,
+    // and quoting only its first word would corrupt it
+    // (`"34010e92" extra` is invalid YAML). Multi-word values
+    // cannot parse as numbers, so leaving them alone is safe. A
+    // trailing comment ends the scalar, so following lines are
+    // only checked for a bare line break.
+    let mut rest = val_end;
+    while matches!(all_bytes.get(rest), Some(b' ') | Some(b'\t')) {
+        rest += 1;
+    }
+    if let Some(&b) = all_bytes.get(rest) {
+        if matches!(b, b'\n' | b'\r') {
+            let key_col = key_pos - tracker.line_start();
+            if scalar_continues_on_following_line(all_bytes, rest, key_col, tracker.in_flow()) {
+                return None;
+            }
+        } else if matches!(b, b'#') || (tracker.in_flow() && matches!(b, b',' | b'}' | b']')) {
+            // Trailing comment or flow separator ends the scalar.
+        } else {
+            // More text on this line: multi-word value, leave alone.
+            return None;
+        }
+    }
+
+    out.push_str(&content[last_match..val_start]);
+    push_quoted(out, &content[val_start..val_end]);
+    Some(val_end)
 }
 
 /// Strip a YAML `#` comment from an unquoted scalar. In YAML, `#` only
@@ -592,23 +1599,41 @@ pub fn percent_decode(input: &str) -> String {
         return input.to_owned();
     }
 
-    let mut result = Vec::with_capacity(input.len());
     let bytes = input.as_bytes();
+    let mut result = Vec::with_capacity(bytes.len());
     let mut i = 0;
-    while let Some(&byte) = bytes.get(i) {
-        if byte == b'%' {
-            if let (Some(hi), Some(lo)) = (
-                bytes.get(i + 1).and_then(|&byte| decode_hex_digit(byte)),
-                bytes.get(i + 2).and_then(|&byte| decode_hex_digit(byte)),
-            ) {
-                result.push((hi << 4) | lo);
-                i += 3;
-                continue;
+
+    while i < bytes.len() {
+        if let Some(&b) = bytes.get(i) {
+            if b == b'%' {
+                if let (Some(&h), Some(&l)) = (bytes.get(i + 1), bytes.get(i + 2)) {
+                    if let (Some(hi), Some(lo)) = (decode_hex_digit(h), decode_hex_digit(l)) {
+                        result.push((hi << 4) | lo);
+                        i += 3;
+                        continue;
+                    }
+                }
+                result.push(b'%');
+                i += 1;
+            } else {
+                let rest = match bytes.get(i..) {
+                    Some(r) => r,
+                    None => break,
+                };
+                let next_pct = rest
+                    .iter()
+                    .position(|&b| b == b'%')
+                    .map_or(bytes.len(), |pos| i + pos);
+                if let Some(chunk) = bytes.get(i..next_pct) {
+                    result.extend_from_slice(chunk);
+                }
+                i = next_pct;
             }
+        } else {
+            break;
         }
-        result.push(byte);
-        i += 1;
     }
+
     String::from_utf8(result).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
@@ -1837,6 +2862,638 @@ mod tests {
         let yaml = r#"short-id: "abc123""#;
         let result = quote_short_id_values(yaml);
         assert_eq!(result, r#"short-id: "abc123""#);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_multiline_continuation() {
+        // A plain scalar on the next, more-indented line is still the value.
+        let yaml = "short-id:\n  34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id:\n  \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_comment_lines_skipped() {
+        // A comment between the key and its value is not the value: the
+        // comment stays untouched and the real value still gets quoted.
+        let yaml = "short-id:\n  # note\n  34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id:\n  # note\n  \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_inline_comment_not_quoted() {
+        // A comment after the key means the value is empty, not "#".
+        let yaml = "short-id: # note";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_scalar_not_quoted() {
+        // A block scalar is already a string: quoting its header would
+        // corrupt the document, so both forms stay untouched.
+        let yaml = "short-id:\n  |-\n    34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "short-id: |-\n  34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_cr_only_line_endings() {
+        // A carriage return alone is a YAML line break too.
+        let yaml = "a: 1\rshort-id: 34010e92\r";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "a: 1\rshort-id: \"34010e92\"\r");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_alias_not_quoted() {
+        // An alias is a reference, not text: quoting it would stop it
+        // from resolving to its anchor.
+        let yaml = "sid: &sid 34010e92\nshort-id: # note\n  *sid";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_tag_not_quoted() {
+        // A tag is node syntax, not the value itself: quoting it would
+        // split the tagged scalar into two tokens.
+        let yaml = "short-id: !!str 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "short-id:\n  !!str 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_anchor_and_flow_not_quoted() {
+        // An anchor keeps its name and the plain scalar after it gets
+        // quoted; a flow collection as the value is left alone.
+        let yaml = "short-id: &a 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id: &a \"34010e92\"");
+        let yaml = "short-id: {id: 34010e92}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_flow_context() {
+        // In flow context the scalar ends at the separator, so the
+        // separator stays outside the quotes, on one line or many.
+        let yaml = "{\n  short-id: 34010e92,\n  y: 1\n}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{\n  short-id: \"34010e92\",\n  y: 1\n}");
+        let yaml = "{\n  short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{\n  short-id: \"34010e92\"}");
+        let yaml = "reality-opts: {short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "reality-opts: {short-id: \"34010e92\"}");
+        // In block context a token containing a separator parses to the
+        // same string quoted or not, so it is left alone.
+        let yaml = "short-id: abc,def";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_nested_mapping_not_quoted() {
+        // A more-indented line holding a mapping entry is a nested
+        // mapping, not a scalar continuation.
+        let yaml = "short-id:\n  next: 1";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_interior_quotes_escaped() {
+        // A plain scalar may contain quotes and backslashes inside; they
+        // must be escaped when the token is wrapped in double quotes.
+        let yaml = "short-id: a\"b\\c";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id: \"a\\\"b\\\\c\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_inside_string_or_comment_not_quoted() {
+        // An occurrence inside a quoted scalar or a comment is not a key.
+        let yaml = "key: \"foo\n  short-id: 34010e92\"";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "# short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_interior_quote_not_a_scalar_start() {
+        // A quote inside a plain scalar does not open a quoted scalar,
+        // so a later short-id key is still found and quoted.
+        let yaml = "note: use \" anywhere\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "note: use \" anywhere\nshort-id: \"34010e92\"");
+        let yaml = "note: don't stop\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "note: don't stop\nshort-id: \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_scalar_content_untouched() {
+        // Brackets, braces, and apparent keys inside a block scalar are
+        // literal text: they must not affect flow tracking or quoting,
+        // neither inside the scalar nor for keys after it ends.
+        let yaml = "desc: |\n  text [ bracket\n  more\nshort-id: abc,def";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "desc: |\n  something { here\n  x, short-id: 34010e92\nnext: 1";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_sequence_entry() {
+        // A mapping entry inside a sequence item is a real key, inline
+        // or with a continuation value indented past the key column.
+        // A value line at the key column itself is not a continuation.
+        let yaml = "- short-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "- short-id: \"34010e92\"");
+        let yaml = "- short-id:\n    34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "- short-id:\n    \"34010e92\"");
+        let yaml = "- short-id:\n  34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_compact_flow_quoted_value() {
+        // A quote directly after `:` in flow context opens a quoted
+        // scalar, so a `}` inside it does not close the flow early.
+        let yaml = "{x: \"a}b\", short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{x: \"a}b\", short-id: \"34010e92\"}");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_colon_without_separator() {
+        // A colon with no separating space is plain scalar text, not
+        // a key, in block and in flow alike: `[short-id:34010e92]`
+        // is one scalar item, and `{short-id:34010e92}` is a key
+        // with no value.
+        let yaml = "- short-id:34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "short-id:34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "{short-id:34010e92}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "[short-id:34010e92]";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        // With a space it does split a pair, even as a single-pair
+        // sequence entry.
+        let yaml = "{short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{short-id: \"34010e92\"}");
+        let yaml = "[short-id: 34010e92]";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "[short-id: \"34010e92\"]");
+        // A quote after a bare colon is scalar text, so it cannot
+        // hide a later pair behind an unbalanced string.
+        let yaml = "{a:\"b, short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{a:\"b, short-id: \"34010e92\"}");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_bare_tag_and_explicit_keys() {
+        // A bare `!` is the non-specific tag, so the node after it
+        // is still tracked, in flow and before a block scalar.
+        let yaml = "proxies: ! {short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "proxies: ! {short-id: \"34010e92\"}");
+        let yaml = "description: ! |-\n  short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        // A quoted key after an explicit-key `?` is one quoted
+        // scalar: the short-id text inside it is not a key.
+        let yaml = "{? \"foo, short-id: 34010e92\":bar}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "? \"foo, short-id: 34010e92\"\n: bar";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_flow_endings_continue() {
+        // In block context `}`, `]` and `,` end plain scalar text,
+        // so the next indented line still continues the scalar.
+        let yaml = "note: foo}\n  [continuation\nshort-id: abc,def";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "note: foo]\n  [continuation\nshort-id: abc,def";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "note: foo,\n  [continuation\nshort-id: abc,def";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_quote_after_bare_colon_or_comma() {
+        // A quote after a bare colon or a comma in block context is
+        // plain scalar text, not a quoted scalar start, so a later
+        // short-id key is still found and quoted.
+        let yaml = "password: ab:\"cd\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "password: ab:\"cd\nshort-id: \"34010e92\"");
+        let yaml = "name: a,'b\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "name: a,'b\nshort-id: \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_sequence_block_scalar_sibling() {
+        // A block scalar on a sequence-item line ends at a sibling key
+        // at the key column, not at the `-` column.
+        let yaml = "- desc: |\n    text\n  short-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "- desc: |\n    text\n  short-id: \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_bracket_in_plain_scalar() {
+        // An unmatched bracket inside a block plain scalar does not
+        // open flow context for later keys.
+        let yaml = "name: HK [Premium\nshort-id: abc,def";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "name: HK [Premium\nshort-id:\n  next: 1";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_dash_without_space_not_sequence() {
+        // A dash glued to what follows is plain scalar text, not a
+        // sequence entry, so it must not make a key or open a quote.
+        let yaml = "-short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "-'abc\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "-'abc\nshort-id: \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_bare_colon_not_block_header() {
+        // A `>` after a bare colon is plain scalar text, not a block
+        // scalar header, so a sibling key is still quoted.
+        let yaml = "- name: HK:>\n  short-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "- name: HK:>\n  short-id: \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_flow_continuation_same_indent() {
+        // In flow context a line break folds to a space, so a value on
+        // the next line counts even at the same indent as its key.
+        let yaml = "{\nshort-id:\n34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{\nshort-id:\n\"34010e92\"}");
+        // In block context the same shape is not a continuation.
+        let yaml = "short-id:\n34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_anchored_or_tagged_flow() {
+        // A flow collection after an anchor or tag is still a flow
+        // collection, so values next to its closing brace are quoted.
+        let yaml = "rules: &r {\n  short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "rules: &r {\n  short-id: \"34010e92\"}");
+        let yaml = "rules: !!map {\n  short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "rules: !!map {\n  short-id: \"34010e92\"}");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_multiline_scalar_not_quoted() {
+        // A plain scalar that continues on a more-indented following
+        // line (or any following line in flow context) is one
+        // multi-word value, so its first token is left alone.
+        let yaml = "short-id: 34010e92\n  extra";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "short-id: 34010e92\n\n  extra";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "{\nshort-id: 34010e92\n  extra}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        // A following line at the key column is a sibling, not a
+        // continuation, and a comma line ends a flow scalar.
+        let yaml = "- short-id: 34010e92\n  other: 1";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "- short-id: \"34010e92\"\n  other: 1");
+        let yaml = "{\nshort-id: 34010e92\n, other: 1}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{\nshort-id: \"34010e92\"\n, other: 1}");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_anchor_tag_chain_and_verbatim() {
+        // An anchor plus a tag still start a node, as does a verbatim
+        // tag, so a flow collection after them is tracked.
+        let yaml = "key: &a !t {\n  short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "key: &a !t {\n  short-id: \"34010e92\"}");
+        let yaml = "rules: !<tag:yaml.org,2002:map> {\n  short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(
+            result,
+            "rules: !<tag:yaml.org,2002:map> {\n  short-id: \"34010e92\"}"
+        );
+    }
+
+    #[test]
+    fn test_quote_short_id_values_continuation_line_quote_not_scalar() {
+        // A quote or bracket starting a continuation line of a plain
+        // scalar is literal text, not a new node, so a later short-id
+        // key is still found and quoted.
+        let yaml = "note: prefix\n  \"continuation\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(
+            result,
+            "note: prefix\n  \"continuation\nshort-id: \"34010e92\""
+        );
+        let yaml = "note: prefix\n  [cont\nshort-id: abc,def";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        // A quoted scalar on its own line after a bare key is a real
+        // node start, not a continuation.
+        let yaml = "key:\n  \"quoted\"\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "key:\n  \"quoted\"\nshort-id: \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_scalar_after_anchor() {
+        // A block scalar header after an anchor is still a header, so
+        // key-like text inside its literal content is left alone.
+        let yaml = "key: &a |\n  short-id: 34010e92\nnext: 1";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_flow_explicit_key() {
+        // An explicit key in flow context, with or without a space
+        // after the `?`, is still a key.
+        let yaml = "{? short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{? short-id: \"34010e92\"}");
+        let yaml = "{?short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{?short-id: \"34010e92\"}");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_flow_after_anchor_not_continuation() {
+        // An anchor awaiting its node is not plain-scalar text, so a
+        // flow collection on the next line is the anchored node and
+        // its short-id value is quoted.
+        let yaml = "opts: &x\n  {short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "opts: &x\n  {short-id: \"34010e92\"}");
+        // A `&` inside a word is not an anchor, so the next line
+        // really is a plain-scalar continuation and stays untouched.
+        let yaml = "note: foo&x\n  {short-id: 34010e92}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_long_gt_run_stays_linear() {
+        // A long unbroken run of `>` must not make the verbatim-tag
+        // backscan quadratic, and must not hide a later key.
+        let mut yaml = ">".repeat(100_000);
+        yaml.push_str("\nshort-id: 34010e92");
+        let result = quote_short_id_values(&yaml);
+        assert!(result.ends_with("short-id: \"34010e92\""));
+    }
+
+    #[test]
+    fn test_quote_short_id_values_anchor_only_lines_not_recursive() {
+        // Many consecutive anchor-only lines must not recurse once
+        // per line when the flow collection after them is evaluated.
+        let mut yaml = "  &a\n".repeat(50_000);
+        yaml.push_str("  {short-id: 34010e92}");
+        let result = quote_short_id_values(&yaml);
+        assert!(result.ends_with("{short-id: \"34010e92\"}"));
+    }
+
+    #[test]
+    fn test_quote_short_id_values_trailing_quote_continuation() {
+        // A quote at the end of plain-scalar text is literal, so the
+        // next indented line still continues the scalar and its `[`
+        // must not open a flow collection.
+        let yaml = "note:\n  prefix\"\n  [continuation\nshort-id: abc,def";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "note: foo&\n  [continuation\nshort-id: abc,def";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_long_verbatim_tag() {
+        // A verbatim tag longer than any backscan cap is still a tag,
+        // so the flow collection after it is tracked.
+        let mut yaml = String::from("rules: !<");
+        yaml.push_str(&"a".repeat(300));
+        yaml.push_str("> {\n  short-id: 34010e92}");
+        let result = quote_short_id_values(&yaml);
+        assert!(result.ends_with("short-id: \"34010e92\"}"));
+    }
+
+    #[test]
+    fn test_quote_short_id_values_tag_suffix_chars() {
+        // Tag suffixes may contain URI characters such as `/` and `:`.
+        let yaml = "x: !local/type {short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "x: !local/type {short-id: \"34010e92\"}");
+        let yaml = "x: !foo:bar {short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "x: !foo:bar {short-id: \"34010e92\"}");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_explicit_key_marker_lines() {
+        // A line holding only an explicit-key marker is not a plain
+        // scalar: the quoted key on the next line is a real node.
+        let yaml = "?\n  \"foo, short-id: 34010e92\"\n: bar";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "- ?\n    \"foo, short-id: 34010e92\"\n  : bar";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_percent_encoded_tag() {
+        // A percent-encoded tag suffix still counts as a tag, so a
+        // block scalar header after it is recognised and its literal
+        // content stays untouched.
+        let yaml = "desc: !foo%2Fbar |-\n  {short-id: 34010e92}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_long_quote_run_stays_linear() {
+        // Quotes inside one long plain scalar must not re-walk the
+        // whole run for every quote, and must not hide a later key.
+        let mut yaml = String::from("note: ");
+        yaml.push_str(&"a'".repeat(20_000));
+        yaml.push_str("\nshort-id: 34010e92");
+        let result = quote_short_id_values(&yaml);
+        assert!(result.ends_with("short-id: \"34010e92\""));
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_scalar_header_next_line() {
+        // A block scalar header alone on its line is still a header
+        // when the previous content line leaves a value pending.
+        let yaml = "short-id:\n  |\n    short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "key: &a\n  |\n    short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "key:\n  # note\n  |-\n    short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    /// Parse-equivalence oracle: quoting must not change the parsed
+    /// document, except that `short-id` scalars become strings. The
+    /// normalizer replaces every scalar `short-id` value with a
+    /// marker, since the parsed form of a value like `34010e92` (a
+    /// float) does not round-trip to its text.
+    fn normalize_short_ids(value: serde_yaml::Value) -> serde_yaml::Value {
+        use serde_yaml::Value;
+        match value {
+            Value::Mapping(mapping) => {
+                let mut out = serde_yaml::Mapping::new();
+                for (k, v) in &mapping {
+                    if k.as_str() == Some("short-id")
+                        && !matches!(v, Value::Mapping(_) | Value::Sequence(_))
+                    {
+                        out.insert(k.clone(), Value::String("short-id".to_owned()));
+                    } else {
+                        out.insert(
+                            normalize_short_ids(k.clone()),
+                            normalize_short_ids(v.clone()),
+                        );
+                    }
+                }
+                Value::Mapping(out)
+            }
+            Value::Sequence(seq) => {
+                Value::Sequence(seq.iter().map(|v| normalize_short_ids(v.clone())).collect())
+            }
+            Value::Tagged(tagged) => {
+                let mut tagged = tagged;
+                tagged.value = normalize_short_ids(tagged.value);
+                Value::Tagged(tagged)
+            }
+            other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)) => other,
+        }
+    }
+
+    fn assert_parse_equivalent(input: &str) {
+        let out = quote_short_id_values(input);
+        let Ok(before) = serde_yaml::from_str::<serde_yaml::Value>(input) else {
+            return; // Invalid input: only require no panic.
+        };
+        let after: serde_yaml::Value = serde_yaml::from_str(&out).unwrap_or_else(|e| {
+            panic!("quoting broke valid YAML: {e}\ninput: {input:?}\noutput: {out:?}")
+        });
+        assert_eq!(
+            normalize_short_ids(before),
+            normalize_short_ids(after),
+            "input: {input:?}\noutput: {out:?}"
+        );
+    }
+
+    #[test]
+    fn test_quote_short_id_values_parse_equivalent() {
+        for doc in [
+            "short-id: 34010e92",
+            "short-id: 34010e92\nother: 1",
+            "outer:\n  short-id: 34010e92\n  other: abc,def",
+            "{short-id: 34010e92, other: 1}",
+            "{short-id:&a x}",
+            "{\n  short-id: 34010e92,\n  other: 1\n}",
+            "[short-id: 34010e92]",
+            "[short-id: 34010e92, other]",
+            "short-id:\n  34010e92",
+            "short-id: # note\n  34010e92",
+            "short-id: |\n  34010e92",
+            "short-id:\n  |\n    short-id: 34010e92",
+            "key:\n  \"quoted\"\nshort-id: 34010e92",
+            "desc: !foo%2Fbar |-\n  {short-id: 34010e92}",
+            "proxies: ! {short-id: 34010e92}",
+            "key: &a |\n  short-id: 34010e92",
+            "rules: &r {\n  short-id: 34010e92}",
+            "rules: !<tag:yaml.org,2002:map> {\n  short-id: 34010e92}",
+            "x: !local/type {short-id: 34010e92}",
+            "{? short-id: 34010e92}",
+            "{? \"foo, short-id: 34010e92\": bar}",
+            "note: prefix\n  \"continuation\"\nshort-id: 34010e92",
+            "note: foo}\n  [continuation\nshort-id: abc,def",
+            "- short-id: 34010e92",
+            "- short-id: 34010e92\n  other: 1",
+            "short-id: 34010e92 # note\nother: 1",
+            "short-id: 34010e92\nnext: 1",
+            "a: 1\rshort-id: 34010e92\r",
+            "a: 1\r\nshort-id: 34010e92\r\n",
+            "short-id: 34010e92\n  extra",
+            "sid: &sid 34010e92\nshort-id: # note\n  *sid",
+            "short-id:\n34010e92",
+        ] {
+            assert_parse_equivalent(doc);
+        }
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_scalar_content_parent_indent() {
+        // Block content need only exceed the pending parent's indent,
+        // not the header line's: a column-1 line under `key:\n  |` is
+        // still block content, and a column-3 line under `- key:\n  |`
+        // (key column 2) is too.
+        let yaml = "key:\n  |\n short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "- key:\n  |\n   short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "-\n  |\n short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_multi_word_not_quoted() {
+        // Quoting only the first word of a multi-word scalar would
+        // corrupt it; multi-word values cannot parse as numbers, so
+        // they are left alone, inline, on a continuation line, and
+        // after an anchor alike.
+        let yaml = "short-id: 34010e92 extra";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "short-id:\n  34010e92 extra";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "short-id: &a 34010e92 extra";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_value_after_inline_comment() {
+        // A comment ends the key line, but the value may still follow on
+        // a more-indented line, and it still needs quoting.
+        let yaml = "short-id: # note\n  34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id: # note\n  \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_sibling_key_not_quoted() {
+        // A key at the same indent on the next line is a sibling, not the
+        // value: quoting it would corrupt the mapping.
+        let yaml = "outer:\n  short-id:\n  next: 1";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_repeated_occurrences_on_one_line() {
+        // Occurrences that are not keys (e.g. inside a long comment) must
+        // not be quoted, no matter how many share the line.
+        let yaml = "# short-id: a short-id: b short-id: c\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(
+            result,
+            "# short-id: a short-id: b short-id: c\nshort-id: \"34010e92\""
+        );
     }
 
     #[test]
