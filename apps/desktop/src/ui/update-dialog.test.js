@@ -138,6 +138,50 @@ describe('update dialog', () => {
         expect(calls('get_latest_version')).toBe(1);
     });
 
+    it('offers the Lite package when both have updates and passes the choice to the backend', async () => {
+        responses.get_latest_version = { version: 'v1.20.0', download_url: 'u' };
+        responses.get_latest_client_version = { version: '1.3.0', release_notes: '- new' };
+        openUpdateDialog();
+        await flush();
+        expect(phase()).toBe('available');
+        expect(document.getElementById('upd-lite')).not.toBeNull();
+        click('upd-lite');
+        await flush(); await flush(); await flush();
+        expect(phase()).toBe('done');
+        const order = invoke.mock.calls.map((c) => c[0]).filter((c) => c === 'update_core' || c === 'update_client');
+        expect(order).toEqual(['update_core', 'update_client']);
+        const clientCalls = invoke.mock.calls.filter((c) => c[0] === 'update_client');
+        expect(clientCalls.length).toBe(1);
+        expect(clientCalls[0]?.[1]).toEqual({ variant: 'lite' });
+    });
+
+    it('passes the Full variant for the recommended dual update', async () => {
+        responses.get_latest_version = { version: 'v1.20.0', download_url: 'u' };
+        responses.get_latest_client_version = { version: '1.3.0' };
+        openUpdateDialog();
+        await flush();
+        click('upd-install');
+        await flush(); await flush(); await flush();
+        expect(phase()).toBe('done');
+        const clientCalls = invoke.mock.calls.filter((c) => c[0] === 'update_client');
+        expect(clientCalls.length).toBe(1);
+        expect(clientCalls[0]?.[1]).toEqual({ variant: 'full' });
+    });
+
+    it('offers no Lite choice for an app-only update and passes no variant', async () => {
+        responses.get_latest_client_version = { version: '1.3.0' };
+        openUpdateDialog();
+        await flush();
+        expect(phase()).toBe('available');
+        expect(document.getElementById('upd-lite')).toBeNull();
+        click('upd-install');
+        await flush(); await flush();
+        expect(phase()).toBe('done');
+        const clientCalls = invoke.mock.calls.filter((c) => c[0] === 'update_client');
+        expect(clientCalls.length).toBe(1);
+        expect(clientCalls[0]?.[1]).toBeUndefined();
+    });
+
     it('keeps the core refresh warning when only the app installer is retried', async () => {
         responses.get_latest_version = { version: 'v1.20.0', download_url: 'u' };
         responses.get_latest_client_version = { version: '1.3.0' };
