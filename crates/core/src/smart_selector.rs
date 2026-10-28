@@ -86,9 +86,8 @@ pub fn compute_smart_score(
     success_records: Vec<bool>,
 ) -> f64 {
     let mut history = NodeHistory::new("node");
-    // Optimization: Consuming owned vectors via `into_iter` avoids reference dereferencing.
-    for (lat, success) in latency_records.into_iter().zip(success_records) {
-        history.add_record(lat, success);
+    for (lat, success) in latency_records.iter().zip(success_records.iter()) {
+        history.add_record(*lat, *success);
     }
     let scorer = SmartScorer::with_config(
         ScoreWeights {
@@ -135,8 +134,8 @@ pub fn compute_smart_rank(
     for name in node_names {
         let mut history = NodeHistory::new(name);
         if let (Some(latency), Some(success)) = (latency_iter.next(), success_iter.next()) {
-            for (lat, suc) in latency.into_iter().zip(success) {
-                history.add_record(lat, suc);
+            for (lat, suc) in latency.iter().zip(success.iter()) {
+                history.add_record(*lat, *suc);
             }
         }
         histories.push(history);
