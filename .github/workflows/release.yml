@@ -306,11 +306,20 @@ jobs:
             BUNDLE_DIR="target/release/bundle"
             EXE_PATH="target/release/Zephyr.exe"
           fi
+          case "${{ matrix.arch }}" in
+            x64) ASSET_ARCH="windows-x86_64" ;;
+            arm64) ASSET_ARCH="windows-aarch64" ;;
+            *) echo "ERROR: Unexpected Windows arch: ${{ matrix.arch }}"; exit 1 ;;
+          esac
           for f in $BUNDLE_DIR/nsis/*-setup.exe; do
-            cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-full}")"
+            base="$(basename "$f")"
+            base="${base/_${{ matrix.arch }}-setup/_${ASSET_ARCH}-setup}"
+            cp "$f" "dist-artifacts/${base/-setup/-setup-full}"
           done
           for f in $BUNDLE_DIR/msi/*.msi; do
-            cp "$f" "dist-artifacts/$(basename "${f/.msi/-full.msi}")"
+            base="$(basename "$f")"
+            base="${base/_${{ matrix.arch }}_/_${ASSET_ARCH}_}"
+            cp "$f" "dist-artifacts/${base/.msi/-full.msi}"
           done
           # Copy raw exe for portable (same binary, avoids a 3rd full compile)
           cp "$EXE_PATH" "dist-artifacts/Zephyr_${{ steps.get_version.outputs.VERSION }}_${{ matrix.arch }}-portable.exe"
@@ -321,10 +330,16 @@ jobs:
         run: |
           shopt -s nullglob
           for f in target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
-            cp "$f" "dist-artifacts/$(basename "${f/.dmg/-full.dmg}")"
+            base="$(basename "$f")"
+            base="${base/_x64./_macos-x86_64.}"
+            base="${base/_aarch64./_macos-aarch64.}"
+            cp "$f" "dist-artifacts/${base/.dmg/-full.dmg}"
           done
           for f in target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
-            cp "$f" "dist-artifacts/$(basename "${f/.tar.gz/-full.tar.gz}")"
+            base="$(basename "$f")"
+            base="${base/_x64./_macos-x86_64.}"
+            base="${base/_aarch64./_macos-aarch64.}"
+            cp "$f" "dist-artifacts/${base/.tar.gz/-full.tar.gz}"
           done
         shell: bash
 
@@ -333,7 +348,10 @@ jobs:
         run: |
           shopt -s nullglob
           for f in target/release/bundle/deb/*.deb; do
-            cp "$f" "dist-artifacts/$(basename "${f/.deb/-full.deb}")"
+            base="$(basename "$f")"
+            base="${base/_amd64./_linux-x86_64.}"
+            base="${base/_arm64./_linux-aarch64.}"
+            cp "$f" "dist-artifacts/${base/.deb/-full.deb}"
           done
           for f in target/release/bundle/appimage/*.AppImage; do
             cp "$f" "dist-artifacts/$(basename "${f/.AppImage/-full.AppImage}")"
@@ -370,11 +388,20 @@ jobs:
           else
             BUNDLE_DIR="target/release/bundle"
           fi
+          case "${{ matrix.arch }}" in
+            x64) ASSET_ARCH="windows-x86_64" ;;
+            arm64) ASSET_ARCH="windows-aarch64" ;;
+            *) echo "ERROR: Unexpected Windows arch: ${{ matrix.arch }}"; exit 1 ;;
+          esac
           for f in $BUNDLE_DIR/nsis/*-setup.exe; do
-            cp "$f" "dist-artifacts/$(basename "${f/-setup/-setup-lite}")"
+            base="$(basename "$f")"
+            base="${base/_${{ matrix.arch }}-setup/_${ASSET_ARCH}-setup}"
+            cp "$f" "dist-artifacts/${base/-setup/-setup-lite}"
           done
           for f in $BUNDLE_DIR/msi/*.msi; do
-            cp "$f" "dist-artifacts/$(basename "${f/.msi/-lite.msi}")"
+            base="$(basename "$f")"
+            base="${base/_${{ matrix.arch }}_/_${ASSET_ARCH}_}"
+            cp "$f" "dist-artifacts/${base/.msi/-lite.msi}"
           done
         shell: bash
 
@@ -383,10 +410,16 @@ jobs:
         run: |
           shopt -s nullglob
           for f in target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
-            cp "$f" "dist-artifacts/$(basename "${f/.dmg/-lite.dmg}")"
+            base="$(basename "$f")"
+            base="${base/_x64./_macos-x86_64.}"
+            base="${base/_aarch64./_macos-aarch64.}"
+            cp "$f" "dist-artifacts/${base/.dmg/-lite.dmg}"
           done
           for f in target/${{ matrix.target }}/release/bundle/macos/*.tar.gz; do
-            cp "$f" "dist-artifacts/$(basename "${f/.tar.gz/-lite.tar.gz}")"
+            base="$(basename "$f")"
+            base="${base/_x64./_macos-x86_64.}"
+            base="${base/_aarch64./_macos-aarch64.}"
+            cp "$f" "dist-artifacts/${base/.tar.gz/-lite.tar.gz}"
           done
         shell: bash
 
@@ -395,7 +428,10 @@ jobs:
         run: |
           shopt -s nullglob
           for f in target/release/bundle/deb/*.deb; do
-            cp "$f" "dist-artifacts/$(basename "${f/.deb/-lite.deb}")"
+            base="$(basename "$f")"
+            base="${base/_amd64./_linux-x86_64.}"
+            base="${base/_arm64./_linux-aarch64.}"
+            cp "$f" "dist-artifacts/${base/.deb/-lite.deb}"
           done
           for f in target/release/bundle/appimage/*.AppImage; do
             cp "$f" "dist-artifacts/$(basename "${f/.AppImage/-lite.AppImage}")"
@@ -448,11 +484,16 @@ jobs:
           # All four Windows artifacts are expected from the build steps above.
           # Fail immediately if any is missing or if multiple matches are found.
           shopt -s nullglob
+          case "${{ matrix.arch }}" in
+            x64) ASSET_ARCH="windows-x86_64" ;;
+            arm64) ASSET_ARCH="windows-aarch64" ;;
+            *) echo "ERROR: Unexpected Windows arch: ${{ matrix.arch }}"; exit 1 ;;
+          esac
           EXPECTED=(
-            "dist-artifacts/Zephyr_*_${{ matrix.arch }}-setup-full.exe"
-            "dist-artifacts/Zephyr_*_${{ matrix.arch }}-setup-lite.exe"
-            "dist-artifacts/Zephyr_*_${{ matrix.arch }}*-full.msi"
-            "dist-artifacts/Zephyr_*_${{ matrix.arch }}*-lite.msi"
+            "dist-artifacts/Zephyr_*_${ASSET_ARCH}-setup-full.exe"
+            "dist-artifacts/Zephyr_*_${ASSET_ARCH}-setup-lite.exe"
+            "dist-artifacts/Zephyr_*_${ASSET_ARCH}*-full.msi"
+            "dist-artifacts/Zephyr_*_${ASSET_ARCH}*-lite.msi"
             "dist-artifacts/Zephyr_*_${{ matrix.arch }}-portable.exe"
           )
           for pattern in "${EXPECTED[@]}"; do

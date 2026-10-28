@@ -14,6 +14,11 @@ jobs:
       - name: Checkout Zephyr
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Compute package version
+        id: package_version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: Submit Winget Package Update
         uses: vedantmgoyal2009/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
         if: env.WINGET_TOKEN != ''
@@ -21,5 +26,5 @@ jobs:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN || secrets.GH_PAT || secrets.RELEASE_TOKEN }}
         with:
           identifier: Juwan.Zephyr
-          version: ${{ github.ref_name }}
+          version: ${{ steps.package_version.outputs.version }}
           token: ${{ secrets.WINGET_TOKEN || secrets.GH_PAT || secrets.RELEASE_TOKEN }}
