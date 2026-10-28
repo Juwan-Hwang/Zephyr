@@ -52,9 +52,7 @@ pub fn quote_short_id_values(content: &str) -> String {
         // Skip spaces and tabs after "short-id:"
         let mut value_offset = 0;
         let bytes = rest.as_bytes();
-        while value_offset < bytes.len()
-            && matches!(bytes.get(value_offset), Some(b' ' | b'\t'))
-        {
+        while value_offset < bytes.len() && matches!(bytes.get(value_offset), Some(b' ' | b'\t')) {
             value_offset += 1;
         }
 
