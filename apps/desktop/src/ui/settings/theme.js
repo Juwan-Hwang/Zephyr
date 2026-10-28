@@ -92,9 +92,13 @@ export function initThemeSettings({
             const on = preset === value;
             circle.classList.toggle('is-selected', on);
             circle.setAttribute('aria-pressed', on ? 'true' : 'false');
-            // Screen readers get the colour's name in the interface language.
+            // Screen readers and hover tooltips get the colour's name in the interface language.
             const nameKey = PRESET_NAME_KEYS[preset];
-            if (nameKey) circle.setAttribute('aria-label', t(nameKey));
+            if (nameKey) {
+                const localizedName = t(nameKey);
+                circle.setAttribute('aria-label', localizedName);
+                circle.setAttribute('title', localizedName);
+            }
         });
         const desc = document.getElementById('theme-color-desc');
         if (desc) {
