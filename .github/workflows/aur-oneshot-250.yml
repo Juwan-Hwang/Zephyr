@@ -1,0 +1,79 @@
+name: AUR oneshot 2.5.0
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  push-aur-250:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Push prepared 2.5.0 files to AUR
+        run: |
+          git clone ssh://aur@aur.archlinux.org/zephyr-clash-bin.git aur-repo
+          cd aur-repo
+          cat > PKGBUILD << 'EOF_PKG'
+          # Maintainer: Juwan Hwang <juwan.hwang at proton dot me>
+          pkgname=zephyr-clash-bin
+          _pkgname=zephyr
+          pkgver=2.5.0
+          pkgrel=2
+          pkgdesc="A modern Mihomo GUI client"
+          arch=('x86_64')
+          url="https://github.com/Juwan-Hwang/Zephyr"
+          license=('MIT')
+          depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'glib2' 'gtk3' 'hicolor-icon-theme' 'libsoup3' 'pango' 'webkit2gtk-4.1' 'libayatana-appindicator')
+          provides=('zephyr-clash')
+          conflicts=('zephyr-clash')
+          options=('!strip' '!debug')
+          install=${pkgname}.install
+          source_x86_64=("https://github.com/Juwan-Hwang/Zephyr/releases/download/v${pkgver}/Zephyr_${pkgver}_linux-x86_64-full.deb")
+          sha256sums_x86_64=('5f103f38a9aac9265a8d7cab5290e2fbc596f7a873663abad3c76619ea47d88c')
+
+          package() {
+              bsdtar -xf data.tar.gz -C "$pkgdir/"
+          }
+          EOF_PKG
+          cat > .SRCINFO << 'EOF_SRC'
+          pkgbase = zephyr-clash-bin
+          	pkgdesc = A modern Mihomo GUI client
+          	pkgver = 2.5.0
+          	pkgrel = 2
+          	url = https://github.com/Juwan-Hwang/Zephyr
+          	install = zephyr-clash-bin.install
+          	arch = x86_64
+          	license = MIT
+          	depends = cairo
+          	depends = desktop-file-utils
+          	depends = gdk-pixbuf2
+          	depends = glib2
+          	depends = gtk3
+          	depends = hicolor-icon-theme
+          	depends = libsoup3
+          	depends = pango
+          	depends = webkit2gtk-4.1
+          	depends = libayatana-appindicator
+          	provides = zephyr-clash
+          	conflicts = zephyr-clash
+          	options = !strip
+          	options = !debug
+          	source_x86_64 = https://github.com/Juwan-Hwang/Zephyr/releases/download/v2.5.0/Zephyr_2.5.0_linux-x86_64-full.deb
+          	sha256sums_x86_64 = 5f103f38a9aac9265a8d7cab5290e2fbc596f7a873663abad3c76619ea47d88c
+
+          pkgname = zephyr-clash-bin
+          EOF_SRC
+          git config user.name "Juwan"
+          git config user.email "juwan.hwang@proton.me"
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "把 2.5.0 的安装包地址换成新命名" -m "Co-authored-by: meta-muse-ai[bot] <333466691+meta-muse-ai[bot]@users.noreply.github.com>"
+          git push
