@@ -120,6 +120,8 @@ describe('home and settings page switches and theme swatches accessibility', () 
             expect(btn, theme).toBeTruthy();
             expect(btn?.getAttribute('aria-label')).toBeTruthy();
             expect(btn?.getAttribute('data-i18n-aria-label')).toBe(key);
+            expect(btn?.getAttribute('title')).toBeTruthy();
+            expect(btn?.getAttribute('data-i18n-title')).toBe(key);
         }
 
         const customInput = doc.getElementById('custom-theme-color');
