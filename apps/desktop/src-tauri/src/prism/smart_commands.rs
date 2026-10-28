@@ -8,6 +8,7 @@ use clash_prism_smart::history::NodeHistory;
 use clash_prism_smart::{AdaptiveScheduler, SmartConfig, SmartScorer};
 
 use crate::core_manager::write_file_secure;
+use crate::prism::types::check_name_size;
 use crate::prism::PrismState;
 
 /// Build a `SmartScorer` from the current smart.toml config.
@@ -34,6 +35,7 @@ pub fn smart_score(
     latency_ms: f64,
     success: bool,
 ) -> Result<f64, String> {
+    check_name_size(&node_name, "Node name")?;
     let smart_state = state
         .smart_state
         .as_ref()
@@ -207,6 +209,7 @@ pub fn smart_score_at(
     node_name: String,
     timestamp_ms: i64,
 ) -> Result<f64, String> {
+    check_name_size(&node_name, "Node name")?;
     let scorer = build_scorer(&state)?;
     let smart_state = state
         .smart_state
@@ -255,4 +258,19 @@ pub fn smart_trim_history(state: State<PrismState>, max_records: usize) -> Resul
 
     smart_state.trim(max_records);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::prism::types::{check_name_size, MAX_NAME_SIZE};
+
+    #[test]
+    fn test_smart_node_name_size_validation() {
+        let oversized_name = "n".repeat(MAX_NAME_SIZE + 1);
+        let res = check_name_size(&oversized_name, "Node name");
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("Node name too large"));
+
+        assert!(check_name_size("valid_node_name", "Node name").is_ok());
+    }
 }
