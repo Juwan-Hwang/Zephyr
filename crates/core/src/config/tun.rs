@@ -109,13 +109,14 @@ fn mapping_colon_index(body: &str) -> Option<usize> {
 }
 
 /// The identity of a mapping key, for duplicate-key detection.
-enum KeyIdentity {
-    /// A key whose decoded identity is the contained text: the
+enum KeyIdentity<'a> {
+    /// A key whose decoded identity is the contained text slice: the
     /// text before the separator colon, with one layer of
     /// surrounding quotes removed, so a plain key and the same
     /// key quoted (`port` vs `"port"`) count as one — the parser
     /// compares decoded keys and rejects a repeat.
-    Key(String),
+    /// Borrowing directly from the input string avoids heap allocations.
+    Key(&'a str),
     /// A key whose identity comparison cannot establish: a
     /// quoted key carrying escape sequences (`\x61` in a
     /// double-quoted key, a doubled `''` in a single-quoted
@@ -130,7 +131,7 @@ enum KeyIdentity {
 
 /// The identity of the mapping key a line body carries, if the
 /// body is a mapping entry at all.
-fn mapping_key_identity(body: &str) -> Option<KeyIdentity> {
+fn mapping_key_identity<'a>(body: &'a str) -> Option<KeyIdentity<'a>> {
     let colon = mapping_colon_index(body)?;
     let segment = body[..colon].trim();
     if let Some(inner) = segment
@@ -140,7 +141,7 @@ fn mapping_key_identity(body: &str) -> Option<KeyIdentity> {
         if inner.contains('\\') {
             return Some(KeyIdentity::Undecidable);
         }
-        return Some(KeyIdentity::Key(inner.to_owned()));
+        return Some(KeyIdentity::Key(inner));
     }
     if let Some(inner) = segment
         .strip_prefix('\'')
@@ -149,12 +150,12 @@ fn mapping_key_identity(body: &str) -> Option<KeyIdentity> {
         if inner.contains("''") {
             return Some(KeyIdentity::Undecidable);
         }
-        return Some(KeyIdentity::Key(inner.to_owned()));
+        return Some(KeyIdentity::Key(inner));
     }
     if !yaml_unquoted_scalar_is_string(segment) {
         return Some(KeyIdentity::Undecidable);
     }
-    Some(KeyIdentity::Key(segment.to_owned()))
+    Some(KeyIdentity::Key(segment))
 }
 
 /// Records a top-level line's mapping key in `seen`, returning
@@ -163,7 +164,7 @@ fn mapping_key_identity(body: &str) -> Option<KeyIdentity> {
 /// quoted with escapes (see `KeyIdentity::Undecidable`).
 /// Sequence entries open a fresh mapping per entry, so their
 /// inner keys are not top-level keys.
-fn note_top_level_key(line: &str, seen: &mut std::collections::HashSet<String>) -> bool {
+fn note_top_level_key<'a>(line: &'a str, seen: &mut std::collections::HashSet<&'a str>) -> bool {
     if sequence_entry_body(line).is_some() {
         return false;
     }
@@ -1053,7 +1054,7 @@ impl RootKindTracker {
 /// entries have been seen at this level, and the state of the most
 /// recent mapping key (the same per-key state `RootKindTracker`
 /// keeps for the root, one level down).
-struct BlockFrame {
+struct BlockFrame<'a> {
     indent: usize,
     has_mapping: bool,
     last_key_had_inline_value: bool,
@@ -1063,7 +1064,8 @@ struct BlockFrame {
     /// level: the parser rejects a repeated key anywhere in a
     /// mapping, not just the one a scanner is extracting, so a
     /// repeat at any tracked level falls back.
-    keys: std::collections::HashSet<String>,
+    /// Borrowed string slices avoid per-key heap allocations during block scanning.
+    keys: std::collections::HashSet<&'a str>,
 }
 
 /// Tracks the block kinds of sibling lines while scanning inside
@@ -1077,11 +1079,11 @@ struct BlockFrame {
 /// top-level key starts a fresh context whose nested blocks may
 /// use either kind.
 #[derive(Default)]
-struct BlockKindTracker {
-    stack: Vec<BlockFrame>,
+struct BlockKindTracker<'a> {
+    stack: Vec<BlockFrame<'a>>,
 }
 
-impl BlockKindTracker {
+impl<'a> BlockKindTracker<'a> {
     fn reset(&mut self) {
         self.stack.clear();
     }
@@ -1089,7 +1091,7 @@ impl BlockKindTracker {
     /// Resets the stack for a new top-level line and records a
     /// sequence entry's first key on it (see
     /// `note_sequence_entry`).
-    fn reset_and_note(&mut self, line: &str) -> bool {
+    fn reset_and_note(&mut self, line: &'a str) -> bool {
         self.reset();
         self.note_sequence_entry(line)
     }
@@ -1101,7 +1103,7 @@ impl BlockKindTracker {
     /// `note_sequence_entry`), so a later dash at that column is
     /// judged against the key's state rather than slipping through
     /// as a fresh sequence level.
-    fn observe(&mut self, line: &str) -> bool {
+    fn observe(&mut self, line: &'a str) -> bool {
         if !self.observe_kind(line) {
             return false;
         }
@@ -1117,7 +1119,7 @@ impl BlockKindTracker {
     /// Flow entries and nested sequence entries open no such level.
     /// Returns `false` when the entry's first key is quoted
     /// with escapes (see `KeyIdentity::Undecidable`).
-    fn note_sequence_entry(&mut self, line: &str) -> bool {
+    fn note_sequence_entry(&mut self, line: &'a str) -> bool {
         let indent = line.len() - line.trim_start().len();
         let body = line.trim_start();
         let Some((offset, content)) = sequence_entry_content(body) else {
@@ -1161,7 +1163,7 @@ impl BlockKindTracker {
         true
     }
 
-    fn observe_kind(&mut self, line: &str) -> bool {
+    fn observe_kind(&mut self, line: &'a str) -> bool {
         let indent = line.len() - line.trim_start().len();
         let body = line.trim_start();
         let is_sequence = sequence_entry_body(body).is_some();
@@ -1365,11 +1367,11 @@ fn content_line_frame(line: &str) -> (usize, bool) {
 /// Judges one indented line for the scalar scanner below, updating
 /// the frame state in `last_content`. Returns `true` when the line
 /// forces a fallback to the full parser.
-fn indented_line_forces_fallback(
-    line: &str,
+fn indented_line_forces_fallback<'a>(
+    line: &'a str,
     saw_unindented_line: bool,
     last_content: &mut Option<(usize, bool)>,
-    block_tracker: &mut BlockKindTracker,
+    block_tracker: &mut BlockKindTracker<'a>,
     anchors: &mut std::collections::HashSet<String>,
 ) -> bool {
     let indent = line.len() - line.trim_start().len();
@@ -1442,11 +1444,11 @@ fn indented_line_forces_fallback(
 /// own mapping colon, or a root-kind switch (see `RootKindTracker`,
 /// whose state this updates). Returns `true` when the line forces a
 /// fallback to the full parser.
-fn unindented_line_forces_fallback(
-    line: &str,
+fn unindented_line_forces_fallback<'a>(
+    line: &'a str,
     root_tracker: &mut RootKindTracker,
     anchors: &mut std::collections::HashSet<String>,
-    seen_keys: &mut std::collections::HashSet<String>,
+    seen_keys: &mut std::collections::HashSet<&'a str>,
 ) -> bool {
     is_standalone_value_line(line)
         || starts_with_node_property(line)
