@@ -618,23 +618,41 @@ pub fn percent_decode(input: &str) -> String {
         return input.to_owned();
     }
 
-    let mut result = Vec::with_capacity(input.len());
     let bytes = input.as_bytes();
+    let mut result = Vec::with_capacity(bytes.len());
     let mut i = 0;
-    while let Some(&byte) = bytes.get(i) {
-        if byte == b'%' {
-            if let (Some(hi), Some(lo)) = (
-                bytes.get(i + 1).and_then(|&byte| decode_hex_digit(byte)),
-                bytes.get(i + 2).and_then(|&byte| decode_hex_digit(byte)),
-            ) {
-                result.push((hi << 4) | lo);
-                i += 3;
-                continue;
+
+    while i < bytes.len() {
+        if let Some(&b) = bytes.get(i) {
+            if b == b'%' {
+                if let (Some(&h), Some(&l)) = (bytes.get(i + 1), bytes.get(i + 2)) {
+                    if let (Some(hi), Some(lo)) = (decode_hex_digit(h), decode_hex_digit(l)) {
+                        result.push((hi << 4) | lo);
+                        i += 3;
+                        continue;
+                    }
+                }
+                result.push(b'%');
+                i += 1;
+            } else {
+                let rest = match bytes.get(i..) {
+                    Some(r) => r,
+                    None => break,
+                };
+                let next_pct = rest
+                    .iter()
+                    .position(|&b| b == b'%')
+                    .map_or(bytes.len(), |pos| i + pos);
+                if let Some(chunk) = bytes.get(i..next_pct) {
+                    result.extend_from_slice(chunk);
+                }
+                i = next_pct;
             }
+        } else {
+            break;
         }
-        result.push(byte);
-        i += 1;
     }
+
     String::from_utf8(result).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
