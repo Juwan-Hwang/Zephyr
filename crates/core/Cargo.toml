@@ -19,7 +19,6 @@ rand      = { version = "0.9", features = ["thread_rng"] }
 uuid      = { version = "1", features = ["v4"] }
 tokio     = { version = "1", features = ["rt", "rt-multi-thread"], optional = true }
 url       = "2"
-regex     = "1"
 dashmap   = "6"
 clash-prism-core  = "0.1.5"
 clash-prism-smart = "0.1.1"
