@@ -21,43 +21,124 @@ const fn decode_hex_digit(byte: u8) -> Option<u8> {
 
 // ── Pure functions for subscription content sanitization ─────────────────
 
+/// Find a `short-id` value that continues on a following line.
+/// `cur` points at the line break (or inline comment) that ends the key
+/// line. A plain scalar counts as the value only when it starts on a line
+/// indented more than the key itself (the YAML block rule); blank and
+/// comment lines are skipped. Returns the value start, if any.
+fn short_id_continuation_value(bytes: &[u8], mut cur: usize, key_indent: usize) -> Option<usize> {
+    loop {
+        let &b = bytes.get(cur)?;
+        if b == b'#' {
+            // Comment: skip to the end of its line, then keep looking.
+            while let Some(&c) = bytes.get(cur) {
+                if matches!(c, b'\n' | b'\r') {
+                    break;
+                }
+                cur += 1;
+            }
+        } else if matches!(b, b'\n' | b'\r') {
+            if b == b'\r' && bytes.get(cur + 1) == Some(&b'\n') {
+                cur += 2;
+            } else {
+                cur += 1;
+            }
+            let mut indent = 0;
+            while matches!(bytes.get(cur), Some(b' ' | b'\t')) {
+                cur += 1;
+                indent += 1;
+            }
+            match bytes.get(cur) {
+                // Blank or comment line: loop again for the next line.
+                Some(b'\n' | b'\r') | Some(b'#') => {}
+                // Already quoted, a block scalar header (its content is
+                // already a string, so it needs no quoting), or not a
+                // continuation value.
+                Some(b'"' | b'\'') | Some(b'|' | b'>') | None => return None,
+                Some(_) if indent > key_indent => return Some(cur),
+                Some(_) => return None,
+            }
+        } else {
+            return None;
+        }
+    }
+}
+
 /// Quote `short-id` values in YAML content before parsing.
 /// This prevents YAML from interpreting hex-like values (e.g., "34010e92") as scientific notation.
+#[must_use]
 pub fn quote_short_id_values(content: &str) -> String {
     // Fast path: if "short-id:" is not present at all, return input immediately.
     if !content.contains("short-id:") {
         return content.to_owned();
     }
 
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        match regex::Regex::new(r#"(?:^|\n)(\s*short-id:\s*)([^\s"'\n][^\s\n]*)"#) {
-            Ok(re) => re,
-            Err(e) => unreachable!("short-id regex is statically valid: {e}"),
-        }
-    });
-
-    // Zero-allocation loop over captures using a single pre-allocated output buffer.
+    // Fast-path string search to avoid Regex engine overhead.
     let mut out = String::with_capacity(content.len() + 128);
     let mut last_match = 0;
-    for caps in re.captures_iter(content) {
-        if let Some(m) = caps.get(0) {
-            out.push_str(&content[last_match..m.start()]);
-            let prefix = &caps[1];
-            let value = &caps[2];
-            let newline = if m.as_str().starts_with('\n') {
-                "\n"
-            } else {
-                ""
-            };
-            out.push_str(newline);
-            out.push_str(prefix);
-            out.push('"');
-            out.push_str(value);
-            out.push('"');
-            last_match = m.end();
+
+    let all_bytes = content.as_bytes();
+    for (pos, _) in content.match_indices("short-id:") {
+        if pos < last_match {
+            continue;
         }
+
+        // The key must be the only thing on its line apart from indentation.
+        // Walk back over spaces/tabs only: scanning back to the previous
+        // newline (rfind) for every hit is O(line) per hit, which goes
+        // quadratic when many occurrences share one very long line (e.g. a
+        // long comment in a downloaded subscription body).
+        let mut line_pos = pos;
+        while line_pos > 0 && matches!(all_bytes.get(line_pos - 1), Some(b' ' | b'\t')) {
+            line_pos -= 1;
+        }
+        if line_pos != 0 && !matches!(all_bytes.get(line_pos - 1), Some(&b'\n') | Some(&b'\r')) {
+            continue;
+        }
+        let key_indent = pos - line_pos;
+
+        // Skip spaces and tabs after "short-id:".
+        let mut cursor = pos + "short-id:".len();
+        while matches!(all_bytes.get(cursor), Some(b' ' | b'\t')) {
+            cursor += 1;
+        }
+
+        // Find the value start, if this occurrence has a quotable one.
+        // A plain scalar may continue on a following line, but only when
+        // that line is indented more than the key itself (the YAML block
+        // rule): `short-id:\n  34010e92` quotes, while a sibling key at
+        // the same or lower indent is left alone.
+        let candidate = match all_bytes.get(cursor) {
+            Some(b'\n' | b'\r') | Some(b'#') => {
+                short_id_continuation_value(all_bytes, cursor, key_indent)
+            }
+            // Already quoted, a block scalar header, or nothing after the key.
+            Some(b'"' | b'\'') | Some(b'|' | b'>') | None => None,
+            // Inline value on the same line.
+            Some(_) => Some(cursor),
+        };
+        let Some(val_start) = candidate else {
+            continue;
+        };
+
+        let mut val_end = val_start;
+        while val_end < content.len() {
+            let Some(&b) = content.as_bytes().get(val_end) else {
+                break;
+            };
+            if matches!(b, b' ' | b'\t' | b'\r' | b'\n') {
+                break;
+            }
+            val_end += 1;
+        }
+
+        out.push_str(&content[last_match..val_start]);
+        out.push('"');
+        out.push_str(&content[val_start..val_end]);
+        out.push('"');
+        last_match = val_end;
     }
+
     out.push_str(&content[last_match..]);
     out
 }
@@ -592,23 +673,41 @@ pub fn percent_decode(input: &str) -> String {
         return input.to_owned();
     }
 
-    let mut result = Vec::with_capacity(input.len());
     let bytes = input.as_bytes();
+    let mut result = Vec::with_capacity(bytes.len());
     let mut i = 0;
-    while let Some(&byte) = bytes.get(i) {
-        if byte == b'%' {
-            if let (Some(hi), Some(lo)) = (
-                bytes.get(i + 1).and_then(|&byte| decode_hex_digit(byte)),
-                bytes.get(i + 2).and_then(|&byte| decode_hex_digit(byte)),
-            ) {
-                result.push((hi << 4) | lo);
-                i += 3;
-                continue;
+
+    while i < bytes.len() {
+        if let Some(&b) = bytes.get(i) {
+            if b == b'%' {
+                if let (Some(&h), Some(&l)) = (bytes.get(i + 1), bytes.get(i + 2)) {
+                    if let (Some(hi), Some(lo)) = (decode_hex_digit(h), decode_hex_digit(l)) {
+                        result.push((hi << 4) | lo);
+                        i += 3;
+                        continue;
+                    }
+                }
+                result.push(b'%');
+                i += 1;
+            } else {
+                let rest = match bytes.get(i..) {
+                    Some(r) => r,
+                    None => break,
+                };
+                let next_pct = rest
+                    .iter()
+                    .position(|&b| b == b'%')
+                    .map_or(bytes.len(), |pos| i + pos);
+                if let Some(chunk) = bytes.get(i..next_pct) {
+                    result.extend_from_slice(chunk);
+                }
+                i = next_pct;
             }
+        } else {
+            break;
         }
-        result.push(byte);
-        i += 1;
     }
+
     String::from_utf8(result).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
@@ -1837,6 +1936,79 @@ mod tests {
         let yaml = r#"short-id: "abc123""#;
         let result = quote_short_id_values(yaml);
         assert_eq!(result, r#"short-id: "abc123""#);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_multiline_continuation() {
+        // A plain scalar on the next, more-indented line is still the value.
+        let yaml = "short-id:\n  34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id:\n  \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_comment_lines_skipped() {
+        // A comment between the key and its value is not the value: the
+        // comment stays untouched and the real value still gets quoted.
+        let yaml = "short-id:\n  # note\n  34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id:\n  # note\n  \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_inline_comment_not_quoted() {
+        // A comment after the key means the value is empty, not "#".
+        let yaml = "short-id: # note";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_scalar_not_quoted() {
+        // A block scalar is already a string: quoting its header would
+        // corrupt the document, so both forms stay untouched.
+        let yaml = "short-id:\n  |-\n    34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "short-id: |-\n  34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_cr_only_line_endings() {
+        // A carriage return alone is a YAML line break too.
+        let yaml = "a: 1\rshort-id: 34010e92\r";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "a: 1\rshort-id: \"34010e92\"\r");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_value_after_inline_comment() {
+        // A comment ends the key line, but the value may still follow on
+        // a more-indented line, and it still needs quoting.
+        let yaml = "short-id: # note\n  34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id: # note\n  \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_sibling_key_not_quoted() {
+        // A key at the same indent on the next line is a sibling, not the
+        // value: quoting it would corrupt the mapping.
+        let yaml = "outer:\n  short-id:\n  next: 1";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_repeated_occurrences_on_one_line() {
+        // Occurrences that are not keys (e.g. inside a long comment) must
+        // not be quoted, no matter how many share the line.
+        let yaml = "# short-id: a short-id: b short-id: c\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(
+            result,
+            "# short-id: a short-id: b short-id: c\nshort-id: \"34010e92\""
+        );
     }
 
     #[test]
