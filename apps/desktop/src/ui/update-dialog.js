@@ -36,6 +36,7 @@ const RELEASES_URL = 'https://github.com/Juwan-Hwang/Zephyr/releases/latest';
  *   coreLatest: { version: string, url: string } | null,
  *   clientLatest: { version: string, notes: string } | null,
  *   target: 'core'|'client'|null, coreDone: boolean, clientCurrent: boolean,
+ *   clientVariant: 'full'|'lite'|null,
  *   progress: number, stage: string, error: string, warning: string, checkError: string,
  * }} UpdateState
  * @typedef {{ onCoreUpdated?: (result: any) => Promise<void> | void, closeQuits?: () => boolean }} UpdateDeps
@@ -46,6 +47,7 @@ function freshState() {
     return {
         phase: 'idle', app: '', core: '', portable: false,
         coreLatest: null, clientLatest: null, target: null, coreDone: false, clientCurrent: false,
+        clientVariant: null,
         progress: 0, stage: '', error: '', warning: '', checkError: '',
     };
 }
@@ -421,8 +423,10 @@ async function installTarget(target) {
     render();
     if (target === 'client') {
         // The backend looks up the release again before downloading; when it
-        // turns out to be the running version, no installer opens.
-        const result = await invoke(COMMANDS.UPDATE_CLIENT);
+        // turns out to be the running version, no installer opens. The
+        // variant settled when the install started is passed along; without
+        // one the backend picks the variant itself.
+        const result = await invoke(COMMANDS.UPDATE_CLIENT, state.clientVariant ? { variant: state.clientVariant } : undefined);
         if (result === CLIENT_ALREADY_CURRENT) {
             state.clientCurrent = true;
             state.clientLatest = null;
@@ -492,6 +496,14 @@ async function runInstall() {
     state.phase = 'installing';
     state.error = '';
     state.clientCurrent = false;
+    // The package variant is settled when the install starts, not when the
+    // app step runs: by then the core has just been updated, so asking again
+    // would never see that both had updates. With both, the recommended
+    // package is Full unless the user picked Lite; a retry keeps the choice
+    // the first run made.
+    if (!state.clientVariant && targets.includes('core') && targets.includes('client')) {
+        state.clientVariant = 'full';
+    }
     // A retry after the app installer failed installs only the app: keep the
     // earlier core result so the outcome still names it.
     if (targets[0] === 'core') {
@@ -671,7 +683,14 @@ function availableActions() {
         if (!state.coreLatest) return [later, { ...releases, kind: 'primary' }];
         return [later, { ...releases, kind: 'ghost' }, { id: 'upd-install', label: t('updInstallCore', 'Update core only'), kind: 'primary' }];
     }
-    return [later, { id: 'upd-install', label: t('updInstall', 'Download and update'), kind: 'primary' }];
+    const install = { id: 'upd-install', label: t('updInstall', 'Download and update'), kind: /** @type {const} */ ('primary') };
+    if (state.coreLatest && state.clientLatest) {
+        // Both updates: the recommended download is the Full package, but
+        // the Lite package stays one click away — it pins that choice
+        // instead of leaving it to the backend's own pick.
+        return [later, { id: 'upd-lite', label: t('updLiteInstead', 'Download Lite instead'), kind: /** @type {const} */ ('ghost') }, install];
+    }
+    return [later, install];
 }
 
 /** @returns {{ id: string, label: string, kind: 'primary'|'ghost' }[]} */
@@ -780,6 +799,7 @@ function buildDialog() {
         }
         const id = target.closest('button')?.id;
         if (id === 'upd-x' || id === 'upd-close' || id === 'upd-later') closeDialog();
+        else if (id === 'upd-lite') { state.clientVariant = 'lite'; void runInstall(); }
         else if (id === 'upd-install' || id === 'upd-retry-install') void runInstall();
         else if (id === 'upd-retry-check') void runCheck();
         else if (id === 'upd-releases') {
