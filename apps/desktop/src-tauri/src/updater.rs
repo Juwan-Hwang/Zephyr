@@ -2050,20 +2050,57 @@ pub struct ClientUpdateInfo {
 }
 
 /// Determine the expected asset extension for the current platform.
+/// Lowercase only: asset names are lowercased before they are compared.
 const fn platform_asset_extensions() -> &'static [&'static str] {
     if cfg!(target_os = "windows") {
         &[".exe", ".msi"]
     } else if cfg!(target_os = "macos") {
         &[".dmg"]
     } else {
-        &[".AppImage", ".deb"]
+        &[".appimage", ".deb"]
     }
 }
 
-/// Select the best installer asset from a GitHub release for the current platform.
-fn select_client_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
-    let extensions = platform_asset_extensions();
-    let target_triple = format!(
+/// Which installer variant a client release asset is: the Full package
+/// bundles the core and geo data, the Lite package is the smaller
+/// client-only download for a machine whose core is already in place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientVariant {
+    Full,
+    Lite,
+}
+
+impl ClientVariant {
+    /// The fragment marking this variant in an asset name, right before the
+    /// extension (the `-full` in `Zephyr_2.5.0_linux-x86_64-full.deb`).
+    const fn name_marker(self) -> &'static str {
+        match self {
+            Self::Full => "-full",
+            Self::Lite => "-lite",
+        }
+    }
+
+    /// Parse the variant the frontend passes to `update_client`.
+    fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "full" => Some(Self::Full),
+            "lite" => Some(Self::Lite),
+            _ => None,
+        }
+    }
+}
+
+/// Whether a lowercased asset name carries the variant's marker.
+fn asset_matches_variant(lower_name: &str, variant: ClientVariant) -> bool {
+    let marker = variant.name_marker();
+    lower_name.contains(&format!("{marker}."))
+        || lower_name.ends_with(marker)
+        || lower_name.contains(&format!("{marker}-"))
+}
+
+/// The platform's `os-arch` string as it appears in client asset names.
+fn client_target_triple() -> String {
+    format!(
         "{}-{}",
         std::env::consts::OS,
         if std::env::consts::ARCH == "x86_64" {
@@ -2073,20 +2110,50 @@ fn select_client_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
         } else {
             std::env::consts::ARCH
         }
-    );
+    )
+}
 
-    // First pass: try to find an asset matching the target triple
-    for asset in assets {
-        let lower = asset.name.to_lowercase();
-        if extensions.iter().any(|ext| lower.ends_with(ext)) && lower.contains(&target_triple) {
-            return Ok(asset);
-        }
+/// Select the best installer asset from a GitHub release for the current platform.
+fn select_client_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
+    select_client_asset_inner(
+        assets,
+        platform_asset_extensions(),
+        &client_target_triple(),
+        None,
+    )
+}
+
+/// Select the installer asset for one platform. A variant preference only
+/// ranks the platform's own assets; when none of them carries it — or none
+/// matches the platform at all — the unpreferred order decides, so an
+/// update never fails just because a variant is missing from the release.
+fn select_client_asset_inner<'a>(
+    assets: &'a [GithubAsset],
+    extensions: &[&str],
+    target_triple: &str,
+    variant: Option<ClientVariant>,
+) -> Result<&'a GithubAsset, String> {
+    let lower_extensions: Vec<String> = extensions.iter().map(|ext| ext.to_lowercase()).collect();
+    // (needs the target triple, needs the variant marker), strictest first.
+    let mut passes: Vec<(bool, bool)> = Vec::new();
+    if variant.is_some() {
+        passes.push((true, true));
     }
+    passes.push((true, false));
+    passes.push((false, false));
 
-    // Second pass: any asset with a matching extension
-    for asset in assets {
-        let lower = asset.name.to_lowercase();
-        if extensions.iter().any(|ext| lower.ends_with(ext)) {
+    for (need_triple, need_variant) in passes {
+        for asset in assets {
+            let lower = asset.name.to_lowercase();
+            if !lower_extensions.iter().any(|ext| lower.ends_with(ext)) {
+                continue;
+            }
+            if need_triple && !lower.contains(target_triple) {
+                continue;
+            }
+            if need_variant && !variant.is_some_and(|v| asset_matches_variant(&lower, v)) {
+                continue;
+            }
             return Ok(asset);
         }
     }
@@ -2094,10 +2161,72 @@ fn select_client_asset(assets: &[GithubAsset]) -> Result<&GithubAsset, String> {
     Err("No suitable installer asset found for this platform".to_owned())
 }
 
-/// Check for the latest Zephyr client version.
-#[command]
-pub async fn get_latest_client_version(app: tauri::AppHandle) -> Result<ClientUpdateInfo, String> {
-    let client = build_metadata_client(Some(&app)).await?;
+/// Whether `remote` is a newer dotted version than `local`
+/// ("v1.19.8" against "1.19.7"): numeric components compare in order; with
+/// equal numbers, a stable release is newer than a pre-release of it.
+fn version_is_newer(remote: &str, local: &str) -> bool {
+    fn parse(version: &str) -> (Vec<u64>, bool) {
+        let stripped = strip_version_prefix(version);
+        let (main, pre_release) = match stripped.split_once('-') {
+            Some((main, _)) => (main, true),
+            None => (stripped, false),
+        };
+        let parts = main
+            .split('.')
+            .map(|part| {
+                part.chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect::<String>()
+                    .parse::<u64>()
+                    .unwrap_or(0)
+            })
+            .collect();
+        (parts, pre_release)
+    }
+    let (remote_parts, remote_pre) = parse(remote);
+    let (local_parts, local_pre) = parse(local);
+    let len = remote_parts.len().max(local_parts.len());
+    for i in 0..len {
+        let remote_part = remote_parts.get(i).copied().unwrap_or(0);
+        let local_part = local_parts.get(i).copied().unwrap_or(0);
+        if remote_part != local_part {
+            return remote_part > local_part;
+        }
+    }
+    local_pre && !remote_pre
+}
+
+/// Whether a newer core release exists than the core installed here.
+/// `None` when that cannot be determined: no core installed, its version
+/// unreadable, or the release lookup failed.
+async fn core_update_available(app: &tauri::AppHandle) -> Option<bool> {
+    let latest = fetch_latest_release(Some(app)).await.ok()?;
+    let current = crate::core_manager::core::core_process::get_core_version(app.clone())
+        .await
+        .ok()?;
+    Some(version_is_newer(&latest.tag_name, &current))
+}
+
+/// Which installer variant a client update downloads when the caller did
+/// not choose one. The Full package carries the core, so it is the pick
+/// whenever the core also has an update — and the safe fallback when the
+/// core state is unknown. With the installed core already current, the
+/// Lite package is enough and much smaller.
+async fn preferred_client_variant(app: &tauri::AppHandle) -> ClientVariant {
+    match core_update_available(app).await {
+        Some(false) => ClientVariant::Lite,
+        _ => ClientVariant::Full,
+    }
+}
+
+/// Fetch the latest Zephyr release info, picking the installer to download.
+/// A `variant` steers the pick; `None` keeps the unpreferred order, which is
+/// what a plain version check wants.
+async fn fetch_client_update_info(
+    app: &tauri::AppHandle,
+    variant: Option<ClientVariant>,
+) -> Result<ClientUpdateInfo, String> {
+    let client = build_metadata_client(Some(app)).await?;
 
     let body = client
         .get_text(ZEPHYR_RELEASE_API)
@@ -2107,7 +2236,15 @@ pub async fn get_latest_client_version(app: tauri::AppHandle) -> Result<ClientUp
     let release: GithubRelease = serde_json::from_str(&body)
         .map_err(|e| format!("Failed to parse Zephyr release info: {e}"))?;
 
-    let asset = select_client_asset(&release.assets)?;
+    let asset = match variant {
+        Some(preferred) => select_client_asset_inner(
+            &release.assets,
+            platform_asset_extensions(),
+            &client_target_triple(),
+            Some(preferred),
+        )?,
+        None => select_client_asset(&release.assets)?,
+    };
     let download_url = format!(
         "https://github.com/Juwan-Hwang/Zephyr/releases/download/{}/{}",
         release.tag_name, asset.name
@@ -2123,15 +2260,27 @@ pub async fn get_latest_client_version(app: tauri::AppHandle) -> Result<ClientUp
     })
 }
 
-/// Download and open the Zephyr client installer.
+/// Check for the latest Zephyr client version.
 #[command]
-pub async fn update_client(window: Window) -> Result<String, String> {
-    // The page awaits this step to report its outcome.
-    let _hold = WebviewHold::new(window.app_handle().clone());
-    update_client_inner(&window).await
+pub async fn get_latest_client_version(app: tauri::AppHandle) -> Result<ClientUpdateInfo, String> {
+    fetch_client_update_info(&app, None).await
 }
 
-async fn update_client_inner(window: &Window) -> Result<String, String> {
+/// Download and open the Zephyr client installer. `variant` is the
+/// installer's explicit choice ("full" / "lite") when the page offered one;
+/// without it, the download follows `preferred_client_variant`.
+#[command]
+pub async fn update_client(window: Window, variant: Option<String>) -> Result<String, String> {
+    // The page awaits this step to report its outcome.
+    let _hold = WebviewHold::new(window.app_handle().clone());
+    let parsed_variant = variant.and_then(|value| ClientVariant::parse(&value));
+    update_client_inner(&window, parsed_variant).await
+}
+
+async fn update_client_inner(
+    window: &Window,
+    variant: Option<ClientVariant>,
+) -> Result<String, String> {
     // Portable mode: cannot self-update (exe is locked while running)
     if crate::core_manager::core::core_process::is_portable_mode() {
         return Err("Portable version does not support self-update. Please download the latest release manually.".to_owned());
@@ -2144,7 +2293,14 @@ async fn update_client_inner(window: &Window) -> Result<String, String> {
         5,
     );
 
-    let info = get_latest_client_version(window.app_handle().clone()).await?;
+    // An explicit choice from the page wins; otherwise the Full package is
+    // the pick when the core also has an update, the Lite one when the
+    // installed core is already current.
+    let chosen_variant = match variant {
+        Some(explicit) => explicit,
+        None => preferred_client_variant(window.app_handle()).await,
+    };
+    let info = fetch_client_update_info(window.app_handle(), Some(chosen_variant)).await?;
 
     // Compare with current version
     let current = env!("CARGO_PKG_VERSION");
@@ -2246,6 +2402,15 @@ async fn update_client_inner(window: &Window) -> Result<String, String> {
             format!("{e}. Installer deleted for security.")
         },
     )?;
+
+    // An AppImage is launched as a program, and a freshly written download
+    // carries no executable bit — set it, or opening the file would fail.
+    if dest_path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("appimage"))
+    {
+        core_manager::ensure_executable(&dest_path)?;
+    }
 
     emit_download_status_ext(
         window,
@@ -2543,6 +2708,122 @@ mod tests {
         let assets = vec![make_asset("mihomo-linux-amd64-v1.19.28.gz")];
         let sel = select_release_asset_inner(&assets, "linux", "amd64", true).unwrap();
         assert_eq!(sel.name, "mihomo-linux-amd64-v1.19.28.gz");
+    }
+
+    // ── select_client_asset_inner tests ──
+
+    /// A Linux `x86_64` release listing, Lite listed before Full on purpose:
+    /// the variant preference, not the listing order, must decide.
+    fn client_assets() -> Vec<GithubAsset> {
+        vec![
+            make_asset("Zephyr_2.5.0_linux-x86_64-lite.deb"),
+            make_asset("Zephyr_2.5.0_linux-x86_64-full.deb"),
+            make_asset("Zephyr_2.5.0_linux-aarch64-full.deb"),
+            make_asset("Zephyr_2.5.0_windows-x86_64-setup-full.exe"),
+        ]
+    }
+
+    #[test]
+    fn test_client_asset_full_preference_picks_full() {
+        let assets = client_assets();
+        let sel = select_client_asset_inner(
+            &assets,
+            &[".appimage", ".deb"],
+            "linux-x86_64",
+            Some(ClientVariant::Full),
+        )
+        .unwrap();
+        assert_eq!(sel.name, "Zephyr_2.5.0_linux-x86_64-full.deb");
+    }
+
+    #[test]
+    fn test_client_asset_lite_preference_picks_lite() {
+        let assets = client_assets();
+        let sel = select_client_asset_inner(
+            &assets,
+            &[".appimage", ".deb"],
+            "linux-x86_64",
+            Some(ClientVariant::Lite),
+        )
+        .unwrap();
+        assert_eq!(sel.name, "Zephyr_2.5.0_linux-x86_64-lite.deb");
+    }
+
+    #[test]
+    fn test_client_asset_missing_variant_falls_back() {
+        // No Lite asset in the release: a Lite preference still gets the
+        // platform's Full asset instead of failing the update.
+        let assets = vec![
+            make_asset("Zephyr_2.5.0_linux-x86_64-full.deb"),
+            make_asset("Zephyr_2.5.0_linux-aarch64-full.deb"),
+        ];
+        let sel = select_client_asset_inner(
+            &assets,
+            &[".appimage", ".deb"],
+            "linux-x86_64",
+            Some(ClientVariant::Lite),
+        )
+        .unwrap();
+        assert_eq!(sel.name, "Zephyr_2.5.0_linux-x86_64-full.deb");
+    }
+
+    #[test]
+    fn test_client_asset_no_preference_keeps_listing_order() {
+        let assets = client_assets();
+        let sel = select_client_asset_inner(&assets, &[".appimage", ".deb"], "linux-x86_64", None)
+            .unwrap();
+        assert_eq!(sel.name, "Zephyr_2.5.0_linux-x86_64-lite.deb");
+    }
+
+    #[test]
+    fn test_client_asset_appimage_matches_any_name_case() {
+        // Release assets carry ".AppImage"; the lowercase extension entry
+        // must still match once the name is lowercased for comparison.
+        let assets = vec![
+            make_asset("Zephyr_2.5.0_linux-x86_64-full.AppImage"),
+            make_asset("Zephyr_2.5.0_linux-x86_64-full.deb"),
+        ];
+        let sel = select_client_asset_inner(&assets, &[".appimage"], "linux-x86_64", None).unwrap();
+        assert_eq!(sel.name, "Zephyr_2.5.0_linux-x86_64-full.AppImage");
+    }
+
+    #[test]
+    fn test_client_asset_variant_never_reorders_the_fallback() {
+        // Nothing matches the platform triple: the variant preference must
+        // not reorder the legacy fallback — the first extension match wins.
+        let assets = vec![
+            make_asset("Zephyr_2.5.0_linux-aarch64-lite.deb"),
+            make_asset("Zephyr_2.5.0_linux-aarch64-full.deb"),
+        ];
+        let sel = select_client_asset_inner(
+            &assets,
+            &[".appimage", ".deb"],
+            "linux-x86_64",
+            Some(ClientVariant::Full),
+        )
+        .unwrap();
+        assert_eq!(sel.name, "Zephyr_2.5.0_linux-aarch64-lite.deb");
+    }
+
+    #[test]
+    fn test_client_variant_parse() {
+        assert_eq!(ClientVariant::parse("full"), Some(ClientVariant::Full));
+        assert_eq!(ClientVariant::parse(" Lite "), Some(ClientVariant::Lite));
+        assert_eq!(ClientVariant::parse("portable"), None);
+        assert_eq!(ClientVariant::parse(""), None);
+    }
+
+    #[test]
+    fn test_version_is_newer() {
+        assert!(version_is_newer("v1.19.8", "v1.19.7"));
+        assert!(version_is_newer("1.19.8", "1.19.7"));
+        assert!(version_is_newer("v1.20.0", "v1.19.9"));
+        assert!(!version_is_newer("v1.19.8", "v1.19.8"));
+        assert!(!version_is_newer("v1.19.7", "v1.19.8"));
+        // Same numbers: the stable release is newer than its pre-release.
+        assert!(version_is_newer("v1.19.8", "v1.19.8-alpha.1"));
+        assert!(!version_is_newer("v1.19.8-alpha.1", "v1.19.8"));
+        assert!(!version_is_newer("v1.19.8-alpha.1", "v1.19.8-alpha.1"));
     }
 
     // ── construct_release_from_tag tests ──
