@@ -315,7 +315,13 @@ describe('menu triggers accessibility', () => {
 describe('icon-only close and back buttons', () => {
     it('index.html buttons carry translatable aria-labels', () => {
         const doc = parseIndex();
-        for (const [id, key] of [['fullscreen-editor-close-btn', 'close'], ['btn-back-settings', 'backToSettings'], ['add-tunnel-btn', 'add']]) {
+        for (const [id, key] of [
+            ['fullscreen-editor-close-btn', 'close'],
+            ['btn-back-settings', 'backToSettings'],
+            ['add-tunnel-btn', 'add'],
+            ['open-plugins-btn', 'overrideTitle'],
+            ['update-all-sub-btn', 'updateAll'],
+        ]) {
             const btn = doc.getElementById(id);
             expect(btn, id).toBeTruthy();
             expect(btn?.getAttribute('aria-label'), id).toBeTruthy();
