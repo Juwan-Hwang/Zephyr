@@ -1420,19 +1420,19 @@
                     <p id="port-socks-hint" class="text-2xs text-[var(--text-muted)] mt-1.5 ms-1" data-i18n="socksPortHint">Standalone SOCKS5 proxy port (0 to disable)</p>
                 </div>
                 </div>
-                <p class="text-2xs text-[var(--text-muted)] -mt-1 ms-1" data-i18n="portZeroHint">0 = off</p>
+                <p id="port-zero-hint" class="text-2xs text-[var(--text-muted)] -mt-1 ms-1" data-i18n="portZeroHint">0 = off</p>
 
                 <div id="port-linux-group" class="grid grid-cols-2 gap-3">
                 <p class="col-span-2 text-xs font-semibold text-[var(--text-secondary)] -mb-1" data-i18n="portLinuxOnly">Transparent proxy</p>
 
                 <div>
                     <label for="port-redir-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="redirPort">Redir Port</label>
-                    <input id="port-redir-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="0">
+                    <input id="port-redir-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="0" aria-describedby="port-zero-hint">
                 </div>
 
                 <div>
                     <label for="port-tproxy-input" class="block text-xs font-medium text-[var(--text-muted)] mb-2" data-i18n="tproxyPort">TProxy Port</label>
-                    <input id="port-tproxy-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="0">
+                    <input id="port-tproxy-input" type="number" min="0" max="65535" class="form-control form-control-md" placeholder="0" aria-describedby="port-zero-hint">
                 </div>
                 </div>
             </div>
