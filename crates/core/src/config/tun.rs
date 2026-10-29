@@ -377,9 +377,38 @@ fn flow_collection_has_invalid_content(
         match quote {
             Some(b'"') => {
                 if b == b'\\' {
+                    // Same rule as the block scanners: an invalid escape
+                    // is text the parser rejects, so it forces fallback.
+                    // Skipping the escaped byte blindly would let a flow
+                    // value like `["a\q"]` pass the fast path and be
+                    // written, while the full parser rejects it.
                     quoted.push(b);
-                    if let Some(escaped) = bytes.next() {
+                    let Some(escaped) = bytes.next() else {
+                        return true;
+                    };
+                    if is_simple_double_quoted_escape(escaped) {
                         quoted.push(escaped);
+                    } else if matches!(escaped, b'x' | b'u' | b'U') {
+                        let digits = match escaped {
+                            b'x' => 2,
+                            b'u' => 4,
+                            _ => 8,
+                        };
+                        let mut hex = Vec::with_capacity(digits);
+                        for _ in 0..digits {
+                            match bytes.next() {
+                                Some(h) if h.is_ascii_hexdigit() => {
+                                    hex.push(h);
+                                    quoted.push(h);
+                                }
+                                _ => return true,
+                            }
+                        }
+                        if !unicode_escape_digits_are_valid(&hex) {
+                            return true;
+                        }
+                    } else {
+                        return true;
                     }
                 } else if b == b'"' {
                     quote = None;
@@ -802,6 +831,63 @@ fn quoted_key_shape_forces_fallback(body: &str) -> bool {
 /// line (`foo: "start` / `secret: real` / `a: b"` parses with the
 /// `secret:` line INSIDE the quoted scalar), which no other scanner
 /// rule can tell apart from a real key.
+/// Whether a double-quoted escape letter is one of the simple
+/// single-character escapes (no digits follow).
+const fn is_simple_double_quoted_escape(next: u8) -> bool {
+    matches!(
+        next,
+        b'0' | b'a'
+            | b'b'
+            | b't'
+            | b'n'
+            | b'v'
+            | b'f'
+            | b'r'
+            | b'e'
+            | b'"'
+            | b'/'
+            | b'\\'
+            | b'N'
+            | b'_'
+            | b'L'
+            | b'P'
+    )
+}
+
+/// Whether the hex digits of a `\x` / `\u` / `\U` escape name a real
+/// Unicode scalar value: `\uD800` and `\U00110000` are only hex digits,
+/// but the full parser rejects them, so the fast path must not accept
+/// them either.
+fn unicode_escape_digits_are_valid(hex: &[u8]) -> bool {
+    hex.iter().all(u8::is_ascii_hexdigit)
+        && std::str::from_utf8(hex)
+            .ok()
+            .and_then(|s| u32::from_str_radix(s, 16).ok())
+            .and_then(char::from_u32)
+            .is_some()
+}
+
+/// Whether the escape starting at byte `backslash` in `bytes` is
+/// valid: a simple escape, or a hex escape with the right digit
+/// count naming a Unicode scalar value.
+fn double_quoted_escape_is_valid(bytes: &[u8], backslash: usize) -> bool {
+    let Some(&next) = bytes.get(backslash + 1) else {
+        return false;
+    };
+    if is_simple_double_quoted_escape(next) {
+        return true;
+    }
+    let digits = match next {
+        b'x' => 2,
+        b'u' => 4,
+        b'U' => 8,
+        _ => return false,
+    };
+    bytes
+        .get(backslash + 2..backslash + 2 + digits)
+        .is_some_and(unicode_escape_digits_are_valid)
+}
+
 fn quoted_value_forces_fallback(value: &str) -> bool {
     let mut bytes = value.bytes().enumerate().peekable();
     let Some((_, quote)) = bytes.next() else {
@@ -809,6 +895,17 @@ fn quoted_value_forces_fallback(value: &str) -> bool {
     };
     while let Some((i, b)) = bytes.next() {
         if quote == b'"' && b == b'\\' {
+            // A backslash followed by anything else is not a valid
+            // double-quoted escape: skipping it blindly would let an
+            // invalid escape in an unrelated value pass the fast path,
+            // while the full parser rejects the whole document. Force
+            // fallback instead, so the document is parsed for real.
+            let Some((_, _)) = bytes.peek().copied() else {
+                continue;
+            };
+            if !double_quoted_escape_is_valid(value.as_bytes(), i) {
+                return true;
+            }
             bytes.next();
             continue;
         }
@@ -817,11 +914,82 @@ fn quoted_value_forces_fallback(value: &str) -> bool {
                 bytes.next();
                 continue;
             }
-            let rest = value[i + 1..].trim();
-            return !rest.is_empty() && !rest.starts_with('#');
+            // A comment must be separated from the scalar by whitespace:
+            // `"a"#comment` is malformed (the parser rejects it), so a `#`
+            // glued straight onto the closing quote forces fallback.
+            let rest = &value[i + 1..];
+            if rest.is_empty() {
+                return false;
+            }
+            if !rest.starts_with([' ', '\t']) {
+                return true;
+            }
+            let trimmed = rest.trim();
+            return !trimmed.is_empty() && !trimmed.starts_with('#');
         }
     }
     // The quote never closes on this line.
+    true
+}
+
+/// Whether a quoted scalar on a sequence-entry line is followed by
+/// text the parser rejects: a `#` glued to the closing quote, or any
+/// other trailing junk that is neither a mapping colon, a separated
+/// comment, nor nothing. Returns false when the quote never closes
+/// on this line — a multi-line scalar's continuation lines are judged
+/// by the frame logic, not here. Callers use this only to force a
+/// fallback; misclassifying a rare-but-legal shape as junk merely
+/// costs fast-path coverage, never correctness.
+fn quoted_entry_has_trailing_junk(content: &str) -> bool {
+    let mut bytes = content.bytes().enumerate().peekable();
+    let Some((_, quote)) = bytes.next() else {
+        return false;
+    };
+    let mut after_quote = None;
+    while let Some((i, b)) = bytes.next() {
+        if quote == b'"' && b == b'\\' {
+            // Same rule as the main quoted scanner: an invalid escape
+            // is text the parser rejects, so it counts as junk here.
+            let Some((_, _)) = bytes.peek().copied() else {
+                continue;
+            };
+            if !double_quoted_escape_is_valid(content.as_bytes(), i) {
+                return true;
+            }
+            bytes.next();
+            continue;
+        }
+        if b == quote {
+            if quote == b'\'' && bytes.peek().is_some_and(|&(_, next)| next == b'\'') {
+                bytes.next();
+                continue;
+            }
+            after_quote = Some(&content[i + 1..]);
+            break;
+        }
+    }
+    let Some(rest) = after_quote else {
+        return false;
+    };
+    if rest.is_empty() {
+        return false;
+    }
+    let body = rest.trim_start_matches([' ', '\t']);
+    if body.is_empty() {
+        return false;
+    }
+    // A comment needs its separating space: `"a" # c` is fine, but
+    // `"a"#c` is malformed, so only a spaced `#` counts as a comment.
+    let had_space = body.len() != rest.len();
+    if had_space && body.starts_with('#') {
+        return false;
+    }
+    // A mapping colon (`"a": b`, `"a":`) makes this a mapping entry,
+    // not a scalar with junk; a colon not followed by space or end
+    // (`"a":b`) is not a mapping colon and falls back.
+    if body.starts_with(':') && (body.len() == 1 || body[1..].starts_with([' ', '\t'])) {
+        return false;
+    }
     true
 }
 
@@ -904,6 +1072,12 @@ fn plain_value_has_mapping_colon(
             // rejects it rather than treating it as a bare anchor
             // whose value sits on a later line.
             if token.len() < 2 {
+                return true;
+            }
+            // Anchor names cannot contain flow indicators: a name
+            // like `a,` is rejected by the parser, so it must not
+            // be recorded as a valid anchor here.
+            if token[1..].contains(['[', ']', '{', '}', ',']) {
                 return true;
             }
             anchors.insert(token[1..].to_owned());
@@ -1353,8 +1527,12 @@ fn content_line_frame(line: &str) -> (usize, bool) {
         // colon is a mapping entry, not a scalar: the junk check
         // inside `quoted_value_forces_fallback` tells them apart,
         // since the text after the closing quote is then `: …`.)
+        // A quoted entry with trailing junk the parser rejects
+        // (`- "a"#x`) frames finished too: before the glued-`#`
+        // change it framed this way, and framing it unfinished lets
+        // deeper lines pass as mapping content of a malformed entry.
         if (content.starts_with('"') || content.starts_with('\''))
-            && !quoted_value_forces_fallback(content)
+            && (!quoted_value_forces_fallback(content) || quoted_entry_has_trailing_junk(content))
         {
             return (indent, true);
         }
@@ -2152,11 +2330,259 @@ pub fn update_tun_in_yaml(content: &str, enable: bool) -> Result<String, AppErro
     })
 }
 
+/// Format a string as a spec-compliant YAML scalar value.
+fn format_yaml_secret_scalar(secret: &str) -> String {
+    // Only alphanumeric, `_`, `.` and `/` may start an unquoted scalar: `@`
+    // is a reserved indicator, and `-` followed by separation would read as
+    // a sequence entry, so secrets starting with either must be quoted even
+    // though both characters are allowed inside a plain scalar.
+    let first_ok = secret
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '/'));
+    // `...` is the YAML document-end marker, not a plain scalar: emitting it
+    // unquoted would end the document instead of setting the secret.
+    if !secret.is_empty()
+        && secret != "..."
+        && first_ok
+        && secret
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@' | '/'))
+        && yaml_unquoted_scalar_is_string(secret)
+    {
+        secret.to_owned()
+    } else {
+        let escaped = secret
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t");
+        format!("\"{escaped}\"")
+    }
+}
+
+/// Whether a blank run at `start` is inside a multi-line scalar: true when
+/// the first non-blank line after it is indented (its content continues the
+/// old value), false when the next line is a key or the input ends.
+fn blank_run_continues_scalar(lines: &[&str], start: usize) -> bool {
+    let mut probe = start;
+    while lines.get(probe).is_some_and(|line| line.is_empty()) {
+        probe += 1;
+    }
+    lines
+        .get(probe)
+        .is_some_and(|line| line.starts_with(' ') || line.starts_with('\t'))
+}
+
+/// Fast-path update for top-level `secret` in YAML config content.
+///
+/// Avoids parsing and re-serializing the full YAML AST (which can take tens of milliseconds
+/// for large subscription configs) by scanning top-level lines and replacing an existing
+/// `secret:` line or prepending it if the document root is a simple mapping.
+/// Falls back to `serde_yaml` if complex YAML features, duplicate keys, or non-mapping roots
+/// are present.
+fn set_secret_in_yaml_fast(content: &str, secret: &str) -> Option<String> {
+    if content.contains("<<") || content.contains("%YAML") {
+        return None;
+    }
+    if content.starts_with('\u{FEFF}') || has_breaking_characters(content) {
+        return None;
+    }
+    // The double-quoted branch only escapes `\`, `"`, LF, CR and TAB. Any other
+    // control character (or U+2028/U+2029, which YAML treats as line breaks,
+    // or U+FFFE/U+FFFF, which are not control characters but still outside
+    // YAML's printable set) would be emitted raw into the quoted scalar,
+    // which YAML forbids — fall back to the full parser, which escapes these
+    // correctly.
+    if secret.chars().any(|c| {
+        (c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+            || c == '\u{2028}'
+            || c == '\u{2029}'
+            || c == '\u{FFFE}'
+            || c == '\u{FFFF}'
+    }) {
+        return None;
+    }
+
+    let secret_val_str = format_yaml_secret_scalar(secret);
+    let new_secret_line = format!("secret: {secret_val_str}");
+
+    let mut secret_line_idx: Option<usize> = None;
+    let mut saw_unindented_line = false;
+    let mut root_tracker = RootKindTracker::default();
+    let mut block_tracker = BlockKindTracker::default();
+    let mut anchors = std::collections::HashSet::new();
+    let mut seen_keys = std::collections::HashSet::new();
+    let mut last_content: Option<(usize, bool)> = None;
+
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let Some(&line) = lines.get(i) else { break };
+        if line.starts_with(' ') || line.starts_with('\t') {
+            if indented_line_forces_fallback(
+                line,
+                saw_unindented_line,
+                &mut last_content,
+                &mut block_tracker,
+                &mut anchors,
+            ) {
+                return None;
+            }
+            let trimmed_start = line.trim_start();
+            if !trimmed_start.is_empty() && !trimmed_start.starts_with('#') {
+                root_tracker.note_indented_content();
+            }
+            i += 1;
+            continue;
+        }
+
+        let trimmed_line = line.trim();
+        if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
+            i += 1;
+            continue;
+        }
+        saw_unindented_line = true;
+
+        if line.starts_with("---") || line.starts_with("...") {
+            return None;
+        }
+
+        if trimmed_line.starts_with('?')
+            || trimmed_line.starts_with('{')
+            || trimmed_line.starts_with('[')
+        {
+            return None;
+        }
+
+        if unindented_line_forces_fallback(line, &mut root_tracker, &mut anchors, &mut seen_keys)
+            || !block_tracker.reset_and_note(line)
+        {
+            return None;
+        }
+
+        last_content = Some(content_line_frame(line));
+
+        if quoted_key_could_name(trimmed_line, "secret") {
+            return None;
+        }
+
+        if let Some(rest) = line.strip_prefix("secret") {
+            if !rest.starts_with(':') && rest.trim_start_matches([' ', '\t']).starts_with(':') {
+                return None;
+            }
+        }
+
+        if let Some(rest) = line.strip_prefix("secret:") {
+            if rest.is_empty()
+                || rest.starts_with(' ')
+                || rest.starts_with('\t')
+                || rest.starts_with('#')
+            {
+                if secret_line_idx.is_some() {
+                    return None;
+                }
+                // The replace path drops the secret line's following indented
+                // lines, which is only safe when they belong to the old value
+                // itself. Fall back when there is no inline scalar (a nested
+                // block would be silently deleted), when the value defines an
+                // anchor (replacing the line would leave dangling aliases),
+                // or when a flow collection spans multiple lines (its
+                // continuation lines would be dropped).
+                let value = rest.trim_start_matches([' ', '\t']);
+                if value.is_empty()
+                    || value.starts_with('#')
+                    // An anchor can sit after a tag (`!!str &a x`) or inside a
+                    // closed flow collection (`[&a 1]`), not just at the start.
+                    || value.contains('&')
+                    // A `]`/`}` inside a trailing comment does not close the
+                    // collection: `[1, # ]` on the first line would pass the
+                    // contains check while the continuation lines (and any
+                    // anchor they define) are still dropped below. Any comment
+                    // on the line makes the scan inconclusive, so fall back
+                    // rather than trust it.
+                    || (value.starts_with('[') && (!value.contains(']') || value.contains('#')))
+                    || (value.starts_with('{') && (!value.contains('}') || value.contains('#')))
+                {
+                    return None;
+                }
+                secret_line_idx = Some(i);
+            }
+        }
+
+        i += 1;
+    }
+
+    if !saw_unindented_line {
+        return None;
+    }
+
+    if root_tracker.kind == Some(RootLineKind::Sequence)
+        || root_tracker.kind == Some(RootLineKind::Scalar)
+    {
+        return None;
+    }
+
+    if let Some(idx) = secret_line_idx {
+        let mut end_idx = idx + 1;
+        while end_idx < lines.len() {
+            let Some(&next_line) = lines.get(end_idx) else {
+                break;
+            };
+            if next_line.starts_with(' ') || next_line.starts_with('\t') {
+                end_idx += 1;
+            } else if next_line.is_empty() {
+                // A blank line inside a multi-line scalar is legal YAML, so
+                // the old value can continue on the next indented line
+                // (`secret: old` / `` / `  continued` parses as
+                // "old\ncontinued"). Dropping only up to the blank line
+                // would leave that continuation behind to attach itself to
+                // the NEW secret line. Fall back to the full parser when an
+                // indented line follows the blank run; bare separator blanks
+                // before the next key are harmless and stay put.
+                if blank_run_continues_scalar(&lines, end_idx) {
+                    return None;
+                }
+                break;
+            } else {
+                break;
+            }
+        }
+
+        let mut result = String::with_capacity(content.len() + new_secret_line.len());
+        for (line_num, &line) in lines.iter().enumerate() {
+            if line_num == idx {
+                result.push_str(&new_secret_line);
+                if line_num + 1 < lines.len() || content.ends_with('\n') {
+                    result.push('\n');
+                }
+            } else if line_num <= idx || line_num >= end_idx {
+                result.push_str(line);
+                if line_num + 1 < lines.len() || content.ends_with('\n') {
+                    result.push('\n');
+                }
+            }
+        }
+        Some(result)
+    } else {
+        let mut result = String::with_capacity(content.len() + new_secret_line.len() + 2);
+        result.push_str(&new_secret_line);
+        result.push('\n');
+        result.push_str(content);
+        Some(result)
+    }
+}
+
 /// Set the top-level controller `secret` in YAML config content.
 ///
 /// Only the root key changes: a nested `secret:` inside a proxy, provider or
 /// listener block is left alone, and `serde_yaml` quotes the value as needed.
 pub fn set_secret_in_yaml(content: &str, secret: &str) -> Result<String, AppError> {
+    if let Some(updated) = set_secret_in_yaml_fast(content, secret) {
+        return Ok(updated);
+    }
+
     let mut yaml_val = yaml::from_str::<YamlValue>(content)
         .map_err(|e| AppError::ParseError(format!("Failed to parse YAML config: {e}")))?;
     yaml_val
@@ -2299,6 +2725,183 @@ mod tests {
             set_secret_in_yaml("mixed-port: 7890\n", "s1").expect("secret insert should succeed");
         assert_eq!(extract_secret_from_yaml(&added).as_deref(), Some("s1"));
         assert!(set_secret_in_yaml("- a\n", "s").is_err());
+    }
+
+    #[test]
+    fn test_clash_config_quoted_fast_path() {
+        let cfg = crate::config::subscription::quote_short_id_values("mixed-port: 7890\nallow-lan: false\nmode: rule\nlog-level: info\nexternal-controller: 127.0.0.1:9090\nsecret: s3cr3t\nexternal-ui: ./ui\nscript: ./patch.js\ndns:\n  enable: true\n  enhanced-mode: fake-ip\n  fake-ip-range: 198.18.0.1/16\n  nameserver:\n    - https://1.1.1.1/dns-query\ntun:\n  enable: false\n  stack: mixed\nproxies:\n  - name: node-0\n    type: vless\n    server: s0.example.com\n    port: 443\n    uuid: 00000000-0000-0000-0000-000000000000\n    tls: true\n    reality-opts:\n      public-key: abcdef\n      short-id: 34010e00\nproxy-providers:\n  provider-1:\n    type: http\n    url: https://example.com/provider.yaml\n    path: ./providers/provider-1.yaml\nproxy-groups:\n  - name: Proxy\n    type: select\n    proxies:\n      - node-0\nrules:\n  - DOMAIN-SUFFIX,site0.example.com,Proxy\n  - MATCH,DIRECT\n");
+        assert!(set_secret_in_yaml_fast(&cfg, "n3w-s3cret").is_some());
+    }
+
+    #[test]
+    fn test_format_yaml_secret_scalar() {
+        assert_eq!(format_yaml_secret_scalar("simple_secret"), "simple_secret");
+        assert_eq!(
+            format_yaml_secret_scalar("s3cr3t-123.abc"),
+            "s3cr3t-123.abc"
+        );
+        assert_eq!(format_yaml_secret_scalar("@abc"), "\"@abc\"");
+        assert_eq!(format_yaml_secret_scalar("-"), "\"-\"");
+        assert_eq!(format_yaml_secret_scalar("secret#123"), "\"secret#123\"");
+        assert_eq!(format_yaml_secret_scalar("a: b"), "\"a: b\"");
+        assert_eq!(format_yaml_secret_scalar("null"), "\"null\"");
+        assert_eq!(format_yaml_secret_scalar("true"), "\"true\"");
+        assert_eq!(format_yaml_secret_scalar("12345"), "\"12345\"");
+        // `...` is the document-end marker, not a plain scalar.
+        assert_eq!(format_yaml_secret_scalar("..."), "\"...\"");
+        assert_eq!(format_yaml_secret_scalar(""), "\"\"");
+        assert_eq!(
+            format_yaml_secret_scalar("foo\"bar\\baz"),
+            "\"foo\\\"bar\\\\baz\""
+        );
+    }
+
+    #[test]
+    fn test_set_secret_in_yaml_fast_path_and_fallbacks() {
+        // Fast-path updates an existing secret
+        let res = set_secret_in_yaml("mixed-port: 7890\nsecret: old\n", "new_secret").unwrap();
+        assert_eq!(
+            extract_secret_from_yaml(&res).as_deref(),
+            Some("new_secret")
+        );
+
+        // Special characters requiring quoting (e.g. comment characters, colon)
+        let res_quoted = set_secret_in_yaml("port: 8080\n", "secret#value: 123").unwrap();
+        assert_eq!(
+            extract_secret_from_yaml(&res_quoted).as_deref(),
+            Some("secret#value: 123")
+        );
+
+        // Multiline scalar under secret key is properly replaced
+        let multiline = "secret: |\n  line1\n  line2\nmode: rule\n";
+        let res_multiline = set_secret_in_yaml(multiline, "simple_secret").unwrap();
+        assert_eq!(
+            extract_secret_from_yaml(&res_multiline).as_deref(),
+            Some("simple_secret")
+        );
+        assert!(res_multiline.contains("mode: rule"));
+
+        // Fallback triggers on complex YAML structures (merge key <<) and duplicate secret keys
+        let complex = "<<: {secret: x}\nsecret: old\n";
+        assert_eq!(set_secret_in_yaml_fast(complex, "new"), None);
+        let res_complex = set_secret_in_yaml(complex, "new").unwrap();
+        assert_eq!(
+            extract_secret_from_yaml(&res_complex).as_deref(),
+            Some("new")
+        );
+
+        // Non-mapping root returns error (both fast path returns None and serde_yaml fails)
+        assert!(set_secret_in_yaml("- item1\n- item2\n", "sec").is_err());
+        assert!(set_secret_in_yaml("", "sec").is_err());
+    }
+
+    #[test]
+    fn test_set_secret_in_yaml_fast_path_edge_cases() {
+        // A secret starting with `@` cannot be an unquoted plain scalar: the
+        // fast path must quote it so the result still parses to the same value.
+        let res = set_secret_in_yaml("mixed-port: 7890\n", "@token").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("@token"));
+
+        // Same for a lone `-` and for a `-`-leading value: both must be
+        // quoted so the result still parses to the same value.
+        let res = set_secret_in_yaml("mixed-port: 7890\n", "-").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("-"));
+        let res = set_secret_in_yaml("mixed-port: 7890\n", "-abc").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("-abc"));
+
+        // Control characters other than LF/CR/TAB cannot appear raw in a
+        // double-quoted scalar: the fast path bails and the full parser
+        // handles the value.
+        let res = set_secret_in_yaml("mixed-port: 7890\n", "a\u{0}b").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("a\u{0}b"));
+
+        // Replacing a secret line that defines an anchor must not leave a
+        // dangling alias behind: fall back to the full parser.
+        assert_eq!(
+            set_secret_in_yaml_fast("secret: &a old\nexternal-controller: *a\n", "new"),
+            None
+        );
+        let res = set_secret_in_yaml("secret: &a old\nexternal-controller: *a\n", "new").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("new"));
+
+        // Same hazard when the anchor sits after a tag or inside a closed
+        // flow collection: the old guard only caught a leading `&`.
+        assert_eq!(
+            set_secret_in_yaml_fast("secret: !!str &a old\nfoo: *a\n", "new"),
+            None
+        );
+        assert_eq!(
+            set_secret_in_yaml_fast("secret: [&a 1]\nfoo: *a\n", "new"),
+            None
+        );
+        let res = set_secret_in_yaml("secret: !!str &a old\nfoo: *a\n", "new").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("new"));
+
+        // A value-less secret key whose nested block defines an anchor must
+        // not leave a dangling alias behind: the replace path drops the
+        // secret line's indented lines, so fall back to the full parser.
+        assert_eq!(
+            set_secret_in_yaml_fast("secret:\n  nested: &a x\nfoo: *a\nmode: rule\n", "new"),
+            None
+        );
+        let res =
+            set_secret_in_yaml("secret:\n  nested: &a x\nfoo: *a\nmode: rule\n", "new").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("new"));
+
+        // Same hazard for a flow collection spanning lines: its continuation
+        // lines may define anchors referenced elsewhere.
+        assert_eq!(
+            set_secret_in_yaml_fast("secret: [\n  &a 1,\n]\nfoo: *a\nmode: rule\n", "new"),
+            None
+        );
+        let res =
+            set_secret_in_yaml("secret: [\n  &a 1,\n]\nfoo: *a\nmode: rule\n", "new").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("new"));
+
+        // A `]` inside a trailing comment does not close the collection:
+        // the first line below looks single-line to a contains check, but
+        // the continuation defines `&a`, which a later alias still needs.
+        assert_eq!(
+            set_secret_in_yaml_fast("secret: [1, # ]\n  &a 2]\nfoo: *a\nmode: rule\n", "new"),
+            None
+        );
+        let res =
+            set_secret_in_yaml("secret: [1, # ]\n  &a 2]\nfoo: *a\nmode: rule\n", "new").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("new"));
+
+        // A quoted scalar glued to a comment marker is malformed: the fast
+        // path must not vouch for the document.
+        assert_eq!(
+            set_secret_in_yaml_fast("other: \"a\"#comment\nsecret: old\n", "new"),
+            None
+        );
+
+        // U+FFFE/U+FFFF are not control characters, but they are outside
+        // YAML's printable set and must not be emitted raw into a quoted
+        // scalar either.
+        assert_eq!(
+            set_secret_in_yaml_fast("mixed-port: 7890\nsecret: old\n", "a\u{FFFE}b"),
+            None
+        );
+        assert_eq!(
+            set_secret_in_yaml_fast("mixed-port: 7890\nsecret: old\n", "a\u{FFFF}b"),
+            None
+        );
+
+        // A blank line inside a multi-line scalar does not end the old
+        // value: `secret: old` / `` / `  continued` parses as
+        // "old\ncontinued". The replace path must fall back instead of
+        // leaving `continued` behind to attach to the new secret line,
+        // while a blank separator before the next key stays fast-path.
+        assert_eq!(
+            set_secret_in_yaml_fast("secret: old\n\n  continued\nmode: rule\n", "new"),
+            None
+        );
+        let res = set_secret_in_yaml("secret: old\n\n  continued\nmode: rule\n", "new").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("new"));
+        assert!(!res.contains("continued"));
+        let res = set_secret_in_yaml("secret: old\n\nmode: rule\n", "new").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("new"));
     }
 
     #[test]
@@ -2845,6 +3448,33 @@ mod tests {
             extract_top_level_scalar_fast(commented, "secret"),
             Some("real")
         );
+    }
+
+    #[test]
+    fn test_fast_path_quoted_sequence_entry_trailing_junk() {
+        // A `#` glued to a quoted sequence entry is malformed, and a
+        // deeper line after it must not be read as mapping content of
+        // the entry: the fast path must fall back so the full parser
+        // surfaces the error instead of writing the document back.
+        for doc in [
+            "secret: old\nlist:\n  - \"a\"#x\n    k: v\n",
+            "secret: old\nlist:\n  - 'a'#x\n    k: v\n",
+            "list:\n  - \"a\"#x\n    k: v\nsecret: old\n",
+        ] {
+            assert!(yaml::from_str::<YamlValue>(doc).is_err());
+            assert_eq!(set_secret_in_yaml_fast(doc, "new"), None);
+        }
+        // A glued `#` with no deeper line is legal (scalar plus
+        // comment) and stays on the fast path.
+        let alone = "secret: old\nlist:\n  - \"a\"#x\n";
+        assert!(yaml::from_str::<YamlValue>(alone).is_ok());
+        let res = set_secret_in_yaml(alone, "new").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("new"));
+        // A mapping entry is not junk: its deeper lines are mapping
+        // content and the fast path still applies.
+        let res =
+            set_secret_in_yaml("secret: old\nlist:\n  - \"a\": b\n    c: d\n", "new").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("new"));
     }
 
     #[test]
@@ -3911,5 +4541,43 @@ mod tests {
         assert!(!extract_tun_enabled_from_yaml(
             "tun:\n    enable: true\n  oops: 1\n"
         ));
+    }
+
+    #[test]
+    fn test_set_secret_in_yaml_rejects_invalid_quoted_escape_and_anchor() {
+        // An invalid escape in an unrelated quoted value is rejected
+        // by the full parser, so the fast path must not accept the
+        // document and return updated text containing it.
+        assert_eq!(
+            set_secret_in_yaml_fast("secret: old\nbad: \"x\\q\"\n", "new"),
+            None
+        );
+        assert!(set_secret_in_yaml("secret: old\nbad: \"x\\q\"\n", "new").is_err());
+        // Valid escapes keep the fast path: \n, \", \\ and \x41.
+        assert!(set_secret_in_yaml_fast("secret: old\nbad: \"x\\ny\"\n", "new").is_some());
+        assert!(set_secret_in_yaml_fast("secret: old\nbad: \"x\\x41y\"\n", "new").is_some());
+        // An invalid escape inside a flow value is the same gap in the
+        // flow scanner, which used to skip the escaped byte unchecked.
+        assert_eq!(
+            set_secret_in_yaml_fast("secret: old\nother: [\"a\\q\"]\n", "new"),
+            None
+        );
+        assert!(set_secret_in_yaml("secret: old\nother: [\"a\\q\"]\n", "new").is_err());
+        // A hex escape that names no Unicode scalar value (a surrogate
+        // or a value above the maximum) is also rejected by the parser,
+        // so the fast path must fall back instead of accepting it.
+        for bad in ["\\uD800", "\\U00110000"] {
+            let doc = format!("secret: old\nbad: \"x{bad}\"\n");
+            assert_eq!(set_secret_in_yaml_fast(&doc, "new"), None, "{doc:?}");
+        }
+        // A valid scalar escape keeps the fast path.
+        assert!(set_secret_in_yaml_fast("secret: old\nbad: \"x\\u00e9\"\n", "new").is_some());
+        // An anchor name containing a flow indicator is not a valid
+        // anchor: the scanner must fall back rather than record it,
+        // even when the anchor sits on an unrelated line.
+        assert_eq!(
+            set_secret_in_yaml_fast("foo: &a, bar\nsecret: old\n", "new"),
+            None
+        );
     }
 }
