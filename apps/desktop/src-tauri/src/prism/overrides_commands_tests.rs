@@ -38,13 +38,22 @@ mod tests {
     #[test]
     fn validate_override_url_rejects_invalid_schemes() {
         let err = validate_override_url("file:///etc/passwd").unwrap_err();
-        assert!(err.contains("http:// or https://"), "unexpected error: {err}");
+        assert!(
+            err.contains("http:// or https://"),
+            "unexpected error: {err}"
+        );
 
         let err = validate_override_url("ftp://example.com/file").unwrap_err();
-        assert!(err.contains("http:// or https://"), "unexpected error: {err}");
+        assert!(
+            err.contains("http:// or https://"),
+            "unexpected error: {err}"
+        );
 
         let err = validate_override_url("javascript:alert(1)").unwrap_err();
-        assert!(err.contains("http:// or https://"), "unexpected error: {err}");
+        assert!(
+            err.contains("http:// or https://"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -54,7 +63,10 @@ mod tests {
 
         let long_url = format!("https://example.com/{}", "a".repeat(2040));
         let err = validate_override_url(&long_url).unwrap_err();
-        assert!(err.contains("exceeds maximum length"), "unexpected error: {err}");
+        assert!(
+            err.contains("exceeds maximum length"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

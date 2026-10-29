@@ -94,8 +94,8 @@ pub async fn override_create(
     let mut ext = OverrideExt::from_ext(&ext).ok_or_else(|| format!("Unknown ext: {ext}"))?;
 
     // Validate URL if provided
-    let validated_url = match url {
-        Some(ref u) if !u.trim().is_empty() => Some(validate_override_url(u)?),
+    let validated_url = match url.as_deref() {
+        Some(u) if !u.trim().is_empty() => Some(validate_override_url(u)?),
         _ => None,
     };
 
