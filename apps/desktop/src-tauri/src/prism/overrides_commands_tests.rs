@@ -20,8 +20,54 @@
 mod tests {
     use super::super::{
         check_write_mode, default_template_content, failed_apply_log, lost_by_failed_reload,
-        sanitize_override_yaml, single_apply_reload_error, OverrideExt,
+        sanitize_override_yaml, single_apply_reload_error, validate_override_url, OverrideExt,
     };
+
+    #[test]
+    fn validate_override_url_accepts_valid_http_https() {
+        assert_eq!(
+            validate_override_url("https://example.com/script.js").unwrap(),
+            "https://example.com/script.js"
+        );
+        assert_eq!(
+            validate_override_url("  http://example.org/rules.yaml  ").unwrap(),
+            "http://example.org/rules.yaml"
+        );
+    }
+
+    #[test]
+    fn validate_override_url_rejects_invalid_schemes() {
+        let err = validate_override_url("file:///etc/passwd").unwrap_err();
+        assert!(
+            err.contains("http:// or https://"),
+            "unexpected error: {err}"
+        );
+
+        let err = validate_override_url("ftp://example.com/file").unwrap_err();
+        assert!(
+            err.contains("http:// or https://"),
+            "unexpected error: {err}"
+        );
+
+        let err = validate_override_url("javascript:alert(1)").unwrap_err();
+        assert!(
+            err.contains("http:// or https://"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_override_url_rejects_empty_or_oversized() {
+        let err = validate_override_url("   ").unwrap_err();
+        assert!(err.contains("cannot be empty"), "unexpected error: {err}");
+
+        let long_url = format!("https://example.com/{}", "a".repeat(2040));
+        let err = validate_override_url(&long_url).unwrap_err();
+        assert!(
+            err.contains("exceeds maximum length"),
+            "unexpected error: {err}"
+        );
+    }
 
     #[test]
     fn sanitize_override_yaml_strips_dangerous_keys() {

@@ -58,8 +58,15 @@ pub fn validate_proxy_server(server: &str) -> Result<(), AppError> {
     }
 
     // Handle special hostname cases
-    let host_lower = hp.host.to_lowercase();
-    if host_lower == "localhost" {
+    // Zero-allocation case-insensitive check without allocating a lowercase String.
+    // Non-ASCII hosts keep the previous Unicode-aware lowercasing so their
+    // classification stays exactly what it was before this refactor.
+    let is_localhost = if hp.host.is_ascii() {
+        hp.host.eq_ignore_ascii_case("localhost")
+    } else {
+        hp.host.to_lowercase() == "localhost"
+    };
+    if is_localhost {
         return Ok(());
     }
 
