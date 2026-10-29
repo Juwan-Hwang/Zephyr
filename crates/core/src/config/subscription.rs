@@ -908,8 +908,11 @@ fn is_unsafe_destination_v4(bits: u32) -> bool {
 fn ends_with_ignore_ascii_case(s: &str, suffix: &str) -> bool {
     let s_bytes = s.as_bytes();
     let suffix_bytes = suffix.as_bytes();
-    s_bytes.len() >= suffix_bytes.len()
-        && s_bytes[s_bytes.len() - suffix_bytes.len()..].eq_ignore_ascii_case(suffix_bytes)
+    s_bytes
+        .len()
+        .checked_sub(suffix_bytes.len())
+        .and_then(|offset| s_bytes.get(offset..))
+        .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix_bytes))
 }
 
 /// Check if a host is a private or local address (SSRF protection)
