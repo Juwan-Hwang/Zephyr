@@ -495,14 +495,14 @@ fn extract_name_from_rules_fast(content: &str) -> FastScan {
 /// Shared by the fast path and the full parser so the two cannot drift apart.
 fn rule_policy_name(rule_str: &str) -> Option<&str> {
     let name = rule_str.split(',').nth(2)?.trim();
-    let upper = name.to_uppercase();
-    if upper.is_empty()
-        || upper == "DIRECT"
-        || upper == "REJECT"
-        || upper == "MATCH"
-        || upper == "PROXY"
-        || upper == "PASS"
-        || upper == "DROP"
+    // Zero-allocation case-insensitive comparisons against generic policy target names.
+    if name.is_empty()
+        || name.eq_ignore_ascii_case("DIRECT")
+        || name.eq_ignore_ascii_case("REJECT")
+        || name.eq_ignore_ascii_case("MATCH")
+        || name.eq_ignore_ascii_case("PROXY")
+        || name.eq_ignore_ascii_case("PASS")
+        || name.eq_ignore_ascii_case("DROP")
     {
         return None;
     }
@@ -904,6 +904,14 @@ fn is_unsafe_destination_v4(bits: u32) -> bool {
         || v4_in_cidr(bits, 0xf000_0000, 4)
 }
 
+#[inline]
+fn ends_with_ignore_ascii_case(s: &str, suffix: &str) -> bool {
+    let s_bytes = s.as_bytes();
+    let suffix_bytes = suffix.as_bytes();
+    s_bytes.len() >= suffix_bytes.len()
+        && s_bytes[s_bytes.len() - suffix_bytes.len()..].eq_ignore_ascii_case(suffix_bytes)
+}
+
 /// Check if a host is a private or local address (SSRF protection)
 #[must_use]
 pub fn is_private_host(host: &str) -> bool {
@@ -915,19 +923,19 @@ pub fn is_private_host(host: &str) -> bool {
     if normalized.is_empty() {
         return false;
     }
-    let host_lower = normalized.to_lowercase();
 
-    if host_lower == "localhost"
-        || host_lower.ends_with(".localhost")
-        || host_lower.ends_with(".local")
-        || host_lower.ends_with(".internal")
-        || host_lower.ends_with(".intranet")
-        || host_lower.ends_with(".private")
-        || host_lower.ends_with(".lan")
-        || host_lower == "home.arpa"
-        || host_lower.ends_with(".home.arpa")
-        || host_lower.ends_with(".home")
-        || host_lower.ends_with(".corp")
+    // Zero-allocation case-insensitive checks without allocating a lowercase String per host.
+    if normalized.eq_ignore_ascii_case("localhost")
+        || ends_with_ignore_ascii_case(normalized, ".localhost")
+        || ends_with_ignore_ascii_case(normalized, ".local")
+        || ends_with_ignore_ascii_case(normalized, ".internal")
+        || ends_with_ignore_ascii_case(normalized, ".intranet")
+        || ends_with_ignore_ascii_case(normalized, ".private")
+        || ends_with_ignore_ascii_case(normalized, ".lan")
+        || normalized.eq_ignore_ascii_case("home.arpa")
+        || ends_with_ignore_ascii_case(normalized, ".home.arpa")
+        || ends_with_ignore_ascii_case(normalized, ".home")
+        || ends_with_ignore_ascii_case(normalized, ".corp")
     {
         return true;
     }
@@ -971,9 +979,11 @@ pub fn is_literal_private_host(host: &str) -> bool {
     if normalized.is_empty() {
         return false;
     }
-    let host_lower = normalized.to_lowercase();
 
-    if host_lower == "localhost" || host_lower.ends_with(".localhost") {
+    // Zero-allocation case-insensitive checks.
+    if normalized.eq_ignore_ascii_case("localhost")
+        || ends_with_ignore_ascii_case(normalized, ".localhost")
+    {
         return true;
     }
 
@@ -3278,5 +3288,16 @@ mod tests {
             select_global_candidate(&map).map(|(c, _)| c),
             Some("Top-LB".to_owned())
         );
+    }
+
+    #[test]
+    fn test_ends_with_ignore_ascii_case_multibyte_utf8() {
+        assert!(ends_with_ignore_ascii_case("node.LOCAL", ".local"));
+        assert!(ends_with_ignore_ascii_case("测试.local", ".LOCAL"));
+        assert!(!ends_with_ignore_ascii_case("测试.com", ".local"));
+        // Does not panic when byte offset s.len() - suffix.len() lands inside a multi-byte UTF-8 char
+        assert!(!ends_with_ignore_ascii_case("中国", ".com"));
+        assert!(is_private_host("测试.local"));
+        assert!(!is_private_host("测试.com"));
     }
 }

@@ -58,8 +58,8 @@ pub fn validate_proxy_server(server: &str) -> Result<(), AppError> {
     }
 
     // Handle special hostname cases
-    let host_lower = hp.host.to_lowercase();
-    if host_lower == "localhost" {
+    // Zero-allocation case-insensitive check without allocating a lowercase String.
+    if hp.host.eq_ignore_ascii_case("localhost") {
         return Ok(());
     }
 
