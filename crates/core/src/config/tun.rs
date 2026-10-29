@@ -2152,11 +2152,182 @@ pub fn update_tun_in_yaml(content: &str, enable: bool) -> Result<String, AppErro
     })
 }
 
+/// Format a string as a spec-compliant YAML scalar value.
+fn format_yaml_secret_scalar(secret: &str) -> String {
+    if !secret.is_empty()
+        && secret
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@' | '/'))
+        && yaml_unquoted_scalar_is_string(secret)
+    {
+        secret.to_owned()
+    } else {
+        let escaped = secret
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t");
+        format!("\"{escaped}\"")
+    }
+}
+
+/// Fast-path update for top-level `secret` in YAML config content.
+///
+/// Avoids parsing and re-serializing the full YAML AST (which can take tens of milliseconds
+/// for large subscription configs) by scanning top-level lines and replacing an existing
+/// `secret:` line or prepending it if the document root is a simple mapping.
+/// Falls back to `serde_yaml` if complex YAML features, duplicate keys, or non-mapping roots
+/// are present.
+fn set_secret_in_yaml_fast(content: &str, secret: &str) -> Option<String> {
+    if content.contains("<<") || content.contains("%YAML") {
+        return None;
+    }
+    if content.starts_with('\u{FEFF}') || has_breaking_characters(content) {
+        return None;
+    }
+
+    let secret_val_str = format_yaml_secret_scalar(secret);
+    let new_secret_line = format!("secret: {secret_val_str}");
+
+    let mut secret_line_idx: Option<usize> = None;
+    let mut saw_unindented_line = false;
+    let mut root_tracker = RootKindTracker::default();
+    let mut block_tracker = BlockKindTracker::default();
+    let mut anchors = std::collections::HashSet::new();
+    let mut seen_keys = std::collections::HashSet::new();
+    let mut last_content: Option<(usize, bool)> = None;
+
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        if line.starts_with(' ') || line.starts_with('\t') {
+            if indented_line_forces_fallback(
+                line,
+                saw_unindented_line,
+                &mut last_content,
+                &mut block_tracker,
+                &mut anchors,
+            ) {
+                return None;
+            }
+            let trimmed_start = line.trim_start();
+            if !trimmed_start.is_empty() && !trimmed_start.starts_with('#') {
+                root_tracker.note_indented_content();
+            }
+            i += 1;
+            continue;
+        }
+
+        let trimmed_line = line.trim();
+        if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
+            i += 1;
+            continue;
+        }
+        saw_unindented_line = true;
+
+        if line.starts_with("---") || line.starts_with("...") {
+            return None;
+        }
+
+        if trimmed_line.starts_with('?')
+            || trimmed_line.starts_with('{')
+            || trimmed_line.starts_with('[')
+        {
+            return None;
+        }
+
+        if unindented_line_forces_fallback(line, &mut root_tracker, &mut anchors, &mut seen_keys)
+            || !block_tracker.reset_and_note(line)
+        {
+            return None;
+        }
+
+        last_content = Some(content_line_frame(line));
+
+        if quoted_key_could_name(trimmed_line, "secret") {
+            return None;
+        }
+
+        if let Some(rest) = line.strip_prefix("secret") {
+            if !rest.starts_with(':') && rest.trim_start_matches([' ', '\t']).starts_with(':') {
+                return None;
+            }
+        }
+
+        if let Some(rest) = line.strip_prefix("secret:") {
+            if rest.is_empty()
+                || rest.starts_with(' ')
+                || rest.starts_with('\t')
+                || rest.starts_with('#')
+            {
+                if secret_line_idx.is_some() {
+                    return None;
+                }
+                secret_line_idx = Some(i);
+            }
+        }
+
+        i += 1;
+    }
+
+    if !saw_unindented_line {
+        return None;
+    }
+
+    if root_tracker.kind == Some(RootLineKind::Sequence)
+        || root_tracker.kind == Some(RootLineKind::Scalar)
+    {
+        return None;
+    }
+
+    if let Some(idx) = secret_line_idx {
+        let mut end_idx = idx + 1;
+        while end_idx < lines.len() {
+            let next_line = lines[end_idx];
+            if next_line.starts_with(' ') || next_line.starts_with('\t') {
+                end_idx += 1;
+            } else {
+                break;
+            }
+        }
+
+        let mut result = String::with_capacity(content.len() + new_secret_line.len());
+        for (line_num, &line) in lines.iter().enumerate() {
+            if line_num == idx {
+                result.push_str(&new_secret_line);
+                if line_num + 1 < lines.len() || content.ends_with('\n') {
+                    result.push('\n');
+                }
+            } else if line_num > idx && line_num < end_idx {
+                continue;
+            } else {
+                result.push_str(line);
+                if line_num + 1 < lines.len() || content.ends_with('\n') {
+                    result.push('\n');
+                }
+            }
+        }
+        Some(result)
+    } else {
+        let mut result = String::with_capacity(content.len() + new_secret_line.len() + 2);
+        result.push_str(&new_secret_line);
+        result.push('\n');
+        result.push_str(content);
+        Some(result)
+    }
+}
+
 /// Set the top-level controller `secret` in YAML config content.
 ///
 /// Only the root key changes: a nested `secret:` inside a proxy, provider or
 /// listener block is left alone, and `serde_yaml` quotes the value as needed.
 pub fn set_secret_in_yaml(content: &str, secret: &str) -> Result<String, AppError> {
+    if let Some(updated) = set_secret_in_yaml_fast(content, secret) {
+        return Ok(updated);
+    }
+
     let mut yaml_val = yaml::from_str::<YamlValue>(content)
         .map_err(|e| AppError::ParseError(format!("Failed to parse YAML config: {e}")))?;
     yaml_val
@@ -2299,6 +2470,53 @@ mod tests {
             set_secret_in_yaml("mixed-port: 7890\n", "s1").expect("secret insert should succeed");
         assert_eq!(extract_secret_from_yaml(&added).as_deref(), Some("s1"));
         assert!(set_secret_in_yaml("- a\n", "s").is_err());
+    }
+
+
+    #[test]
+    fn test_clash_config_quoted_fast_path() {
+        let cfg = crate::config::subscription::quote_short_id_values("mixed-port: 7890\nallow-lan: false\nmode: rule\nlog-level: info\nexternal-controller: 127.0.0.1:9090\nsecret: s3cr3t\nexternal-ui: ./ui\nscript: ./patch.js\ndns:\n  enable: true\n  enhanced-mode: fake-ip\n  fake-ip-range: 198.18.0.1/16\n  nameserver:\n    - https://1.1.1.1/dns-query\ntun:\n  enable: false\n  stack: mixed\nproxies:\n  - name: node-0\n    type: vless\n    server: s0.example.com\n    port: 443\n    uuid: 00000000-0000-0000-0000-000000000000\n    tls: true\n    reality-opts:\n      public-key: abcdef\n      short-id: 34010e00\nproxy-providers:\n  provider-1:\n    type: http\n    url: https://example.com/provider.yaml\n    path: ./providers/provider-1.yaml\nproxy-groups:\n  - name: Proxy\n    type: select\n    proxies:\n      - node-0\nrules:\n  - DOMAIN-SUFFIX,site0.example.com,Proxy\n  - MATCH,DIRECT\n");
+        assert!(set_secret_in_yaml_fast(&cfg, "n3w-s3cret").is_some());
+    }
+
+    #[test]
+    fn test_format_yaml_secret_scalar() {
+        assert_eq!(format_yaml_secret_scalar("simple_secret"), "simple_secret");
+        assert_eq!(format_yaml_secret_scalar("s3cr3t-123.abc"), "s3cr3t-123.abc");
+        assert_eq!(format_yaml_secret_scalar("secret#123"), "\"secret#123\"");
+        assert_eq!(format_yaml_secret_scalar("a: b"), "\"a: b\"");
+        assert_eq!(format_yaml_secret_scalar("null"), "\"null\"");
+        assert_eq!(format_yaml_secret_scalar("true"), "\"true\"");
+        assert_eq!(format_yaml_secret_scalar("12345"), "\"12345\"");
+        assert_eq!(format_yaml_secret_scalar(""), "\"\"");
+        assert_eq!(format_yaml_secret_scalar("foo\"bar\\baz"), "\"foo\\\"bar\\\\baz\"");
+    }
+
+    #[test]
+    fn test_set_secret_in_yaml_fast_path_and_fallbacks() {
+        // Fast-path updates an existing secret
+        let res = set_secret_in_yaml("mixed-port: 7890\nsecret: old\n", "new_secret").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("new_secret"));
+
+        // Special characters requiring quoting (e.g. comment characters, colon)
+        let res_quoted = set_secret_in_yaml("port: 8080\n", "secret#value: 123").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res_quoted).as_deref(), Some("secret#value: 123"));
+
+        // Multiline scalar under secret key is properly replaced
+        let multiline = "secret: |\n  line1\n  line2\nmode: rule\n";
+        let res_multiline = set_secret_in_yaml(multiline, "simple_secret").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res_multiline).as_deref(), Some("simple_secret"));
+        assert!(res_multiline.contains("mode: rule"));
+
+        // Fallback triggers on complex YAML structures (merge key <<) and duplicate secret keys
+        let complex = "<<: {secret: x}\nsecret: old\n";
+        assert_eq!(set_secret_in_yaml_fast(complex, "new"), None);
+        let res_complex = set_secret_in_yaml(complex, "new").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res_complex).as_deref(), Some("new"));
+
+        // Non-mapping root returns error (both fast path returns None and serde_yaml fails)
+        assert!(set_secret_in_yaml("- item1\n- item2\n", "sec").is_err());
+        assert!(set_secret_in_yaml("", "sec").is_err());
     }
 
     #[test]
