@@ -24,4 +24,14 @@ describe('showNotification capacity', () => {
         expect(list).toHaveLength(5);
         expect(list[0]).toBe('error');
     });
+
+    it('adds aria-label and title attributes to sticky notification close button', () => {
+        showNotification('Sticky error message', 'error');
+        const closeBtn = document.querySelector('.toast-close');
+        expect(closeBtn).not.toBeNull();
+        expect(closeBtn?.getAttribute('aria-label')).toBe('Dismiss');
+        expect(closeBtn?.getAttribute('title')).toBe('Dismiss');
+        expect(closeBtn?.dataset.i18nTitle).toBe('dismiss');
+        expect(closeBtn?.dataset.i18nAriaLabel).toBe('dismiss');
+    });
 });

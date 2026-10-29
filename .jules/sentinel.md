@@ -29,3 +29,8 @@
 **Vulnerability:** `script_grant_plugin`, `script_revoke_plugin`, and `script_check_plugin_permission` accepted `plugin_id` directly without invoking `validate_plugin_id`, allowing unsanitized plugin IDs (containing path traversal sequences, reserved names, or control characters) into the script sandbox permission configuration.
 **Learning:** Commands in secondary modules that manipulate plugin permissions or settings can easily omit validation routines implemented in the primary plugin module.
 **Prevention:** Always enforce `validate_plugin_id` on every IPC handler accepting a `plugin_id` parameter regardless of module boundary.
+
+## 2026-07-19 - Missing URL Validation in Override Creation and Metadata Updates
+**Vulnerability:** `override_update` and `override_create` allowed persisting arbitrary URL strings (including unsupported schemes like `file://` or `javascript:` and oversized strings) directly into override metadata without scheme or length validation.
+**Learning:** Metadata update commands that bypass network download routines can easily omit URL scheme and length checks performed by network fetchers.
+**Prevention:** Always enforce centralized URL validation (`http`/`https` scheme check and length cap) across all IPC handlers that receive or update URL parameters.
