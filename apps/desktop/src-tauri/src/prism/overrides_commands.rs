@@ -20,6 +20,25 @@ use crate::prism::types::{check_input_size, check_name_size};
 use crate::prism::PrismState;
 use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
 
+/// Validate an override URL (enforce max 2048 chars and http:// / https:// scheme).
+pub(crate) fn validate_override_url(raw_url: &str) -> Result<String, String> {
+    let trimmed = raw_url.trim();
+    if trimmed.is_empty() {
+        return Err("URL cannot be empty".to_owned());
+    }
+    const MAX_URL_LEN: usize = 2048;
+    if trimmed.chars().count() > MAX_URL_LEN {
+        return Err(format!(
+            "URL exceeds maximum length of {MAX_URL_LEN} characters"
+        ));
+    }
+    let parsed = url::Url::parse(trimmed).map_err(|e| format!("Invalid URL: {e}"))?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("URL must use http:// or https://".to_owned());
+    }
+    Ok(trimmed.to_owned())
+}
+
 /// Sanitize user-supplied or remote Prism YAML override content before it is written to disk.
 ///
 /// Strips dangerous YAML keys (`script`, `external-controller-*`, `external-ui`, provider `path`).
@@ -73,10 +92,17 @@ pub async fn override_create(
     // Security: Override names are identifiers; cap them like other names.
     check_name_size(&name, "Override name")?;
     let mut ext = OverrideExt::from_ext(&ext).ok_or_else(|| format!("Unknown ext: {ext}"))?;
+
+    // Validate URL if provided
+    let validated_url = match url.as_deref() {
+        Some(u) if !u.trim().is_empty() => Some(validate_override_url(u)?),
+        _ => None,
+    };
+
     let r#type = match r#type.as_str() {
         "local" => OverrideType::Local,
         "remote" => {
-            if url.as_ref().is_none_or(|u| u.trim().is_empty()) {
+            if validated_url.is_none() {
                 return Err("URL is required for remote overrides".to_owned());
             }
             OverrideType::Remote
@@ -85,7 +111,7 @@ pub async fn override_create(
     };
 
     let download_url = if r#type == OverrideType::Remote {
-        url.clone()
+        validated_url.clone()
     } else {
         None
     };
@@ -134,7 +160,7 @@ pub async fn override_create(
     if r#type == OverrideType::Remote {
         item.global = true;
     }
-    if let Some(u) = url {
+    if let Some(u) = validated_url {
         item.url = Some(u);
     }
 
@@ -365,7 +391,21 @@ pub fn override_update(
             item.profile_ids = pids;
         }
         if let Some(u) = url.take() {
-            item.url = Some(u);
+            if u.trim().is_empty() {
+                if item.r#type == OverrideType::Remote {
+                    name_error = Some("URL is required for remote overrides".to_owned());
+                    return false;
+                }
+                item.url = None;
+            } else {
+                match validate_override_url(&u) {
+                    Ok(valid_url) => item.url = Some(valid_url),
+                    Err(e) => {
+                        name_error = Some(e);
+                        return false;
+                    }
+                }
+            }
         }
         true
     });
@@ -1565,12 +1605,34 @@ pub fn override_import(state: State<PrismState>, json: String) -> Result<u32, St
             entry.content
         };
 
+        // Import is another write path for override URLs, so it gets the same
+        // validation as create/update — but a bad URL must not silently drop
+        // the whole entry: for a local override the URL is only metadata,
+        // and even a remote entry keeps its content when stored without a
+        // URL (refresh then reports it as missing, as before). Keep the
+        // entry with no URL and warn, instead of discarding its content.
+        let url = match entry.url.as_deref() {
+            Some(u) if !u.trim().is_empty() => match validate_override_url(u) {
+                Ok(validated) => Some(validated),
+                Err(e) => {
+                    emit_warn!(
+                        Override,
+                        OVERRIDE_APPLY_FAILED,
+                        "Importing entry '{}' without its invalid URL: {e}",
+                        entry.name
+                    );
+                    None
+                }
+            },
+            _ => None,
+        };
+
         // Pre-populate all fields to avoid redundant update_item call
         let mut item = OverrideItem::new(entry.name, ext, r#type);
         item.global = entry.global;
         item.profile_ids = entry.profile_ids;
         item.enabled = entry.enabled;
-        item.url = entry.url;
+        item.url = url;
 
         items_to_import.push((item, content));
     }
