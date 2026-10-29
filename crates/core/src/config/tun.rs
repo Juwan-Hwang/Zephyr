@@ -2201,7 +2201,7 @@ fn set_secret_in_yaml_fast(content: &str, secret: &str) -> Option<String> {
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0;
     while i < lines.len() {
-        let line = lines[i];
+        let Some(&line) = lines.get(i) else { break };
         if line.starts_with(' ') || line.starts_with('\t') {
             if indented_line_forces_fallback(
                 line,
@@ -2285,7 +2285,9 @@ fn set_secret_in_yaml_fast(content: &str, secret: &str) -> Option<String> {
     if let Some(idx) = secret_line_idx {
         let mut end_idx = idx + 1;
         while end_idx < lines.len() {
-            let next_line = lines[end_idx];
+            let Some(&next_line) = lines.get(end_idx) else {
+                break;
+            };
             if next_line.starts_with(' ') || next_line.starts_with('\t') {
                 end_idx += 1;
             } else {
@@ -2300,9 +2302,7 @@ fn set_secret_in_yaml_fast(content: &str, secret: &str) -> Option<String> {
                 if line_num + 1 < lines.len() || content.ends_with('\n') {
                     result.push('\n');
                 }
-            } else if line_num > idx && line_num < end_idx {
-                continue;
-            } else {
+            } else if line_num <= idx || line_num >= end_idx {
                 result.push_str(line);
                 if line_num + 1 < lines.len() || content.ends_with('\n') {
                     result.push('\n');
@@ -2472,7 +2472,6 @@ mod tests {
         assert!(set_secret_in_yaml("- a\n", "s").is_err());
     }
 
-
     #[test]
     fn test_clash_config_quoted_fast_path() {
         let cfg = crate::config::subscription::quote_short_id_values("mixed-port: 7890\nallow-lan: false\nmode: rule\nlog-level: info\nexternal-controller: 127.0.0.1:9090\nsecret: s3cr3t\nexternal-ui: ./ui\nscript: ./patch.js\ndns:\n  enable: true\n  enhanced-mode: fake-ip\n  fake-ip-range: 198.18.0.1/16\n  nameserver:\n    - https://1.1.1.1/dns-query\ntun:\n  enable: false\n  stack: mixed\nproxies:\n  - name: node-0\n    type: vless\n    server: s0.example.com\n    port: 443\n    uuid: 00000000-0000-0000-0000-000000000000\n    tls: true\n    reality-opts:\n      public-key: abcdef\n      short-id: 34010e00\nproxy-providers:\n  provider-1:\n    type: http\n    url: https://example.com/provider.yaml\n    path: ./providers/provider-1.yaml\nproxy-groups:\n  - name: Proxy\n    type: select\n    proxies:\n      - node-0\nrules:\n  - DOMAIN-SUFFIX,site0.example.com,Proxy\n  - MATCH,DIRECT\n");
@@ -2482,37 +2481,55 @@ mod tests {
     #[test]
     fn test_format_yaml_secret_scalar() {
         assert_eq!(format_yaml_secret_scalar("simple_secret"), "simple_secret");
-        assert_eq!(format_yaml_secret_scalar("s3cr3t-123.abc"), "s3cr3t-123.abc");
+        assert_eq!(
+            format_yaml_secret_scalar("s3cr3t-123.abc"),
+            "s3cr3t-123.abc"
+        );
         assert_eq!(format_yaml_secret_scalar("secret#123"), "\"secret#123\"");
         assert_eq!(format_yaml_secret_scalar("a: b"), "\"a: b\"");
         assert_eq!(format_yaml_secret_scalar("null"), "\"null\"");
         assert_eq!(format_yaml_secret_scalar("true"), "\"true\"");
         assert_eq!(format_yaml_secret_scalar("12345"), "\"12345\"");
         assert_eq!(format_yaml_secret_scalar(""), "\"\"");
-        assert_eq!(format_yaml_secret_scalar("foo\"bar\\baz"), "\"foo\\\"bar\\\\baz\"");
+        assert_eq!(
+            format_yaml_secret_scalar("foo\"bar\\baz"),
+            "\"foo\\\"bar\\\\baz\""
+        );
     }
 
     #[test]
     fn test_set_secret_in_yaml_fast_path_and_fallbacks() {
         // Fast-path updates an existing secret
         let res = set_secret_in_yaml("mixed-port: 7890\nsecret: old\n", "new_secret").unwrap();
-        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("new_secret"));
+        assert_eq!(
+            extract_secret_from_yaml(&res).as_deref(),
+            Some("new_secret")
+        );
 
         // Special characters requiring quoting (e.g. comment characters, colon)
         let res_quoted = set_secret_in_yaml("port: 8080\n", "secret#value: 123").unwrap();
-        assert_eq!(extract_secret_from_yaml(&res_quoted).as_deref(), Some("secret#value: 123"));
+        assert_eq!(
+            extract_secret_from_yaml(&res_quoted).as_deref(),
+            Some("secret#value: 123")
+        );
 
         // Multiline scalar under secret key is properly replaced
         let multiline = "secret: |\n  line1\n  line2\nmode: rule\n";
         let res_multiline = set_secret_in_yaml(multiline, "simple_secret").unwrap();
-        assert_eq!(extract_secret_from_yaml(&res_multiline).as_deref(), Some("simple_secret"));
+        assert_eq!(
+            extract_secret_from_yaml(&res_multiline).as_deref(),
+            Some("simple_secret")
+        );
         assert!(res_multiline.contains("mode: rule"));
 
         // Fallback triggers on complex YAML structures (merge key <<) and duplicate secret keys
         let complex = "<<: {secret: x}\nsecret: old\n";
         assert_eq!(set_secret_in_yaml_fast(complex, "new"), None);
         let res_complex = set_secret_in_yaml(complex, "new").unwrap();
-        assert_eq!(extract_secret_from_yaml(&res_complex).as_deref(), Some("new"));
+        assert_eq!(
+            extract_secret_from_yaml(&res_complex).as_deref(),
+            Some("new")
+        );
 
         // Non-mapping root returns error (both fast path returns None and serde_yaml fails)
         assert!(set_secret_in_yaml("- item1\n- item2\n", "sec").is_err());
