@@ -83,6 +83,8 @@ describe('home and settings page switches and theme swatches accessibility', () 
             { inputId: 'dns-fallbacks-input', descId: 'dns-fallbacks-hint' },
             { inputId: 'port-mixed-input', descId: 'port-mixed-hint' },
             { inputId: 'port-socks-input', descId: 'port-socks-hint' },
+            { inputId: 'port-redir-input', descId: 'port-zero-hint' },
+            { inputId: 'port-tproxy-input', descId: 'port-zero-hint' },
         ];
         for (const { inputId, descId } of modalFields) {
             const input = doc.getElementById(inputId);
