@@ -495,15 +495,27 @@ fn extract_name_from_rules_fast(content: &str) -> FastScan {
 /// Shared by the fast path and the full parser so the two cannot drift apart.
 fn rule_policy_name(rule_str: &str) -> Option<&str> {
     let name = rule_str.split(',').nth(2)?.trim();
-    let upper = name.to_uppercase();
-    if upper.is_empty()
-        || upper == "DIRECT"
-        || upper == "REJECT"
-        || upper == "MATCH"
-        || upper == "PROXY"
-        || upper == "PASS"
-        || upper == "DROP"
-    {
+    // Zero-allocation case-insensitive comparisons against generic policy target names.
+    // Non-ASCII names keep the previous Unicode-aware uppercasing: `to_uppercase`
+    // folds characters like `ß` (so `paß` still matches `PASS`), while the ASCII
+    // comparison does not, and the old behaviour is what callers relied on.
+    let is_generic = if name.is_ascii() {
+        name.eq_ignore_ascii_case("DIRECT")
+            || name.eq_ignore_ascii_case("REJECT")
+            || name.eq_ignore_ascii_case("MATCH")
+            || name.eq_ignore_ascii_case("PROXY")
+            || name.eq_ignore_ascii_case("PASS")
+            || name.eq_ignore_ascii_case("DROP")
+    } else {
+        let upper = name.to_uppercase();
+        upper == "DIRECT"
+            || upper == "REJECT"
+            || upper == "MATCH"
+            || upper == "PROXY"
+            || upper == "PASS"
+            || upper == "DROP"
+    };
+    if name.is_empty() || is_generic {
         return None;
     }
     if name.len() > 64 {
@@ -3465,6 +3477,30 @@ mod tests {
         assert_eq!(
             select_global_candidate(&map).map(|(c, _)| c),
             Some("Top-LB".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_ends_with_ignore_ascii_case_multibyte_utf8() {
+        assert!(ends_with_ignore_ascii_case("node.LOCAL", ".local"));
+        assert!(ends_with_ignore_ascii_case("测试.local", ".LOCAL"));
+        assert!(!ends_with_ignore_ascii_case("测试.com", ".local"));
+        // Does not panic when byte offset s.len() - suffix.len() lands inside a multi-byte UTF-8 char
+        assert!(!ends_with_ignore_ascii_case("中国", ".com"));
+        assert!(is_private_host("测试.local"));
+        assert!(!is_private_host("测试.com"));
+    }
+
+    #[test]
+    fn test_rule_policy_name_unicode_generic_folding() {
+        // `paß` uppercases to `PASS`, so it is still a generic target even
+        // though the ASCII-only comparison would not match it.
+        assert_eq!(rule_policy_name("DOMAIN-SUFFIX,example.com,paß"), None);
+        // Dotless `ı` uppercases to `I`, so `dırect` is still `DIRECT`.
+        assert_eq!(rule_policy_name("DOMAIN-SUFFIX,example.com,dırect"), None);
+        assert_eq!(
+            rule_policy_name("DOMAIN-SUFFIX,example.com,NodeGroup"),
+            Some("NodeGroup")
         );
     }
 }
