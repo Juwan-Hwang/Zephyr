@@ -34,3 +34,7 @@
 **Vulnerability:** `is_trusted_update_url` and `parse_github_release_info` validated hostname strings against trusted GitHub hosts without verifying `parsed.scheme() == "https"`, allowing plaintext HTTP downloads of updater binaries and opening vectors for on-path adversary MITM attacks. Additionally, host check avoided allocation via suffix stripping with dot delimiter.
 **Learning:** Checking hostname patterns without enforcing encrypted transport protocol schemes permits silent fallback to plaintext traffic in updater workflows.
 **Prevention:** Always enforce `parsed.scheme() == "https"` alongside strict domain/subdomain checks on all URL-evaluating security boundary functions.
+## 2026-07-19 - Missing URL Validation in Override Creation and Metadata Updates
+**Vulnerability:** `override_update` and `override_create` allowed persisting arbitrary URL strings (including unsupported schemes like `file://` or `javascript:` and oversized strings) directly into override metadata without scheme or length validation.
+**Learning:** Metadata update commands that bypass network download routines can easily omit URL scheme and length checks performed by network fetchers.
+**Prevention:** Always enforce centralized URL validation (`http`/`https` scheme check and length cap) across all IPC handlers that receive or update URL parameters.
