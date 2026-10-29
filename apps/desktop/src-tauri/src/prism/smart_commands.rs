@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn test_smart_config_parameter_validation() {
         let mut invalid_config = SmartConfig::default();
-        invalid_config.score.weights.latency = -1.0;
+        invalid_config.score.weights.latency_p90 = -1.0;
         let validation_res = invalid_config.validate();
         assert!(validation_res.is_err());
     }
