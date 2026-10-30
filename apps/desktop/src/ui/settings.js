@@ -37,6 +37,7 @@ import { showNotification, showConfirmModal } from './notifications.js';
 import { applyTheme, DEFAULT_THEME } from './theme.js';
 import { appStore } from './state.js';
 import { Bus, Events } from './events.js';
+import { nextClipboardSeq } from './tray.js';
 import { pasteWithFeedback } from '../utils/clipboard.js';
 import { checkConsoleWidthNotification } from './console-width.js';
 import { invalidateSettingsCache } from './cache.js';
@@ -95,6 +96,7 @@ import { openUpdateDialog, showPendingUpdateNote } from './update-dialog.js';
 import { createClientVersionFetcher, DEFAULT_MAX_ATTEMPTS, isValidClientVersions } from './settings/client-version-fetch.js';
 import { uaTripleFromBackendUA, createUaEditTracker, trimLikeRust } from './settings/ua-triple.js';
 
+/** @type {ReturnType<typeof initCustomDropdown> | null} */
 let __langDropdown = null;
 /** @type {(() => Promise<void>) | null} */
 let _dropUnlisten = null;
@@ -609,20 +611,130 @@ const debouncedSyncUA = debounce(() => syncUserAgentToBackend(), 500);
  * - Copy button: copies env vars in the configured format
  * - Format chip: shows the shell format and opens a menu to change it
  */
-function initCopyEnvSettings() {
+export function initCopyEnvSettings() {
     const copyBtn = document.getElementById('copy-env-btn');
     const formatBtn = document.getElementById('copy-env-format-btn');
 
     /** @type {() => Record<string, any>} */
     const getT = () => /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
 
+    /** Bumped on every copy click, so a stale handler or timer cannot undo a newer click's feedback. */
+    let copyFeedbackSeq = 0;
+
+    /**
+     * The newest write sequence actually queued. A click's write
+     * sequence is its own `mySeq` (taken synchronously at the click),
+     * but only a click that reaches the queue updates this, so a click
+     * that fails before queueing (settings or config lookup) cannot
+     * drop an earlier valid copy. Only a queueing click newer than
+     * the current newest moves this: two clicks can resolve their
+     * awaits out of order, and the slower, older click must not move
+     * this backwards past a newer write that already queued.
+     */
+    let newestEnqueuedWriteSeq = 0;
+
+    /**
+     * Whether the newest queued write has settled, and whether it
+     * landed. A click that fails before queueing reads these in its
+     * catch: if the newest write already landed, the clipboard holds
+     * its text and the failure must not be reported as the copy's
+     * outcome; if it is still in flight, the button is left to it.
+     * Both start settled with nothing landed: no write is queued yet.
+     */
+    let newestEnqueuedWriteSettled = true;
+    let newestEnqueuedWriteLanded = false;
+
+    /**
+     * Serializes clipboard writes in click order: two pending `writeText`
+     * calls can resolve out of order, so the pre-write sequence check
+     * alone cannot stop an older write landing last and overwriting the
+     * newer click's contents. A queued write that is no longer the newest
+     * is skipped when it reaches the front, and the chain stays alive
+     * when a write fails. A write that never settles cannot stall the
+     * chain either: `copyToClipboard` time-boxes the write and falls
+     * back, so a hung write rejects here instead of hanging forever.
+     * @type {Promise<unknown>}
+     */
+    let copyWriteChain = Promise.resolve();
+
+    // A language switch during the 1.5 s feedback window would let
+    // applyTranslations() rewrite the span and aria-label back to the
+    // idle labels and swallow the "Copied" feedback early. While the
+    // restore timer is still armed, re-apply the feedback in the new
+    // language instead.
+    const reapplyCopyFeedback = () => {
+        if (!copyBtn?.dataset._copyTimeout) return;
+        const textSpan = copyBtn.querySelector('span') ?? copyBtn;
+        const copied = getT().copyEnvCopied || 'Copied';
+        textSpan.textContent = copied;
+        copyBtn.setAttribute('aria-label', copied);
+    };
+    Bus.on(Events.I18N_APPLIED, reapplyCopyFeedback);
+    registerCleanup(() => Bus.off(Events.I18N_APPLIED, reapplyCopyFeedback));
+
+    /**
+     * Show the "Copied" feedback for the click with sequence `seq`:
+     * button text, aria-label, accent colour, and a 1500 ms restore
+     * timer guarded by `seq`, so only the click that owns the button
+     * may restore it. Used by a click's own success path and by a
+     * later click that failed before queueing while this click's write
+     * already landed — both report the same landed copy.
+     * @param {number} seq
+     */
+    const showCopiedFeedback = (seq) => {
+        if (!copyBtn) return;
+        const t = getT();
+        // Visual feedback: briefly change button text (target span to preserve i18n)
+        const textSpan = copyBtn.querySelector('span') ?? copyBtn;
+        textSpan.textContent = t.copyEnvCopied || 'Copied';
+        // The static aria-label would otherwise keep announcing the old
+        // name and hide the "Copied" feedback from screen readers.
+        copyBtn.setAttribute('aria-label', t.copyEnvCopied || 'Copied');
+        copyBtn.style.color = 'var(--accent-primary, #007AFF)';
+        const timeoutId = setTimeout(() => {
+            // Only the newest click may restore: an older timer must not
+            // cut short a newer click's feedback, and the label is
+            // re-read so a language switch during the window is not
+            // overwritten with the old language's text.
+            if (seq !== copyFeedbackSeq) return;
+            // The span's own key is `copy` ("Copy"); only the
+            // accessible name uses `copyProxyEnv`.
+            textSpan.textContent = getT().copy || 'Copy';
+            copyBtn.setAttribute('aria-label', getT().copyProxyEnv || 'Copy Proxy Env');
+            copyBtn.style.color = '';
+            delete copyBtn.dataset._copyTimeout;
+        }, 1500);
+        copyBtn.dataset._copyTimeout = String(timeoutId);
+    };
+
     // --- Copy button ---
     copyBtn?.addEventListener('click', async () => {
+        // This click owns the button only until a newer click starts: the
+        // awaits below (settings, config, clipboard) resolve out of order,
+        // so an earlier click must never restore over or blank a later one.
+        const mySeq = ++copyFeedbackSeq;
+        // The tray sequence for this click, taken synchronously here: the
+        // awaits below let a newer copy claim the record first, and taking
+        // the sequence only when the write starts (inside
+        // copyToClipboard) would let this older click write last. Passing
+        // the click-time sequence makes copyToClipboard bail out instead
+        // (see there) — the newer copy reports itself.
+        const myTraySeq = nextClipboardSeq();
+        /** Whether this click's write has reached the queue yet: a click that fails before queueing (settings or config lookup) reports its failure in the catch only if no newer queued write owns the outcome. */
+        let queued = false;
         try {
-            // Clear any pending restore timeout to prevent text getting stuck
+            // Clear any pending restore timeout to prevent text getting stuck.
+            // A previous "Copied" is showing exactly while that timeout is
+            // armed, so restore the idle labels with it: otherwise the old
+            // success stays visible (and announced) while this copy is
+            // still pending.
             if (copyBtn.dataset._copyTimeout) {
                 clearTimeout(Number(copyBtn.dataset._copyTimeout));
                 delete copyBtn.dataset._copyTimeout;
+                const pendingSpan = copyBtn.querySelector('span') ?? copyBtn;
+                pendingSpan.textContent = getT().copy || 'Copy';
+                copyBtn.setAttribute('aria-label', getT().copyProxyEnv || 'Copy Proxy Env');
+                copyBtn.style.color = '';
             }
             const settings = await invoke(COMMANDS.GET_SETTINGS);
             const { generateProxyEnvVars, copyToClipboard, resolveEnvFormat } = await import('./tray.js');
@@ -636,26 +748,103 @@ function initCopyEnvSettings() {
             const port = httpPort || socksPort;
             if (!port) throw new Error('No proxy listener is configured');
             const text = generateProxyEnvVars(format, port, httpPort ? 'http' : 'socks5h');
-            await copyToClipboard(text);
-            const t = getT();
-            // Visual feedback: briefly change button text (target span to preserve i18n)
-            const textSpan = copyBtn.querySelector('span') || copyBtn;
-            // Store original text only on first click (not during "Copied" state)
-            if (!copyBtn.dataset._originalText) {
-                copyBtn.dataset._originalText = textSpan.textContent || '';
+            // Writes run one at a time in click order through copyWriteChain:
+            // the sequence check below can only stop a write that has not
+            // started yet, and two pending `writeText` calls can resolve
+            // out of order. A queued write that is no longer the newest is
+            // skipped when it reaches the front, so the clipboard always
+            // ends up with the latest click's text. The write sequence is
+            // the click's own sequence, taken synchronously above: taking
+            // it here, after the awaits, would let a slower older click
+            // queue behind a newer one and then write last. The tray
+            // sequence is separate: `myTraySeq` (also taken at click time)
+            // is passed to `copyToClipboard`, so a direct copy requested
+            // after this click but landing before it — which the chain
+            // cannot see — still wins over this older click.
+            const myWriteSeq = mySeq;
+            // Only a queueing click newer than the current newest
+            // resets the outcome tracking: an older click queueing late
+            // (its write is skipped at the front of the chain) must not
+            // clear the newer write's settled/landed state.
+            if (myWriteSeq > newestEnqueuedWriteSeq) {
+                newestEnqueuedWriteSeq = myWriteSeq;
+                newestEnqueuedWriteSettled = false;
+                newestEnqueuedWriteLanded = false;
             }
-            textSpan.textContent = t.copyEnvCopied || 'Copied';
-            copyBtn.style.color = 'var(--accent-primary, #007AFF)';
-            const timeoutId = setTimeout(() => {
-                textSpan.textContent = copyBtn.dataset._originalText || '';
-                copyBtn.style.color = '';
-                delete copyBtn.dataset._originalText;
-                delete copyBtn.dataset._copyTimeout;
-            }, 1500);
-            copyBtn.dataset._copyTimeout = String(timeoutId);
+            const writeTask = copyWriteChain.then(async () => {
+                if (myWriteSeq !== newestEnqueuedWriteSeq) return;
+                return copyToClipboard(text, myTraySeq);
+            });
+            copyWriteChain = writeTask.catch(() => {});
+            // Record this write's outcome for a later click that fails
+            // before queueing: only the newest queued write's outcome
+            // counts — an older write settling late must not overwrite
+            // it. The click's own await below reads its own result
+            // directly, so this tracking is purely for other clicks.
+            writeTask.then(
+                (landed) => {
+                    if (myWriteSeq !== newestEnqueuedWriteSeq) return;
+                    newestEnqueuedWriteSettled = true;
+                    newestEnqueuedWriteLanded = landed === true;
+                },
+                () => {
+                    if (myWriteSeq !== newestEnqueuedWriteSeq) return;
+                    newestEnqueuedWriteSettled = true;
+                    newestEnqueuedWriteLanded = false;
+                },
+            );
+            queued = true;
+            const landedNewest = await writeTask;
+            // A newer copy (through another path) claimed the record
+            // while this write was in flight: the clipboard now holds
+            // that text, so showing "Copied" for this one would be a
+            // lie. Stay silent — the newer copy shows its own feedback.
+            if (!landedNewest) return;
+            // A newer click has started since: it owns the button now, so
+            // this stale success must not overwrite its feedback or arm a
+            // timer that would later cut it short.
+            if (mySeq !== copyFeedbackSeq) return;
+            showCopiedFeedback(mySeq);
         } catch (err) {
             settingsLogger.error('[copy-env] Failed to copy:', err);
+            // A stale failure (an earlier click resolving after a later one
+            // succeeded) must not kill the newer "Copied" feedback, must not
+            // show an error toast over it, and the timer it would otherwise
+            // orphan must be cancelled, not just have its id deleted, or it
+            // later blanks the button. So the sequence check comes first.
+            if (mySeq !== copyFeedbackSeq) return;
+            // This click failed before its write reached the queue
+            // (settings or config lookup): the copy it was about to make
+            // never started, so its failure is not the copy's outcome.
+            // Hand the button back to the newest queued write instead:
+            // if that write already landed, the clipboard holds its text
+            // and the feedback reports its success; if it is still in
+            // flight, its own success or failure will report itself —
+            // the ownership is rewound so its guards let it through.
+            // Only when there is no queued write, or the newest one
+            // already failed, does this click's failure get reported.
+            if (!queued) {
+                if (newestEnqueuedWriteLanded) {
+                    copyFeedbackSeq = newestEnqueuedWriteSeq;
+                    showCopiedFeedback(newestEnqueuedWriteSeq);
+                    return;
+                }
+                if (!newestEnqueuedWriteSettled) {
+                    copyFeedbackSeq = newestEnqueuedWriteSeq;
+                    return;
+                }
+            }
             showNotification(`${getT().copyFailed || 'Copy failed'}: ${toError(err).message}`, 'error');
+            if (copyBtn.dataset._copyTimeout) {
+                clearTimeout(Number(copyBtn.dataset._copyTimeout));
+                delete copyBtn.dataset._copyTimeout;
+            }
+            const textSpan = copyBtn.querySelector('span') ?? copyBtn;
+            // The span's own key is `copy` ("Copy"); only the
+            // accessible name uses `copyProxyEnv`.
+            textSpan.textContent = getT().copy || 'Copy';
+            copyBtn.setAttribute('aria-label', getT().copyProxyEnv || 'Copy Proxy Env');
+            copyBtn.style.color = '';
         }
     });
 
@@ -1948,8 +2137,26 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             optionAttr: 'data-lang-value',
             /** @param {string} value */
             onChange: (value) => {
-                setLanguage(value);
+                // Store first: setLanguage() applies translations synchronously
+                // and emits I18N_APPLIED, whose listeners (e.g. the copy
+                // feedback re-apply) read the language from appStore.
+                const previous = appStore.get('currentLang');
                 appStore.set('currentLang', value);
+                try {
+                    setLanguage(value);
+                } catch (err) {
+                    // The persist inside setLanguage failed (blocked or
+                    // full localStorage): the DOM was never re-translated,
+                    // so roll the store and the dropdown back — otherwise
+                    // the store would claim the new language while the UI
+                    // still shows the old one.
+                    appStore.set('currentLang', previous);
+                    __langDropdown?.setValue(previous);
+                    settingsLogger.error('[language] Failed to switch language:', err);
+                    const tr = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+                    showNotification(`${tr.saveFailed || 'Failed to save'}: ${toError(err).message}`, 'error');
+                    return;
+                }
                 Bus.emit(Events.LANGUAGE_CHANGED, value);
                 void renderConfigs();
             },

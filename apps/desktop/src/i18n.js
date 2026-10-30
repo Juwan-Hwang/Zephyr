@@ -14906,10 +14906,14 @@ export function setLanguage(lang) {
         i18nLogger.warn(`Unknown language "${lang}", falling back to "en"`);
         resolvedLang = 'en';
     }
-    currentLang = resolvedLang;
+    // Persist before mutating anything: if the write throws (blocked
+    // or full localStorage), the module state and the DOM are left
+    // exactly as they were instead of claiming the new language while
+    // still showing the old one.
     if (typeof localStorage !== 'undefined') {
         localStorage.setItem('lang', resolvedLang);
     }
+    currentLang = resolvedLang;
     setHTMLAttributes(resolvedLang);
     applyTranslations();
 }
