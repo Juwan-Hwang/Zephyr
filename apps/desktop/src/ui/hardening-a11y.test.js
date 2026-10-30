@@ -325,11 +325,34 @@ describe('icon-only close and back buttons', () => {
             ['add-tunnel-btn', 'add'],
             ['open-plugins-btn', 'overrideTitle'],
             ['update-all-sub-btn', 'updateAll'],
+            ['add-sub-btn', 'addSubscription'],
+            ['copy-env-btn', 'copyProxyEnv'],
+            ['rl-btn-new-group', 'ruleLibraryNewGroup'],
+            ['rl-btn-import', 'ruleLibraryImport'],
+            ['plugin-new-btn', 'overrideNew'],
         ]) {
             const btn = doc.getElementById(id);
             expect(btn, id).toBeTruthy();
             expect(btn?.getAttribute('aria-label'), id).toBeTruthy();
             expect(btn?.getAttribute('data-i18n-aria-label'), id).toBe(key);
+        }
+    });
+
+    it('header action buttons carry translatable title tooltips', () => {
+        const doc = parseIndex();
+        for (const [id, key] of [
+            ['open-plugins-btn', 'overrideTitle'],
+            ['update-all-sub-btn', 'updateAll'],
+            ['add-sub-btn', 'addSubscription'],
+            ['copy-env-btn', 'copyProxyEnv'],
+            ['rl-btn-new-group', 'ruleLibraryNewGroup'],
+            ['rl-btn-import', 'ruleLibraryImport'],
+            ['plugin-new-btn', 'overrideNew'],
+        ]) {
+            const btn = doc.getElementById(id);
+            expect(btn, id).toBeTruthy();
+            expect(btn?.getAttribute('title'), id).toBeTruthy();
+            expect(btn?.getAttribute('data-i18n-title'), id).toBe(key);
         }
     });
 
