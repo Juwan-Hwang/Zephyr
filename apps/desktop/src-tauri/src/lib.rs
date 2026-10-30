@@ -1281,8 +1281,17 @@ fn update_subscription_user_agent(
     app: tauri::AppHandle,
     user_agent: Option<String>,
 ) -> Result<(), String> {
+    if let Some(ref ua) = user_agent {
+        let trimmed = ua.trim();
+        if !trimmed.is_empty() {
+            zephyr_core::config::subscription::validate_user_agent(trimmed)
+                .map_err(|e| e.to_string())?;
+        }
+    }
     commit_settings(&app, |s| {
-        s.subscription_user_agent = user_agent.filter(|ua| !ua.is_empty());
+        s.subscription_user_agent = user_agent
+            .map(|ua| ua.trim().to_owned())
+            .filter(|ua| !ua.is_empty());
     })
 }
 

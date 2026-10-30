@@ -29,3 +29,8 @@
 **Vulnerability:** `script_grant_plugin`, `script_revoke_plugin`, and `script_check_plugin_permission` accepted `plugin_id` directly without invoking `validate_plugin_id`, allowing unsanitized plugin IDs (containing path traversal sequences, reserved names, or control characters) into the script sandbox permission configuration.
 **Learning:** Commands in secondary modules that manipulate plugin permissions or settings can easily omit validation routines implemented in the primary plugin module.
 **Prevention:** Always enforce `validate_plugin_id` on every IPC handler accepting a `plugin_id` parameter regardless of module boundary.
+
+## 2026-07-19 - Unvalidated User-Agent Input in IPC Commands
+**Vulnerability:** `update_subscription_user_agent` accepted arbitrary string inputs over IPC without length or control character checks. Passing newlines (`\r\n`) or oversized strings persisted invalid header values into settings, causing HTTP client building during subscription downloads to fail permanently and leading to persistent DoS.
+**Learning:** Setting values that map directly to HTTP request headers must be validated for length limits and control characters prior to persistence.
+**Prevention:** Always validate User-Agent strings (`validate_user_agent`) to enforce maximum length limits (<= 512 chars) and reject control characters (`\r`, `\n`, `\0`) before writing to settings or constructing HTTP clients.
