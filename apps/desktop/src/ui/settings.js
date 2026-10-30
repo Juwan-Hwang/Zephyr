@@ -94,6 +94,7 @@ import { selectSegment } from './seg-control.js';
 import { openUpdateDialog, showPendingUpdateNote } from './update-dialog.js';
 import { createClientVersionFetcher, isValidClientVersions } from './settings/client-version-fetch.js';
 
+/** @type {ReturnType<typeof initCustomDropdown> | null} */
 let __langDropdown = null;
 /** @type {(() => Promise<void>) | null} */
 let _dropUnlisten = null;
@@ -189,13 +190,68 @@ function initCopyEnvSettings() {
     /** @type {() => Record<string, any>} */
     const getT = () => /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
 
+    /** Bumped on every copy click, so a stale handler or timer cannot undo a newer click's feedback. */
+    let copyFeedbackSeq = 0;
+
+    /**
+     * The newest write sequence actually queued. A click's write
+     * sequence is its own `mySeq` (taken synchronously at the click),
+     * but only a click that reaches the queue updates this, so a click
+     * that fails before queueing (settings or config lookup) cannot
+     * drop an earlier valid copy. Updated with `Math.max`, not
+     * assignment: two clicks can resolve their awaits out of order,
+     * and the slower, older click must not move this backwards past a
+     * newer write that already queued.
+     */
+    let newestEnqueuedWriteSeq = 0;
+
+    /**
+     * Serializes clipboard writes in click order: two pending `writeText`
+     * calls can resolve out of order, so the pre-write sequence check
+     * alone cannot stop an older write landing last and overwriting the
+     * newer click's contents. A queued write that is no longer the newest
+     * is skipped when it reaches the front, and the chain stays alive
+     * when a write fails. A write that never settles cannot stall the
+     * chain either: `copyToClipboard` time-boxes the write and falls
+     * back, so a hung write rejects here instead of hanging forever.
+     * @type {Promise<unknown>}
+     */
+    let copyWriteChain = Promise.resolve();
+
+    // A language switch during the 1.5 s feedback window would let
+    // applyTranslations() rewrite the span and aria-label back to the
+    // idle labels and swallow the "Copied" feedback early. While the
+    // restore timer is still armed, re-apply the feedback in the new
+    // language instead.
+    const reapplyCopyFeedback = () => {
+        if (!copyBtn?.dataset._copyTimeout) return;
+        const textSpan = copyBtn.querySelector('span') ?? copyBtn;
+        const copied = getT().copyEnvCopied || 'Copied';
+        textSpan.textContent = copied;
+        copyBtn.setAttribute('aria-label', copied);
+    };
+    Bus.on(Events.I18N_APPLIED, reapplyCopyFeedback);
+    registerCleanup(() => Bus.off(Events.I18N_APPLIED, reapplyCopyFeedback));
+
     // --- Copy button ---
     copyBtn?.addEventListener('click', async () => {
+        // This click owns the button only until a newer click starts: the
+        // awaits below (settings, config, clipboard) resolve out of order,
+        // so an earlier click must never restore over or blank a later one.
+        const mySeq = ++copyFeedbackSeq;
         try {
-            // Clear any pending restore timeout to prevent text getting stuck
+            // Clear any pending restore timeout to prevent text getting stuck.
+            // A previous "Copied" is showing exactly while that timeout is
+            // armed, so restore the idle labels with it: otherwise the old
+            // success stays visible (and announced) while this copy is
+            // still pending.
             if (copyBtn.dataset._copyTimeout) {
                 clearTimeout(Number(copyBtn.dataset._copyTimeout));
                 delete copyBtn.dataset._copyTimeout;
+                const pendingSpan = copyBtn.querySelector('span') ?? copyBtn;
+                pendingSpan.textContent = getT().copy || 'Copy';
+                copyBtn.setAttribute('aria-label', getT().copyProxyEnv || 'Copy Proxy Env');
+                copyBtn.style.color = '';
             }
             const settings = await invoke(COMMANDS.GET_SETTINGS);
             const { generateProxyEnvVars, copyToClipboard, resolveEnvFormat } = await import('./tray.js');
@@ -209,26 +265,68 @@ function initCopyEnvSettings() {
             const port = httpPort || socksPort;
             if (!port) throw new Error('No proxy listener is configured');
             const text = generateProxyEnvVars(format, port, httpPort ? 'http' : 'socks5h');
-            await copyToClipboard(text);
+            // Writes run one at a time in click order through copyWriteChain:
+            // the sequence check below can only stop a write that has not
+            // started yet, and two pending `writeText` calls can resolve
+            // out of order. A queued write that is no longer the newest is
+            // skipped when it reaches the front, so the clipboard always
+            // ends up with the latest click's text. The write sequence is
+            // the click's own sequence, taken synchronously above: taking
+            // it here, after the awaits, would let a slower older click
+            // queue behind a newer one and then write last.
+            const myWriteSeq = mySeq;
+            newestEnqueuedWriteSeq = Math.max(newestEnqueuedWriteSeq, myWriteSeq);
+            const writeTask = copyWriteChain.then(async () => {
+                if (myWriteSeq !== newestEnqueuedWriteSeq) return;
+                await copyToClipboard(text);
+            });
+            copyWriteChain = writeTask.catch(() => {});
+            await writeTask;
+            // A newer click has started since: it owns the button now, so
+            // this stale success must not overwrite its feedback or arm a
+            // timer that would later cut it short.
+            if (mySeq !== copyFeedbackSeq) return;
             const t = getT();
             // Visual feedback: briefly change button text (target span to preserve i18n)
-            const textSpan = copyBtn.querySelector('span') || copyBtn;
-            // Store original text only on first click (not during "Copied" state)
-            if (!copyBtn.dataset._originalText) {
-                copyBtn.dataset._originalText = textSpan.textContent || '';
-            }
+            const textSpan = copyBtn.querySelector('span') ?? copyBtn;
             textSpan.textContent = t.copyEnvCopied || 'Copied';
+            // The static aria-label would otherwise keep announcing the old
+            // name and hide the "Copied" feedback from screen readers.
+            copyBtn.setAttribute('aria-label', t.copyEnvCopied || 'Copied');
             copyBtn.style.color = 'var(--accent-primary, #007AFF)';
             const timeoutId = setTimeout(() => {
-                textSpan.textContent = copyBtn.dataset._originalText || '';
+                // Only the newest click may restore: an older timer must not
+                // cut short a newer click's feedback, and the label is
+                // re-read so a language switch during the window is not
+                // overwritten with the old language's text.
+                if (mySeq !== copyFeedbackSeq) return;
+                // The span's own key is `copy` ("Copy"); only the
+                // accessible name uses `copyProxyEnv`.
+                textSpan.textContent = getT().copy || 'Copy';
+                copyBtn.setAttribute('aria-label', getT().copyProxyEnv || 'Copy Proxy Env');
                 copyBtn.style.color = '';
-                delete copyBtn.dataset._originalText;
                 delete copyBtn.dataset._copyTimeout;
             }, 1500);
             copyBtn.dataset._copyTimeout = String(timeoutId);
         } catch (err) {
             settingsLogger.error('[copy-env] Failed to copy:', err);
+            // A stale failure (an earlier click resolving after a later one
+            // succeeded) must not kill the newer "Copied" feedback, must not
+            // show an error toast over it, and the timer it would otherwise
+            // orphan must be cancelled, not just have its id deleted, or it
+            // later blanks the button. So the sequence check comes first.
+            if (mySeq !== copyFeedbackSeq) return;
             showNotification(`${getT().copyFailed || 'Copy failed'}: ${toError(err).message}`, 'error');
+            if (copyBtn.dataset._copyTimeout) {
+                clearTimeout(Number(copyBtn.dataset._copyTimeout));
+                delete copyBtn.dataset._copyTimeout;
+            }
+            const textSpan = copyBtn.querySelector('span') ?? copyBtn;
+            // The span's own key is `copy` ("Copy"); only the
+            // accessible name uses `copyProxyEnv`.
+            textSpan.textContent = getT().copy || 'Copy';
+            copyBtn.setAttribute('aria-label', getT().copyProxyEnv || 'Copy Proxy Env');
+            copyBtn.style.color = '';
         }
     });
 
@@ -1330,8 +1428,26 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             optionAttr: 'data-lang-value',
             /** @param {string} value */
             onChange: (value) => {
-                setLanguage(value);
+                // Store first: setLanguage() applies translations synchronously
+                // and emits I18N_APPLIED, whose listeners (e.g. the copy
+                // feedback re-apply) read the language from appStore.
+                const previous = appStore.get('currentLang');
                 appStore.set('currentLang', value);
+                try {
+                    setLanguage(value);
+                } catch (err) {
+                    // The persist inside setLanguage failed (blocked or
+                    // full localStorage): the DOM was never re-translated,
+                    // so roll the store and the dropdown back — otherwise
+                    // the store would claim the new language while the UI
+                    // still shows the old one.
+                    appStore.set('currentLang', previous);
+                    __langDropdown?.setValue(previous);
+                    settingsLogger.error('[language] Failed to switch language:', err);
+                    const tr = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+                    showNotification(`${tr.saveFailed || 'Failed to save'}: ${toError(err).message}`, 'error');
+                    return;
+                }
                 Bus.emit(Events.LANGUAGE_CHANGED, value);
                 void renderConfigs();
             },
