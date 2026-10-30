@@ -761,13 +761,85 @@ export function generateProxyEnvVars(format, port = 7890, scheme = 'http') {
 }
 
 /**
+ * Whether the browser has already granted clipboard-write permission.
+ * Unknown (no Permissions API, or an unknown permission name) counts
+ * as granted: the write attempt itself then decides, as before.
+ * @returns {Promise<boolean>}
+ */
+async function clipboardWriteGranted() {
+    try {
+        const status = await navigator.permissions?.query({
+            name: /** @type {PermissionName} */ ('clipboard-write'),
+        });
+        return !status || status.state === 'granted';
+    } catch (_) {
+        return true;
+    }
+}
+
+/** The newest text any `copyToClipboard` call was asked for. @type {string | null} */
+let latestCopiedText = null;
+
+/**
  * Copy text to clipboard with fallback for environments without clipboard API.
  * @param {string} text
  * @returns {Promise<void>}
  */
 export async function copyToClipboard(text) {
+    // A clipboard write can hang: when the browser leaves the
+    // permission prompt unanswered, `writeText` may never settle, and a
+    // caller that serializes writes (the copy button's chain) would
+    // stall forever. Give it a few seconds, then fall back to the
+    // textarea path instead of waiting on it.
+    let timeoutId;
+    let timedOut = false;
     try {
-        await navigator.clipboard.writeText(text);
+        // When the clipboard-write permission is still undecided, the
+        // write would sit on the permission prompt: the 5 s timeout
+        // below would fire first, but the write itself stays pending
+        // and lands whenever the prompt is answered — after a newer
+        // copy, if one completed in between, so the clipboard ends up
+        // holding the older text while the UI reports the newer copy.
+        // `writeText` cannot be cancelled once started, so do not
+        // start it while the permission is undecided: go straight to
+        // the textarea fallback, which still has the click's transient
+        // activation. A granted permission resolves promptly, so it
+        // keeps the fast path; a denied one rejects at once and falls
+        // back anyway.
+        if (!await clipboardWriteGranted()) {
+            throw new Error('Clipboard write permission not granted');
+        }
+        // The newest text any copy was asked for. A native write that
+        // outlives its timeout still lands when it eventually resolves,
+        // so a late landing is repaired below by re-asserting this.
+        latestCopiedText = text;
+        const writePromise = navigator.clipboard.writeText(text);
+        // Prevent unhandled rejection if the timeout wins the race and the
+        // write rejects later.
+        writePromise.catch(() => {});
+        // A timed-out write cannot be cancelled: if it resolves after a
+        // newer copy ran, it would land the stale text over the newer
+        // one. Re-assert the newest text instead, so the clipboard ends
+        // up holding the latest copy. Best-effort and fire-and-forget:
+        // a newer copy that is itself still in flight carries the same
+        // text, so an extra write of it is harmless.
+        writePromise.then(() => {
+            if (timedOut && latestCopiedText !== null && latestCopiedText !== text) {
+                navigator.clipboard.writeText(latestCopiedText).catch(() => {});
+            }
+        });
+        await Promise.race([
+            writePromise,
+            new Promise((_, reject) => {
+                timeoutId = setTimeout(
+                    () => {
+                        timedOut = true;
+                        reject(new Error('Clipboard write timed out'));
+                    },
+                    5000,
+                );
+            }),
+        ]);
     } catch (_) {
         // Fallback for environments without clipboard API
         const textarea = document.createElement('textarea');
@@ -775,11 +847,28 @@ export async function copyToClipboard(text) {
         textarea.style.position = 'fixed';
         textarea.style.opacity = '0';
         document.body.appendChild(textarea);
+        // select() moves focus onto the textarea, so remember where
+        // it was: once the temporary element is removed, focus would
+        // otherwise be lost (the clicked button would no longer be
+        // focused).
+        const previouslyFocused = document.activeElement;
         textarea.select();
         try {
-            document.execCommand('copy');
+            // execCommand returns false instead of throwing when the
+            // command is not enabled (no user activation, e.g. after the
+            // 5 s timeout above let the click's transient activation
+            // expire). Ignoring it would report a copy that never
+            // happened, so fail loudly and let the caller show the error.
+            if (!document.execCommand('copy')) {
+                throw new Error('Copy command was not enabled');
+            }
         } finally {
             document.body.removeChild(textarea);
+            if (previouslyFocused instanceof HTMLElement) {
+                previouslyFocused.focus();
+            }
         }
+    } finally {
+        clearTimeout(timeoutId);
     }
 }
