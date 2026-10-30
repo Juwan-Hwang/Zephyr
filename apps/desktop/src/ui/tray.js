@@ -761,25 +761,178 @@ export function generateProxyEnvVars(format, port = 7890, scheme = 'http') {
 }
 
 /**
+ * Whether the browser has already granted clipboard-write permission.
+ * Unknown (no Permissions API, or an unknown permission name) counts
+ * as granted: the write attempt itself then decides, as before.
+ * @returns {Promise<boolean>}
+ */
+async function clipboardWriteGranted() {
+    let timeoutId;
+    try {
+        // Race the query against a timeout: a query that never settles
+        // would stall the copy (and the settings page's write chain
+        // behind it) with no fallback. A timeout counts as granted,
+        // like a rejected query — the write attempt itself, time-boxed
+        // to 5 s with a textarea fallback, then decides. The query's
+        // own rejection is guarded so a late rejection cannot surface
+        // as unhandled once the timeout has already won the race; the
+        // timer is cleared in the finally below so a settled query
+        // leaves no timer behind.
+        const query = navigator.permissions?.query({
+            name: /** @type {PermissionName} */ ('clipboard-write'),
+        })?.catch(() => null);
+        const timeout = new Promise((resolve) => {
+            timeoutId = setTimeout(() => resolve(null), 2000);
+        });
+        const status = await Promise.race([query, timeout]);
+        return !status || status.state === 'granted';
+    } catch (_) {
+        // Unknown permission state counts as granted (see above): the
+        // write attempt itself decides.
+        return true;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+/** The newest text any `copyToClipboard` call was asked for. @type {string | null} */
+let latestCopiedText = null;
+
+/**
+ * Re-assert the newest copied text after a timed-out write lands late.
+ * Self-correcting: if a newer copy lands while this repair is still in
+ * flight, the repair re-asserts the newest text again instead of leaving
+ * the stale one on the clipboard. Each re-assertion is triggered by a
+ * newer user copy, so the chain ends once the newest text stops changing.
+ * Fire-and-forget, like the repair it performs: a rejected repair landed
+ * nothing, so there is nothing to re-assert.
+ * @param {string} expected
+ */
+function reassertLatestCopy(expected) {
+    navigator.clipboard.writeText(expected).then(
+        () => {
+            if (latestCopiedText !== null && latestCopiedText !== expected) {
+                reassertLatestCopy(latestCopiedText);
+            }
+        },
+        () => {},
+    );
+}
+
+/**
  * Copy text to clipboard with fallback for environments without clipboard API.
  * @param {string} text
  * @returns {Promise<void>}
  */
 export async function copyToClipboard(text) {
+    // A clipboard write can hang: when the browser leaves the
+    // permission prompt unanswered, `writeText` may never settle, and a
+    // caller that serializes writes (the copy button's chain) would
+    // stall forever. Give it a few seconds, then fall back to the
+    // textarea path instead of waiting on it. The fallback is
+    // best-effort: it needs the click's transient activation, which the
+    // timeout (and the awaits before this call) may already have spent,
+    // so on the timeout path it is expected to fail — the late native
+    // write may still land afterwards.
+    let timeoutId;
+    let timedOut = false;
     try {
-        await navigator.clipboard.writeText(text);
+        // When the clipboard-write permission is still undecided, the
+        // write would sit on the permission prompt: the 5 s timeout
+        // below would fire first, but the write itself stays pending
+        // and lands whenever the prompt is answered — after a newer
+        // copy, if one completed in between, so the clipboard ends up
+        // holding the older text while the UI reports the newer copy.
+        // `writeText` cannot be cancelled once started, so do not
+        // start it while the permission is undecided: go straight to
+        // the textarea fallback, which the click's transient activation
+        // may still cover (the awaits before this call can already have
+        // spent it — if so the fallback fails and the caller reports
+        // it). A granted permission resolves promptly, so it keeps the
+        // fast path; a denied one rejects at once and falls back anyway.
+        if (!await clipboardWriteGranted()) {
+            throw new Error('Clipboard write permission not granted');
+        }
+        // The newest text any copy was asked for. A native write that
+        // outlives its timeout still lands when it eventually resolves,
+        // so a late landing is repaired below by re-asserting this.
+        latestCopiedText = text;
+        const writePromise = navigator.clipboard.writeText(text);
+        // Prevent unhandled rejection if the timeout wins the race and the
+        // write rejects later.
+        writePromise.catch(() => {});
+        // A timed-out write cannot be cancelled: if it resolves after a
+        // newer copy ran, it would land the stale text over the newer
+        // one. Re-assert the newest text instead, so the clipboard ends
+        // up holding the latest copy. The repair re-checks on landing
+        // (see `reassertLatestCopy`): a repair that is itself still in
+        // flight when a newer copy lands re-asserts the newest text
+        // again instead of leaving its own stale text behind. The
+        // rejection handler is load-bearing: without it, a write that
+        // rejects leaves this derived promise rejected with nobody
+        // catching it (the `.catch` above only covers the original
+        // promise), and Vitest fails the run on the unhandled rejection.
+        // The repair only applies to writes that resolve late; a rejected
+        // write landed nothing, so there is nothing to re-assert.
+        writePromise.then(
+            () => {
+                if (timedOut && latestCopiedText !== null && latestCopiedText !== text) {
+                    reassertLatestCopy(latestCopiedText);
+                }
+            },
+            () => {},
+        );
+        await Promise.race([
+            writePromise,
+            new Promise((_, reject) => {
+                timeoutId = setTimeout(
+                    () => {
+                        timedOut = true;
+                        reject(new Error('Clipboard write timed out'));
+                    },
+                    5000,
+                );
+            }),
+        ]);
     } catch (_) {
+        // The failure reason does not change the fallback: any failure
+        // takes the textarea path, and the caller reports it if that
+        // fails too — so the error value itself is unused here.
         // Fallback for environments without clipboard API
         const textarea = document.createElement('textarea');
         textarea.value = text;
         textarea.style.position = 'fixed';
         textarea.style.opacity = '0';
         document.body.appendChild(textarea);
+        // select() moves focus onto the textarea, so remember where
+        // it was: once the temporary element is removed, focus would
+        // otherwise be lost (the clicked button would no longer be
+        // focused).
+        const previouslyFocused = document.activeElement;
         textarea.select();
         try {
-            document.execCommand('copy');
+            // execCommand returns false instead of throwing when the
+            // command is not enabled (no user activation, e.g. after the
+            // 5 s timeout above let the click's transient activation
+            // expire). Ignoring it would report a copy that never
+            // happened, so fail loudly and let the caller show the error.
+            if (!document.execCommand('copy')) {
+                throw new Error('Copy command was not enabled');
+            }
+            // The fallback copy succeeded: it is the newest text now, so
+            // record it like a native write — otherwise a late landing
+            // of an earlier timed-out write would not be repaired (its
+            // guard compares against this value). Only a successful
+            // fallback records: a failed one must not become the text a
+            // later repair re-asserts.
+            latestCopiedText = text;
         } finally {
             document.body.removeChild(textarea);
+            if (previouslyFocused instanceof HTMLElement) {
+                previouslyFocused.focus();
+            }
         }
+    } finally {
+        clearTimeout(timeoutId);
     }
 }
