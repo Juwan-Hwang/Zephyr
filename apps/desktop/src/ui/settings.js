@@ -167,7 +167,20 @@ async function syncUserAgentToBackend() {
     try {
         const ua = getSubscriptionUserAgent();
         await invoke(COMMANDS.UPDATE_SUBSCRIPTION_USER_AGENT, { userAgent: ua });
-    } catch { /* ignore */ }
+    } catch {
+        // A value the backend rejects must not linger in local storage
+        // looking active while the scheduler keeps the old one: restore
+        // the backend's current value and tell the user it was rejected.
+        try {
+            const settings = await invoke(COMMANDS.GET_SETTINGS);
+            const backendUa = settings?.subscription_user_agent ?? null;
+            localStorage.setItem('fakeClientCustom', backendUa ?? '');
+            const customInput = document.getElementById('fake-client-custom');
+            if (customInput) customInput.value = backendUa ?? '';
+        } catch { /* restore failed; the notification below still fires */ }
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+        showNotification(t.userAgentRejected || 'Custom User-Agent was rejected and has been reverted to the saved value.', 'error');
+    }
 }
 
 /** Debounced version for input events (avoids IPC on every keystroke). */

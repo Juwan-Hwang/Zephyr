@@ -55,9 +55,14 @@ fn build_http_client_with_proxy(
         client_builder = client_builder.resolve(host, *addr);
     }
 
-    // Determine User-Agent: use provided UA, or default to Zephyr
+    // Determine User-Agent: use provided UA if valid, or default to Zephyr
     let ua_to_use = match user_agent {
-        Some(ua) if !ua.trim().is_empty() => ua.trim().to_owned(),
+        Some(ua)
+            if !ua.trim().is_empty()
+                && zephyr_core::config::subscription::validate_user_agent(ua.trim()).is_ok() =>
+        {
+            ua.trim().to_owned()
+        }
         _ => {
             // Default Zephyr User-Agent with version
             let version = env!("CARGO_PKG_VERSION");
