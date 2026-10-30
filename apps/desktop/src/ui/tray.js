@@ -766,8 +766,26 @@ export function generateProxyEnvVars(format, port = 7890, scheme = 'http') {
  * @returns {Promise<void>}
  */
 export async function copyToClipboard(text) {
+    // A clipboard write can hang: when the browser leaves the
+    // permission prompt unanswered, `writeText` may never settle, and a
+    // caller that serializes writes (the copy button's chain) would
+    // stall forever. Give it a few seconds, then fall back to the
+    // textarea path instead of waiting on it.
+    let timeoutId;
     try {
-        await navigator.clipboard.writeText(text);
+        const writePromise = navigator.clipboard.writeText(text);
+        // Prevent unhandled rejection if the timeout wins the race and the
+        // write rejects later.
+        writePromise.catch(() => {});
+        await Promise.race([
+            writePromise,
+            new Promise((_, reject) => {
+                timeoutId = setTimeout(
+                    () => reject(new Error('Clipboard write timed out')),
+                    5000,
+                );
+            }),
+        ]);
     } catch (_) {
         // Fallback for environments without clipboard API
         const textarea = document.createElement('textarea');
@@ -775,11 +793,28 @@ export async function copyToClipboard(text) {
         textarea.style.position = 'fixed';
         textarea.style.opacity = '0';
         document.body.appendChild(textarea);
+        // select() moves focus onto the textarea, so remember where
+        // it was: once the temporary element is removed, focus would
+        // otherwise be lost (the clicked button would no longer be
+        // focused).
+        const previouslyFocused = document.activeElement;
         textarea.select();
         try {
-            document.execCommand('copy');
+            // execCommand returns false instead of throwing when the
+            // command is not enabled (no user activation, e.g. after the
+            // 5 s timeout above let the click's transient activation
+            // expire). Ignoring it would report a copy that never
+            // happened, so fail loudly and let the caller show the error.
+            if (!document.execCommand('copy')) {
+                throw new Error('Copy command was not enabled');
+            }
         } finally {
             document.body.removeChild(textarea);
+            if (previouslyFocused instanceof HTMLElement) {
+                previouslyFocused.focus();
+            }
         }
+    } finally {
+        clearTimeout(timeoutId);
     }
 }
