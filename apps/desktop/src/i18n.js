@@ -7,7 +7,7 @@
  * HTML lang/dir attributes, locale attribute introspection.
  */
 
-import { invoke } from './api.js';
+import { invoke, isIpcAvailable } from './api.js';
 import { COMMANDS } from '@zephyr/shared';
 import { i18nLogger } from './utils/logger.js';
 import { Bus, Events } from './ui/events.js';
@@ -14906,10 +14906,14 @@ export function setLanguage(lang) {
         i18nLogger.warn(`Unknown language "${lang}", falling back to "en"`);
         resolvedLang = 'en';
     }
-    currentLang = resolvedLang;
+    // Persist before mutating anything: if the write throws (blocked
+    // or full localStorage), the module state and the DOM are left
+    // exactly as they were instead of claiming the new language while
+    // still showing the old one.
     if (typeof localStorage !== 'undefined') {
         localStorage.setItem('lang', resolvedLang);
     }
+    currentLang = resolvedLang;
     setHTMLAttributes(resolvedLang);
     applyTranslations();
 }
@@ -14963,11 +14967,20 @@ export function applyTranslations() {
         const sysProxyEnabled = sysProxyToggle?.checked ?? win._currentSysProxyEnabled ?? false;
         const tunEnabled = tunToggle?.checked ?? win._currentTunEnabled ?? false;
 
-        invoke(COMMANDS.TRAY.UPDATE_TRAY_TOGGLE_STATES, {
-            sysProxyEnabled,
-            tunEnabled,
-            currentMode: win._currentMode || 'rule',
-        }).catch(e => i18nLogger.warn("Failed to update tray menu", e));
+        // The tray update is best-effort: without the IPC bridge
+        // (a non-Tauri preview) there is nothing to call, and the
+        // language already persisted and translated — a missing
+        // bridge must not fail the switch, or the caller rolls back
+        // a language that already applied. Skip it instead of
+        // catching the synchronous throw `invoke` makes without a
+        // bridge, so `I18N_APPLIED` still fires below.
+        if (typeof invoke === 'function' && isIpcAvailable()) {
+            invoke(COMMANDS.TRAY.UPDATE_TRAY_TOGGLE_STATES, {
+                sysProxyEnabled,
+                tunEnabled,
+                currentMode: win._currentMode || 'rule',
+            }).catch(e => i18nLogger.warn("Failed to update tray menu", e));
+        }
     }
 
     Bus.emit(Events.I18N_APPLIED);
