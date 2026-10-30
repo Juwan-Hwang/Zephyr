@@ -59,6 +59,9 @@ fn quoted_key_could_name(line: &str, key: &str) -> bool {
 /// token begins; an interior quote in a plain key (`don't`,
 /// `name 'x`) is ordinary text.
 fn mapping_colon_index(body: &str) -> Option<usize> {
+    if !body.contains(':') {
+        return None;
+    }
     let mut quote: Option<u8> = None;
     let mut prev: Option<u8> = None;
     let mut bytes = body.bytes().enumerate().peekable();
@@ -359,9 +362,9 @@ fn flow_collection_closes_on_line(text: &str) -> bool {
 /// order, exactly as the block-level check in
 /// `plain_value_has_mapping_colon` does: an alias naming an anchor
 /// not yet seen is malformed wherever it appears.
-fn flow_collection_has_invalid_content(
-    text: &str,
-    anchors: &mut std::collections::HashSet<String>,
+fn flow_collection_has_invalid_content<'a>(
+    text: &'a str,
+    anchors: &mut std::collections::HashSet<&'a str>,
 ) -> bool {
     let mut scan = FlowContentScan {
         at_token_start: true,
@@ -459,26 +462,20 @@ fn flow_collection_has_invalid_content(
                     if b == b'*' && scan.in_key_position() {
                         return true;
                     }
-                    let mut name_bytes = Vec::new();
+                    let name_start = text.len() - bytes.len();
                     let mut last = b;
                     while let Some(&next) = bytes.peek() {
                         if matches!(next, b' ' | b'\t' | b',' | b'}' | b']' | b'{' | b'[') {
                             break;
                         }
-                        name_bytes.push(next);
                         last = next;
                         bytes.next();
                     }
-                    // An alias is itself the node, so its name is
-                    // key text when in key position; an anchor
-                    // only prefixes the node that follows and is
-                    // not part of the key.
+                    let name_end = text.len() - bytes.len();
+                    let name = &text[name_start..name_end];
                     if b == b'*' {
-                        scan.capture_bytes(&name_bytes);
+                        scan.capture_bytes(name.as_bytes());
                     }
-                    // The delimiters are all ASCII, so the name
-                    // is a whole UTF-8 slice of the input.
-                    let name = String::from_utf8(name_bytes).unwrap_or_default();
                     if name.is_empty() {
                         return true;
                     }
@@ -487,6 +484,19 @@ fn flow_collection_has_invalid_content(
                             return true;
                         }
                     } else {
+                        // A node takes at most one anchor (the
+                        // block-level scan tracks the same rule with
+                        // its own `saw_anchor`): reading an anchor
+                        // starts its node (`content_byte` below sets
+                        // `node_begun`), while `at_token_start` stays
+                        // set until the node itself begins — so a
+                        // second `&` here is the parser's "did not
+                        // find expected node content", and recording
+                        // it would let the fast path rewrite a
+                        // document YAML itself rejects (`foo: [&a &b x]`).
+                        if scan.node_begun() {
+                            return true;
+                        }
                         anchors.insert(name);
                     }
                     if scan.content_byte() == FlowStep::Invalid {
@@ -1026,9 +1036,9 @@ fn block_scalar_header_has_junk(value: &str) -> bool {
 /// rules), as is anything past a ` #` comment start, and so is a
 /// flow collection that closes on the same line (its colons are
 /// flow syntax, not mapping separators).
-fn plain_value_has_mapping_colon(
-    body: &str,
-    anchors: &mut std::collections::HashSet<String>,
+fn plain_value_has_mapping_colon<'a>(
+    body: &'a str,
+    anchors: &mut std::collections::HashSet<&'a str>,
 ) -> bool {
     let entry = sequence_entry_body(body).unwrap_or(body);
     if entry.starts_with('{') || entry.starts_with('[') {
@@ -1051,6 +1061,10 @@ fn plain_value_has_mapping_colon(
     // anchor or tag means the value itself sits on a later line
     // (nothing to judge here).
     let mut effective = raw_value;
+    // A node takes at most one anchor: the parser rejects a second
+    // `&`, so recording it would let a later alias name it and
+    // bypass the fallback for a document YAML itself rejects.
+    let mut saw_anchor = false;
     loop {
         if let Some(alias) = effective.strip_prefix('*') {
             let name = alias.split([' ', '\t']).next().unwrap_or("");
@@ -1067,6 +1081,9 @@ fn plain_value_has_mapping_colon(
             break;
         }
         if effective.starts_with('&') {
+            if saw_anchor {
+                return true;
+            }
             let token = effective.split([' ', '\t']).next().unwrap_or("");
             // A lone `&` has no anchor name at all; the parser
             // rejects it rather than treating it as a bare anchor
@@ -1080,7 +1097,8 @@ fn plain_value_has_mapping_colon(
             if token[1..].contains(['[', ']', '{', '}', ',']) {
                 return true;
             }
-            anchors.insert(token[1..].to_owned());
+            anchors.insert(&token[1..]);
+            saw_anchor = true;
         }
         match effective.split_once([' ', '\t']) {
             Some((_, rest)) => effective = rest.trim_start(),
@@ -1469,9 +1487,9 @@ fn starts_with_reserved_indicator(body: &str) -> bool {
 /// that does not close on the line may carry no mapping colon to
 /// judge (the entry itself, or an explicit key's value). Complete
 /// flow entries are fine — they close on the line.
-fn sequence_entry_forces_fallback(
-    body: &str,
-    anchors: &mut std::collections::HashSet<String>,
+fn sequence_entry_forces_fallback<'a>(
+    body: &'a str,
+    anchors: &mut std::collections::HashSet<&'a str>,
 ) -> bool {
     let Some(entry) = sequence_entry_body(body) else {
         return false;
@@ -1550,7 +1568,7 @@ fn indented_line_forces_fallback<'a>(
     saw_unindented_line: bool,
     last_content: &mut Option<(usize, bool)>,
     block_tracker: &mut BlockKindTracker<'a>,
-    anchors: &mut std::collections::HashSet<String>,
+    anchors: &mut std::collections::HashSet<&'a str>,
 ) -> bool {
     let indent = line.len() - line.trim_start().len();
     let trimmed_start = line.trim_start();
@@ -1625,7 +1643,7 @@ fn indented_line_forces_fallback<'a>(
 fn unindented_line_forces_fallback<'a>(
     line: &'a str,
     root_tracker: &mut RootKindTracker,
-    anchors: &mut std::collections::HashSet<String>,
+    anchors: &mut std::collections::HashSet<&'a str>,
     seen_keys: &mut std::collections::HashSet<&'a str>,
 ) -> bool {
     is_standalone_value_line(line)
@@ -3511,6 +3529,46 @@ mod tests {
         let anchored_value = "tun: &a\n  enable: true\n";
         assert_eq!(extract_tun_enabled_fast(anchored_value), None);
         assert!(extract_tun_enabled_from_yaml(anchored_value));
+    }
+
+    #[test]
+    fn test_fast_path_second_anchor_forces_fallback() {
+        // A node takes at most one anchor: the parser rejects
+        // `foo: &a &b x`, so `b` must not be recorded as a usable
+        // anchor for a later `*b` alias.
+        let doc = "foo: &a &b x\nbar: *b\n";
+        assert!(yaml::from_str::<YamlValue>(doc).is_err());
+        let mut anchors = std::collections::HashSet::new();
+        assert!(plain_value_has_mapping_colon("foo: &a &b x", &mut anchors));
+        assert!(anchors.contains("a"));
+        assert!(!anchors.contains("b"));
+        // The whole document falls back, so the fast extractor
+        // refuses it instead of resolving the alias.
+        assert_eq!(extract_top_level_scalar_fast(doc, "bar"), None);
+    }
+
+    #[test]
+    fn test_flow_collection_second_anchor_forces_fallback() {
+        // The same rule inside a flow collection: the parser rejects
+        // `foo: [&a &b x]`, so the flow scan must flag it and the
+        // fast path must not rewrite the document.
+        let doc = "foo: [&a &b x]\nsecret: old\n";
+        assert!(yaml::from_str::<YamlValue>(doc).is_err());
+        let mut anchors = std::collections::HashSet::new();
+        assert!(flow_collection_has_invalid_content(
+            "[&a &b x]",
+            &mut anchors
+        ));
+        assert_eq!(set_secret_in_yaml_fast(doc, "new"), None);
+        assert!(set_secret_in_yaml(doc, "new").is_err());
+        // A single anchor in a flow collection still takes the fast path.
+        let single = "foo: [&a x]\nsecret: old\n";
+        assert!(yaml::from_str::<YamlValue>(single).is_ok());
+        let mut anchors = std::collections::HashSet::new();
+        assert!(!flow_collection_has_invalid_content("[&a x]", &mut anchors));
+        let res = set_secret_in_yaml(single, "new").unwrap();
+        assert_eq!(extract_secret_from_yaml(&res).as_deref(), Some("new"));
+        assert!(res.starts_with("foo: [&a x]\n"));
     }
 
     #[test]
