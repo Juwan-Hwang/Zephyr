@@ -6,6 +6,7 @@ vi.mock('../api.js', () => ({
         if (cmd === 'list_configs') return Promise.resolve([]);
         return Promise.resolve({});
     }),
+    isIpcAvailable: vi.fn().mockReturnValue(true),
     getConnections: vi.fn().mockResolvedValue({ connections: [] }),
     getProxies: vi.fn().mockResolvedValue({ proxies: {} }),
     getProxiesMerged: vi.fn(async (data) => data),
@@ -588,5 +589,151 @@ describe('Console Dashboard Width Threshold and Notification', () => {
             vi.mocked(testProxy).mockResolvedValueOnce(999999);
             expect(await measureLatency('JP')).toEqual({ delay: -1, cancelled: false });
         });
+    });
+});
+
+describe('node host click-to-copy feedback', () => {
+    /**
+     * Build the console page from a fresh module (the build runs once
+     * per module) and mock the clipboard, so the test drives the real
+     * click handler.
+     * @param {() => Promise<void>} writeTextImpl
+     */
+    async function setupHostCopy(writeTextImpl) {
+        document.body.innerHTML = '<div data-page="console"></div><div data-page="home"></div>';
+        vi.resetModules();
+        const fresh = await import('./console-home.js');
+        const originalClipboard = navigator.clipboard;
+        const writeText = vi.fn(writeTextImpl);
+        Object.defineProperty(navigator, 'clipboard', {
+            value: { writeText },
+            configurable: true,
+            writable: true,
+        });
+        vi.useFakeTimers();
+        fresh.activateConsole();
+        const hostEl = /** @type {HTMLElement} */ (document.getElementById('dz-node-host'));
+        expect(hostEl).not.toBeNull();
+        return { fresh, hostEl, originalClipboard };
+    }
+
+    /**
+     * Click the node host twice within the 1.2 s feedback window and
+     * expect the color to end back at idle. The shared double-click
+     * dance; the tests differ only in whether the copy succeeds and
+     * which feedback color that shows.
+     */
+    async function expectDoubleCopyRestoresIdle(writeTextImpl, expectedColor) {
+        const { fresh, hostEl, originalClipboard } = await setupHostCopy(writeTextImpl);
+        try {
+            hostEl.textContent = 'host.example:8080';
+            hostEl.click();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(hostEl.style.color).toBe(expectedColor);
+            // Second copy 500 ms later, inside the 1.2 s window.
+            await vi.advanceTimersByTimeAsync(500);
+            hostEl.textContent = 'host.example:8080';
+            hostEl.click();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(hostEl.style.color).toBe(expectedColor);
+            // Past both timers: the color must be back to idle.
+            await vi.advanceTimersByTimeAsync(1200);
+            expect(hostEl.style.color).toBe('');
+        } finally {
+            fresh.deactivateConsole();
+            Object.defineProperty(navigator, 'clipboard', {
+                value: originalClipboard,
+                configurable: true,
+                writable: true,
+            });
+        }
+    }
+
+    afterEach(() => {
+        vi.useRealTimers();
+        document.body.innerHTML = '';
+    });
+
+    it('does not leave the success color stuck after two quick copies', async () => {
+        await expectDoubleCopyRestoresIdle(async () => {}, 'var(--zephyr-color-success)');
+    });
+
+    it('does not leave the danger color stuck after two quick failures', async () => {
+        await expectDoubleCopyRestoresIdle(async () => {
+            throw new Error('denied');
+        }, 'var(--zephyr-color-danger)');
+    });
+
+    it('does not let an older failure replace a newer success', async () => {
+        // Two host copies in flight: the newer one succeeds while the
+        // older one is still pending, then the older one fails. The
+        // failure belongs to the older copy and must not replace the
+        // newer success feedback with danger.
+        const makeDeferred = () => {
+            let resolve;
+            let reject;
+            const promise = new Promise((res, rej) => {
+                resolve = res;
+                reject = rej;
+            });
+            return { promise, resolve, reject };
+        };
+        const first = makeDeferred();
+        const second = makeDeferred();
+        const writes = [first, second];
+        let call = 0;
+        const { fresh, hostEl, originalClipboard } = await setupHostCopy(() => writes[call++].promise);
+        try {
+            hostEl.textContent = 'host.example:8080';
+            hostEl.click();
+            hostEl.textContent = 'host.example:8080';
+            hostEl.click();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(hostEl.style.color).toBe('');
+            // The newer copy succeeds first.
+            second.resolve();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(hostEl.style.color).toBe('var(--zephyr-color-success)');
+            // The older copy fails after: the success feedback stays.
+            first.reject(new Error('denied'));
+            await vi.advanceTimersByTimeAsync(0);
+            expect(hostEl.style.color).toBe('var(--zephyr-color-success)');
+            // Past the feedback window: the color is back to idle.
+            await vi.advanceTimersByTimeAsync(1200);
+            expect(hostEl.style.color).toBe('');
+        } finally {
+            fresh.deactivateConsole();
+            Object.defineProperty(navigator, 'clipboard', {
+                value: originalClipboard,
+                configurable: true,
+                writable: true,
+            });
+        }
+    });
+
+    it('reports a hung host copy as a failure after the write timeout', async () => {
+        // A permission prompt left unanswered leaves `writeText`
+        // unsettled forever: without a timeout the host would stay
+        // silent with no feedback at all.
+        const { fresh, hostEl, originalClipboard } = await setupHostCopy(() => new Promise(() => {}));
+        try {
+            hostEl.textContent = 'host.example:8080';
+            hostEl.click();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(hostEl.style.color).toBe('');
+            // Past the 5 s write timeout: the copy is reported failed.
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(hostEl.style.color).toBe('var(--zephyr-color-danger)');
+            // Past the feedback window: the color is back to idle.
+            await vi.advanceTimersByTimeAsync(1200);
+            expect(hostEl.style.color).toBe('');
+        } finally {
+            fresh.deactivateConsole();
+            Object.defineProperty(navigator, 'clipboard', {
+                value: originalClipboard,
+                configurable: true,
+                writable: true,
+            });
+        }
     });
 });
