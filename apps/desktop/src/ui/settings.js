@@ -93,6 +93,7 @@ import { withResetChanges } from './settings/reset-merge.js';
 import { selectSegment } from './seg-control.js';
 import { openUpdateDialog, showPendingUpdateNote } from './update-dialog.js';
 import { createClientVersionFetcher, isValidClientVersions } from './settings/client-version-fetch.js';
+import { uaTripleFromBackendUA, createUaEditTracker } from './settings/ua-triple.js';
 
 let __langDropdown = null;
 /** @type {(() => Promise<void>) | null} */
@@ -158,16 +159,305 @@ function getSubscriptionUserAgent() {
     return getFakeClientUA();
 }
 
+/** Monotonic generation for UA syncs: a stale catch must not roll back a newer edit. */
+let uaSyncSeq = 0;
+
+/**
+ * Tracks user edits to the fake-client triple (see `createUaEditTracker`):
+ * a backup import captures the generation when its queue task starts and
+ * only restores the imported triple when no edit landed in between.
+ */
+const uaEditTracker = createUaEditTracker();
+
+/**
+ * Record a user edit to the fake-client controls: bump the edit
+ * generation (so an import in flight recognizes it instead of restoring
+ * over it) and clear the stale-import marker (an explicit edit is the
+ * user's choice even if the value happens to equal the pre-import one,
+ * so its sync is sent instead of skipped as stale). Only user edits
+ * use this — the programmatic version refresh must not: it refreshes
+ * the marker instead of clearing it.
+ */
+function noteUaUserEdit() {
+    uaEditTracker.noteEdit();
+    sessionStorage.removeItem('zephyr-stale-import-ua');
+}
+
+/**
+ * The last UA triple the backend accepted. A validation rejection must roll
+ * back to this — never to a snapshot taken inside the sync itself: by then
+ * the input listener has already overwritten localStorage with the rejected
+ * draft, so such a snapshot IS the bad value and the "revert" restores
+ * nothing. It is set only by a successful sync, never seeded from the values
+ * loaded at init: a previous session can end with an unsynced draft in
+ * localStorage, and seeding from that would "restore" the very draft that
+ * was just rejected.
+ * @type {{ enabled: string|null, type: string|null, custom: string|null }|null}
+ */
+let lastAcceptedUA = null;
+
+/**
+ * Refresh the fake-client controls from a restored triple. Registered by
+ * initFakeClient, which owns the toggle, the custom dropdown and the
+ * visibility rules; without it the rollback below could only restore
+ * storage and the custom input, leaving the other controls showing the
+ * rejected edit.
+ * @type {((triple: { enabled: string|null, type: string|null, custom: string|null }) => void)|null}
+ */
+let uaRollbackUI = null;
+
+/** Read the current UA triple from localStorage. */
+function readUATriple() {
+    return {
+        enabled: localStorage.getItem('fakeClientEnabled'),
+        type: localStorage.getItem('fakeClientType'),
+        custom: localStorage.getItem('fakeClientCustom'),
+    };
+}
+
+/**
+ * Write a UA triple back to storage and refresh the fake-client controls
+ * from it. Restoring storage alone would leave the toggle and the preset
+ * select showing the rejected edit.
+ * @param {{ enabled: string|null, type: string|null, custom: string|null }} triple
+ */
+function restoreUATriple(triple) {
+    const { enabled, type, custom } = triple;
+    if (enabled === null) localStorage.removeItem('fakeClientEnabled');
+    else localStorage.setItem('fakeClientEnabled', enabled);
+    if (type === null) localStorage.removeItem('fakeClientType');
+    else localStorage.setItem('fakeClientType', type);
+    if (custom === null) localStorage.removeItem('fakeClientCustom');
+    else localStorage.setItem('fakeClientCustom', custom);
+    if (uaRollbackUI) {
+        uaRollbackUI({ enabled, type, custom });
+    } else {
+        const customInput = /** @type {HTMLInputElement} */ (document.getElementById('fake-client-custom'));
+        if (customInput) customInput.value = custom ?? '';
+    }
+}
+
+/**
+ * Read the UA the backend last accepted, as a triple the rollback can
+ * restore. Only used when no sync has succeeded this session, so there
+ * is no in-memory snapshot yet. A preset UA maps back to its preset;
+ * anything else is a custom text value. Returns null when the backend
+ * holds nothing, when the read fails, or when the user has already typed
+ * a newer value while the read was in flight (restoring then would
+ * clobber the newer draft).
+ * @param {string|null} sentUa the UA this sync just tried to send
+ * @returns {Promise<{ enabled: string|null, type: string|null, custom: string|null }|null>}
+ */
+async function readBackendAcceptedUA(sentUa) {
+    try {
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        if (getSubscriptionUserAgent() !== sentUa) return null;
+        return uaTripleFromBackendUA(settings?.subscription_user_agent);
+    } catch (readErr) {
+        settingsLogger.error('[fake-client] Failed to read the accepted User-Agent:', readErr);
+        return null;
+    }
+}
+
+/**
+ * Serializes UA syncs in call order: overlapping syncs used to commit
+ * out of order, so a success could be discarded as superseded while its
+ * value was live on the backend, and a later validation rejection would
+ * roll back to an older value the backend no longer holds. Each link
+ * runs even if the previous settled with an error, so one failure
+ * cannot stall later syncs; a stalled sync can still delay later ones,
+ * but syncs are debounced and IPC resolves quickly in practice.
+ * @type {Promise<unknown>}
+ */
+let uaSyncQueue = Promise.resolve();
+
+/**
+ * Run `task` on the UA sync queue, behind every sync enqueued so far.
+ * The backup import uses this so its publish and capture cannot
+ * interleave with a pending UA write (see the import handler). The
+ * queue itself never rejects, so one failure cannot stall later work;
+ * the task's own result (or rejection) is returned to the caller.
+ * @template T
+ * @param {() => Promise<T>} task
+ * @returns {Promise<T>}
+ */
+function runAfterUaSyncs(task) {
+    const result = uaSyncQueue.then(task, task);
+    uaSyncQueue = result.catch(() => {});
+    return result;
+}
+
+/**
+ * After a backup import whose UA could not be read back, the stored
+ * triple is the pre-import one and a stale-import marker blocks syncs
+ * of it — so the controls keep showing the pre-import UA while the
+ * backend already holds the imported one. Read the backend value back
+ * now and restore it, then clear the marker. Returns false (and leaves
+ * the marker and the stored triple alone) when there is no marker, the
+ * read fails, the backend value is still unknown, or a user edit landed
+ * while the read was in flight — that edit's own sync carries the
+ * current value.
+ * @returns {Promise<boolean>} Whether the marker was consumed.
+ */
+async function reconcileStaleImportUa() {
+    if (sessionStorage.getItem('zephyr-stale-import-ua') === null) return false;
+    const editGenBefore = uaEditTracker.capture();
+    try {
+        const settings = await invoke(COMMANDS.GET_SETTINGS) || {};
+        if (!uaEditTracker.unchangedSince(editGenBefore)) return false;
+        const triple = uaTripleFromBackendUA(settings.subscription_user_agent);
+        if (!triple) return false;
+        lastAcceptedUA = triple;
+        restoreUATriple(triple);
+        sessionStorage.removeItem('zephyr-stale-import-ua');
+        return true;
+    } catch (err) {
+        settingsLogger.error('[fake-client] Failed to read settings to reconcile the imported User-Agent:', err);
+        return false;
+    }
+}
+
 /**
  * Sync the current fake client UA to backend settings
  * so the subscription scheduler can use it for auto-updates.
  * Uses atomic field-level update to avoid Read-Modify-Write race.
+ * Runs serialized through `syncUserAgentToBackend`.
+ * @param {{ silent?: boolean, ignoreStaleImport?: boolean }} [options] When silent, failures are only
+ * logged, not toasted: callers that report the failure themselves (like
+ * Restore Defaults, which lists failed steps in its own summary) would
+ * otherwise show the same failure twice. `ignoreStaleImport` bypasses
+ * the stale-import guard below; only an explicit overwrite (Restore
+ * Defaults) may use it.
+ * @returns {Promise<'ok' | 'superseded' | 'failed'>} 'ok' when the backend
+ * now holds the sent value (including when there was nothing to send
+ * because the stored triple is a stale pre-import one — see below);
+ * 'superseded' when a newer sync carries the current value instead, so
+ * this one did not land and the caller must not count it as a success;
+ * 'failed' when the sync failed and the backend still holds the
+ * previous value.
  */
-async function syncUserAgentToBackend() {
+async function syncUserAgentToBackendNow(options) {
+    const ua = getSubscriptionUserAgent();
+    // A backup import replaces the backend settings, but its UA could
+    // not be read back (see the import handler): the stored triple is
+    // the pre-import one, and sending it now would undo the import.
+    // Skip syncs that would send exactly that stale value; the marker
+    // survives a reload in sessionStorage, so it covers the reloaded
+    // page's init sync too. A version refresh moves the stored preset
+    // to a newer version — still the pre-import preset, so
+    // `applyLatestVersions` refreshes the marker to the new value
+    // instead of syncing. Any different value — a user edit, a reset —
+    // sends normally and clears the marker. 'ok', not 'failed':
+    // nothing failed, there is simply nothing this sync should send.
+    const staleImportUa = sessionStorage.getItem('zephyr-stale-import-ua');
+    if (staleImportUa !== null) {
+        if (JSON.stringify(ua) === staleImportUa && !options?.ignoreStaleImport) {
+            return 'ok';
+        }
+        sessionStorage.removeItem('zephyr-stale-import-ua');
+    }
+    // The triple being sent: on success this is what the backend now holds.
+    // Custom text is only actually sent (and validated) while custom mode
+    // is on: when a preset is selected or the toggle is off, the stored
+    // custom text is an unsent draft, and saving it as "accepted" would
+    // let a later rejection restore a value that was never validated.
+    // Keep the previously accepted custom text in that case instead.
+    const current = readUATriple();
+    const sent = {
+        ...current,
+        custom:
+            current.enabled === 'true' && current.type === 'custom'
+                ? current.custom
+                : (lastAcceptedUA?.custom ?? null),
+    };
+    const seq = ++uaSyncSeq;
     try {
-        const ua = getSubscriptionUserAgent();
         await invoke(COMMANDS.UPDATE_SUBSCRIPTION_USER_AGENT, { userAgent: ua });
-    } catch { /* ignore */ }
+        // Only the newest sync may set the rollback snapshot: an older
+        // response arriving after a newer one must not rewind it, or a
+        // later validation rejection would restore the older triple.
+        if (seq === uaSyncSeq) lastAcceptedUA = sent;
+        return 'ok';
+    } catch (err) {
+        // A newer sync has started, or the user has already typed a newer
+        // value (the input listener writes localStorage synchronously): the
+        // stale failure must not clobber the newer draft. That newer sync
+        // carries the current value, so there is no failure to report —
+        // but the caller must not count this sync as landed either: it
+        // reports 'superseded', and callers that need a landed value
+        // (Restore Defaults) follow up with a sync of the current value
+        // and report that result instead.
+        if (seq !== uaSyncSeq || getSubscriptionUserAgent() !== ua) return 'superseded';
+        const message = toError(err).message || '';
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+        // Only a validation rejection means "revert to the saved value".
+        // Any other failure (IPC, settings persist) leaves the user's edit
+        // in place so the next edit retries it, instead of discarding a
+        // valid edit behind a misleading "rejected" notice.
+        const isValidationRejection =
+            message.includes('User-Agent string too long') ||
+            message.includes('User-Agent contains invalid control characters');
+        // The failure report for a sync that did not land and did not
+        // revert: log it, and tell the user the edit is kept (unless the
+        // caller reports failures itself — see `silent`). Shared by the
+        // non-validation path and the no-snapshot path below, which used
+        // to write the same two lines twice.
+        /** @returns {'failed'} */
+        const keepEdit = () => {
+            settingsLogger.error('[fake-client] Failed to sync User-Agent:', err);
+            if (!options?.silent) showNotification(t.userAgentSyncFailed || 'Failed to sync User-Agent; your edit is kept and will retry on the next change.', 'error');
+            return 'failed';
+        };
+        if (!isValidationRejection) return keepEdit();
+        // Validation can only reject a custom text value: preset UAs are
+        // short and clean, and null always passes. Restore the last
+        // accepted triple to storage and refresh all three controls from
+        // it — restoring storage alone would leave the toggle and the
+        // preset select showing the rejected edit.
+        // (No accepted triple yet means no sync has ever succeeded this
+        // session — but the backend still holds the value it last
+        // accepted, from an earlier session. A saved draft rejected on
+        // the first sync of the session must roll back to that, or the
+        // UI keeps showing the draft while the backend keeps its own
+        // value: manual downloads send the frontend value and fall back
+        // to the default when it is invalid, while scheduled downloads
+        // use the backend value, so the two would silently disagree.
+        // When the backend holds nothing, the disabled triple is the
+        // restore (the backend uses its default UA exactly then). Only
+        // when the read itself fails, or the stored value is not
+        // trustworthy, is there nothing to restore: then keep the edit
+        // and say so instead of claiming a revert that did not happen.)
+        // The rollback target: the snapshot when one exists, else the
+        // backend value (see the comment above — no snapshot yet this
+        // session means the backend still holds the last accepted value
+        // from an earlier session). No target means the read itself
+        // failed or the stored value is not trustworthy: keep the edit
+        // instead of claiming a revert that did not happen.
+        const target = lastAcceptedUA ?? await readBackendAcceptedUA(ua);
+        if (!target) return keepEdit();
+        lastAcceptedUA = target;
+        restoreUATriple(target);
+        if (!options?.silent) showNotification(t.userAgentRejected || 'Custom User-Agent was rejected and has been reverted to the saved value. Use at most 512 bytes and no control characters.', 'error');
+        return 'failed';
+    }
+}
+
+/**
+ * Serialized entry point for UA syncs: enqueue the sync behind any
+ * still-running one instead of firing it concurrently.
+ * @param {{ silent?: boolean, ignoreStaleImport?: boolean }} [options] Passed through to
+ * `syncUserAgentToBackendNow` (see its docs for what silent does).
+ * @returns {Promise<'ok' | 'superseded' | 'failed'>} Whether the sent value
+ * landed (see `syncUserAgentToBackendNow`); 'failed' when the sync itself
+ * threw instead of returning a status.
+ */
+function syncUserAgentToBackend(options) {
+    /** @type {Promise<'ok' | 'superseded' | 'failed'>} */
+    const synced = uaSyncQueue
+        .then(() => syncUserAgentToBackendNow(options), () => syncUserAgentToBackendNow(options))
+        .catch(() => 'failed');
+    uaSyncQueue = synced;
+    return synced;
 }
 
 /** Debounced version for input events (avoids IPC on every keystroke). */
@@ -925,10 +1215,55 @@ function initFakeClient() {
         /** @param {string} val */
         onChange: (val) => {
             localStorage.setItem('fakeClientType', val);
+            noteUaUserEdit();
             updateVisibility();
             void syncUserAgentToBackend();
         },
     });
+
+    // A validation rejection rolls storage back to the last accepted
+    // triple; the visible controls must follow it, or the toggle and the
+    // type dropdown keep showing the rejected edit. setValue only moves
+    // the select and its trigger label — it does not re-fire onChange,
+    // so this cannot loop back into another sync.
+    uaRollbackUI = ({ enabled, type, custom }) => {
+        toggle.checked = enabled === null ? true : enabled === 'true';
+        // The disabled triple carries no type, but the dropdown shows a
+        // preset: use the one actually offered — once the version lookup
+        // has run, the option carries the fetched version, not the 1.6.0
+        // fallback, so writing the fallback would sync a UA the dropdown
+        // no longer shows. Same lookup as the reset path.
+        const vergeOpt = select?.querySelector('option[value^="clash-verge"]');
+        const defaultType = vergeOpt
+            ? /** @type {HTMLOptionElement} */ (vergeOpt).value
+            : 'clash-verge/1.6.0';
+        const restoredType = type || defaultType;
+        if (type === null) {
+            // The disabled triple carries no type, but the dropdown shows
+            // the default preset: persist it, or re-enabling the toggle
+            // later would sync a null UA while the UI still shows the
+            // preset. (The not-offered branch below still overwrites this
+            // with Custom when the preset itself is gone.)
+            localStorage.setItem('fakeClientType', restoredType);
+        }
+        if (fakeClientDropdown) fakeClientDropdown.setValue(restoredType);
+        else select.value = restoredType;
+        let restoredCustom = custom ?? '';
+        if (!select.value) {
+            if (fakeClientDropdown) fakeClientDropdown.setValue('custom');
+            else select.value = 'custom';
+            // The restored preset is no longer offered (a version fetch
+            // replaced it): showing Custom while storage still holds the
+            // preset would leave later custom edits ignored, because the
+            // UA is read from storage by type. Keep the UA string itself
+            // unchanged by carrying it as the custom text instead.
+            localStorage.setItem('fakeClientType', 'custom');
+            localStorage.setItem('fakeClientCustom', restoredType);
+            restoredCustom = restoredType;
+        }
+        customInput.value = restoredCustom;
+        updateVisibility();
+    };
 
     function updateVisibility() {
         if (toggle.checked) {
@@ -943,6 +1278,10 @@ function initFakeClient() {
         } else {
             /** @type {HTMLElement} */ (optionsContainer).classList.remove('max-h-40', 'opacity-100');
             /** @type {HTMLElement} */ (optionsContainer).classList.add('max-h-0', 'opacity-0', 'overflow-hidden');
+            // The feature is off, so no versions are needed: stop scheduled
+            // retries too. This also covers a validation rollback that
+            // restores the disabled state while a lookup is in flight.
+            versionFetcher.pause();
             setTimeout(() => { if (customContainer) customContainer.classList.add('hidden'); }, 300);
         }
     }
@@ -971,24 +1310,45 @@ function initFakeClient() {
             if (flclashBtn) { flclashBtn.setAttribute('data-value', versions.flclash); flclashBtn.textContent = `Flclash (${versions.flclash})`; flclashBtn.setAttribute('data-label', `Flclash (${versions.flclash})`); }
         }
 
-        if (savedType && savedType.startsWith('clash-verge')) {
+        // Read the current selection, not the init-time one: the user may
+        // have switched preset (or picked Custom) while the lookup was
+        // pending, and applying the stale preset would overwrite that
+        // choice and sync the wrong UA to the backend.
+        const currentType = localStorage.getItem('fakeClientType') || 'clash-verge/1.6.0';
+        if (currentType.startsWith('clash-verge')) {
             select.value = versions.verge;
             localStorage.setItem('fakeClientType', versions.verge);
-        } else if (savedType && savedType.startsWith('mihomo-party')) {
+        } else if (currentType.startsWith('mihomo-party')) {
             select.value = versions.mihomo_party;
             localStorage.setItem('fakeClientType', versions.mihomo_party);
-        } else if (savedType && savedType.startsWith('Flclash')) {
+        } else if (currentType.startsWith('Flclash')) {
             select.value = versions.flclash;
             localStorage.setItem('fakeClientType', versions.flclash);
         } else {
-            select.value = savedType;
+            select.value = currentType;
         }
 
         if (fakeClientDropdown) fakeClientDropdown.syncUI();
+        // The init sync ran before this fetch finished, so the backend
+        // still holds the old preset version: sync the replaced preset
+        // now, or the scheduler keeps using the old UA until the next
+        // manual change. Unless a stale-import marker is set: the stored
+        // preset is the pre-import one, and the refreshed version is
+        // equally stale — sending it would undo the import, and so would
+        // the reloaded page's init sync once the value differs from the
+        // marker. Refresh the marker to the new version instead, and
+        // skip the sync; the import reconciliation reads the backend
+        // value back on reload.
+        if (sessionStorage.getItem('zephyr-stale-import-ua') !== null) {
+            sessionStorage.setItem('zephyr-stale-import-ua', JSON.stringify(getSubscriptionUserAgent()));
+            return;
+        }
+        void syncUserAgentToBackend();
     }
 
     toggle.addEventListener('change', () => {
         localStorage.setItem('fakeClientEnabled', toggle.checked.toString());
+        noteUaUserEdit();
         // Re-enabling is an explicit user action: allow a fresh retry budget.
         if (toggle.checked) versionFetcher.retryNow();
         else versionFetcher.pause();
@@ -1003,6 +1363,7 @@ function initFakeClient() {
 
     customInput.addEventListener('input', () => {
         localStorage.setItem('fakeClientCustom', customInput.value);
+        noteUaUserEdit();
         debouncedSyncUA();
     });
 
@@ -1016,6 +1377,13 @@ document.getElementById('fake-client-custom-paste-btn')?.addEventListener('click
         updateVisibility();
         setTimeout(() => optionsContainer.style.transition = '', 50);
     }
+
+    // A backup import may have left a stale-import marker (its UA could
+    // not be read back): reconcile the stored triple from the backend so
+    // the controls show the imported value instead of the pre-import
+    // one. Runs last, after the rollback UI is registered, so the
+    // restore refreshes the toggle and the preset select too.
+    void reconcileStaleImportUa();
 }
 
 /** @type {boolean} In-flight guard for home-mode switch. */
@@ -1673,17 +2041,57 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 const fakeClientToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-fake-client'));
                 if (fakeClientToggle) {
                     fakeClientToggle.checked = true;
-                    localStorage.setItem('fakeClientEnabled', 'true');
-                    localStorage.removeItem('fakeClientType');
-                    localStorage.removeItem('fakeClientCustom');
+                    // Reset to the Clash Verge option that is actually
+                    // offered: once the version lookup has run, the option
+                    // carries the fetched version, not the 1.6.0 fallback,
+                    // so writing the fallback would sync a UA the dropdown
+                    // no longer shows. Refresh through the same restore
+                    // path the rollback uses, so the dropdown label and
+                    // the custom editor visibility follow the reset too.
                     const fakeClientSelect = /** @type {HTMLSelectElement} */ (document.getElementById('fake-client-select'));
-                    if (fakeClientSelect) fakeClientSelect.value = 'clash-verge/1.6.0';
-                    const optionsContainer = document.getElementById('fake-client-options');
-                    if (optionsContainer) {
-                        optionsContainer.classList.remove('max-h-0', 'opacity-0');
-                        optionsContainer.classList.add('max-h-40', 'opacity-100');
-                    }
-                    successItems.push('fakeClient');
+                    const vergeOpt = fakeClientSelect?.querySelector('option[value^="clash-verge"]');
+                    const resetType = vergeOpt
+                        ? /** @type {HTMLOptionElement} */ (vergeOpt).value
+                        : 'clash-verge/1.6.0';
+                    restoreUATriple({ enabled: 'true', type: resetType, custom: null });
+                    // A reset is an explicit rewrite, newer than the
+                    // import: note it like a user edit, so an import in
+                    // flight recognizes it instead of restoring over it.
+                    uaEditTracker.noteEdit();
+                    // The reset changed the fake-client triple without
+                    // syncing it: the backend would keep the pre-reset UA
+                    // for scheduled downloads, and `lastAcceptedUA` would
+                    // still hold the pre-reset triple, so a later
+                    // validation rejection would restore the pre-reset
+                    // values and undo the reset. Sync now, and count the
+                    // step as failed if the sync does not land — the
+                    // controls would otherwise show the preset while
+                    // scheduled downloads keep the old UA. Silent: the
+                    // sync's own toast would duplicate the failure in
+                    // the restore summary below, and its wording ("your
+                    // edit is kept") does not fit a reset. An explicit
+                    // reset is a deliberate overwrite, so it also
+                    // bypasses the stale-import guard (an import whose
+                    // UA could not be read back must not block it).
+                    await trackResult('fakeClient', async () => {
+                        // A superseded sync is not a success: the reset's
+                        // own write did not land, because a newer edit is
+                        // in flight (or still in the input debounce).
+                        // Follow up with a sync of the current value and
+                        // report THAT result: the follow-up sends whatever
+                        // storage holds now — the reset value, or the
+                        // user's newer choice — so the step only counts
+                        // as failed if neither landed. Bounded: a user
+                        // typing continuously keeps superseding, and the
+                        // step must not wait forever.
+                        let result = await syncUserAgentToBackend({ silent: true, ignoreStaleImport: true });
+                        for (let attempt = 0; result === 'superseded' && attempt < 3; attempt += 1) {
+                            result = await syncUserAgentToBackend({ silent: true, ignoreStaleImport: true });
+                        }
+                        if (result !== 'ok') {
+                            throw new Error(t.failedSaveSettings || 'Failed to save settings');
+                        }
+                    });
                 }
 
                 // Reset theme mode
@@ -2431,22 +2839,139 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 return;
             }
             appStore.set('isNetworkUpdating', true);
-            let result;
+            // The import and its capture run as one link on the UA sync
+            // queue, behind every sync enqueued so far: a sync that
+            // started before the import must not commit after the import
+            // publishes and before the capture reads, or it silently
+            // overwrites the imported User-Agent — and the capture would
+            // then read the stale value back and re-assert it. A sync
+            // from a later edit waits behind this link and sends the
+            // value storage holds then: the imported value, unless the
+            // user edited in the meantime (see the generation guard
+            // below), in which case the newer edit wins.
+            let imported;
             try {
-                result = await invoke(COMMANDS.MISC.IMPORT_BACKUP);
+                imported = await runAfterUaSyncs(async () => {
+                    // Capture both before the import publishes: the
+                    // pre-import UA (for the stale marker below) and the
+                    // edit generation (an edit that lands after this point
+                    // is newer than the import and must not be restored
+                    // over — the input listener writes localStorage
+                    // synchronously and does not go through this queue).
+                    const preImportUa = getSubscriptionUserAgent();
+                    const editGenBefore = uaEditTracker.capture();
+                    const importResult = await invoke(COMMANDS.MISC.IMPORT_BACKUP);
+                    // The settings read is separate from the import: if
+                    // it fails, the import itself still succeeded, so the
+                    // window reload below must still run — but the core
+                    // restart must not: configPath/customArgs would be
+                    // defaults, and restarting on them could run (and
+                    // persist as fallback) the wrong profile. One retry
+                    // first — the backend just finished a heavy write and
+                    // may be briefly busy.
+                    /** @type {any} */
+                    let importedSettings = {};
+                    let settingsRead = true;
+                    try {
+                        importedSettings = await invoke(COMMANDS.GET_SETTINGS) || {};
+                    } catch (readErr) {
+                        settingsLogger.error('[fake-client] Failed to read settings after backup import, retrying:', readErr);
+                        try {
+                            await new Promise((resolve) => setTimeout(resolve, 500));
+                            importedSettings = await invoke(COMMANDS.GET_SETTINGS) || {};
+                        } catch (retryErr) {
+                            settingsLogger.error('[fake-client] Failed to read settings after backup import:', retryErr);
+                            settingsRead = false;
+                            // The imported UA is unknown, so the stored
+                            // triple is stale: mark it, and the sync
+                            // guard in `syncUserAgentToBackendNow`
+                            // refuses to send that stale value back over
+                            // the import — including on the reloaded
+                            // page, where the init sync would otherwise
+                            // undo the import. Any different value (a
+                            // user edit, a reset) still syncs and clears
+                            // the marker. But only when no edit landed
+                            // while the import was in flight: an edit
+                            // whose net value happens to equal the
+                            // pre-import one would otherwise be skipped
+                            // by its own queued sync (the guard only
+                            // compares values, not generations), and the
+                            // user's choice would never reach the
+                            // backend. With no marker, that edit's queued
+                            // sync sends the current value normally.
+                            if (uaEditTracker.unchangedSince(editGenBefore)) {
+                                sessionStorage.setItem('zephyr-stale-import-ua', JSON.stringify(preImportUa));
+                            }
+                        }
+                    }
+                    // The import replaced the backend settings, so the
+                    // fake-client snapshot from before the import is
+                    // stale: a sync rejection landing before the reload
+                    // would restore the pre-import triple to storage, and
+                    // the reloaded page would then sync it back to the
+                    // backend, undoing the import's User-Agent. Refresh
+                    // the snapshot (and storage) from the imported value
+                    // now — but only when no user edit landed while the
+                    // import was in flight: that edit is newer than the
+                    // import, and restoring over it would drop it from
+                    // storage and from the backend (its queued sync reads
+                    // storage after the restore). Whenever the imported
+                    // value is not applied — an edit landed, or the import
+                    // carried no usable value — drop the snapshot instead:
+                    // clearing it to null makes a later rejection re-read
+                    // the backend value rather than restore a stale
+                    // pre-import one.
+                    // A null imported value is not left alone: it means
+                    // the imported settings carry no User-Agent, so the
+                    // disabled triple is restored above and fake client
+                    // stays off until the user sets one. (An invalid
+                    // value never reaches here — the import strips
+                    // those first.)
+                    const importedTriple = uaTripleFromBackendUA(
+                        importedSettings.subscription_user_agent,
+                    );
+                    const editedDuringImport = !uaEditTracker.unchangedSince(editGenBefore);
+                    if (importedTriple && !editedDuringImport) {
+                        lastAcceptedUA = importedTriple;
+                        restoreUATriple(importedTriple);
+                        // Re-assert the imported value behind any sync
+                        // that started before the import: the queue runs
+                        // it after that sync settles, so a late response
+                        // cannot leave the pre-import snapshot (and the
+                        // backend value) in place. The reloaded page
+                        // re-syncs the same value on init as well.
+                        void syncUserAgentToBackend();
+                    } else {
+                        lastAcceptedUA = null;
+                    }
+                    return {
+                        result: importResult,
+                        settingsRead,
+                        configPath: importedSettings.last_config || 'config.yaml',
+                        customArgs: importedSettings.custom_args || [],
+                    };
+                });
             } catch (err) {
                 appStore.set('isNetworkUpdating', false);
                 throw err;
             }
-            showNotification(result, 'success');
-            // Reload settings and restart core in the background to avoid
-            // blocking the UI. The import is already complete at this point.
+            showNotification(imported.result, 'success');
+            // Restart the core in the background to avoid blocking the
+            // UI. The import and its settings capture are already
+            // complete at this point.
             void (async () => {
                 let reloadDelay = 0;
                 try {
-                    const importedSettings = await invoke(COMMANDS.GET_SETTINGS) || {};
-                    const configPath = importedSettings.last_config || 'config.yaml';
-                    const customArgs = importedSettings.custom_args || [];
+                    if (!imported.settingsRead) {
+                        // Both settings reads failed, so the profile and
+                        // args below are just defaults: restarting on them
+                        // could run the wrong profile (and persist it as
+                        // the fallback). Do not restart — the reload below
+                        // re-reads the imported settings from disk.
+                        throw new Error('Failed to read settings after backup import');
+                    }
+                    const configPath = imported.configPath;
+                    const customArgs = imported.customArgs;
                     abortLatencyTests();
                     const coreResult = await restartCore(configPath, customArgs);
                     // A fallback is saved before the reload, and its warning
