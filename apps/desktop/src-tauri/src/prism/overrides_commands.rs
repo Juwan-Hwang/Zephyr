@@ -16,7 +16,7 @@ use crate::prism::overrides::overrides_store;
 use crate::prism::pipeline::{
     execute_batch_pipeline, execute_test_pipeline, execute_write_pipeline,
 };
-use crate::prism::types::{check_input_size, check_name_size};
+use crate::prism::types::{check_input_size, check_name_size, validate_override_id};
 use crate::prism::PrismState;
 use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
 
@@ -333,6 +333,8 @@ pub fn override_update(
     mut profile_ids: Option<Vec<String>>,
     mut url: Option<String>,
 ) -> Result<OverrideItem, String> {
+    // Security: Validate override ID to prevent path traversal
+    validate_override_id(&id)?;
     // update_item performs read-modify-write within a single lock acquisition,
     // preventing race conditions with concurrent updates. The name check
     // lives inside it for the same reason: only a changed name is a new
@@ -378,12 +380,16 @@ pub fn override_update(
 /// Delete an override item and its content/log files.
 #[tauri::command]
 pub fn override_delete(state: State<PrismState>, id: String) -> Result<(), String> {
+    // Security: Validate override ID to prevent path traversal
+    validate_override_id(&id)?;
     overrides_store::delete_item(&state, &id)
 }
 
 /// Get the content of an override script.
 #[tauri::command]
 pub fn override_get_content(state: State<PrismState>, id: String) -> Result<String, String> {
+    // Security: Validate override ID to prevent path traversal
+    validate_override_id(&id)?;
     overrides_store::read_content(&state, &id)
 }
 
@@ -412,6 +418,8 @@ pub async fn override_set_content(
     dry_run: Option<bool>,
     save_only: Option<bool>,
 ) -> Result<OverrideLog, String> {
+    // Security: Validate override ID to prevent path traversal
+    validate_override_id(&id)?;
     check_input_size(&content, "Override content")?;
     check_write_mode(dry_run, save_only)?;
 
@@ -839,6 +847,8 @@ pub fn override_reorder(state: State<PrismState>, ids: Vec<String>) -> Result<()
 /// Toggle override enabled/disabled.
 #[tauri::command]
 pub fn override_toggle(state: State<PrismState>, id: String, enabled: bool) -> Result<(), String> {
+    // Security: Validate override ID to prevent path traversal
+    validate_override_id(&id)?;
     // When enabling a Prism YAML override, read and sanitize the stored
     // content before persisting the flag: if the content cannot be restored
     // as a patch, the toggle fails without changing any state.
@@ -890,6 +900,8 @@ pub fn override_toggle(state: State<PrismState>, id: String, enabled: bool) -> R
 /// Test-execute an override without saving content.
 #[tauri::command]
 pub fn override_test(state: State<PrismState>, id: String) -> Result<OverrideLog, String> {
+    // Security: Validate override ID to prevent path traversal
+    validate_override_id(&id)?;
     let item = overrides_store::load_item(&state, &id)?;
     let content = overrides_store::read_content(&state, &id)?;
     // Test what would actually be applied: stored Prism YAML goes through
@@ -933,6 +945,8 @@ pub async fn override_refresh_remote(
     state: State<'_, PrismState>,
     id: String,
 ) -> Result<OverrideLog, String> {
+    // Security: Validate override ID to prevent path traversal
+    validate_override_id(&id)?;
     let item = overrides_store::load_item(&state, &id)?;
     if item.r#type != OverrideType::Remote {
         return Err("Only remote overrides can be refreshed".to_owned());

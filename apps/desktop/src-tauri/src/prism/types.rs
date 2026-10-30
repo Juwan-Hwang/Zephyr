@@ -109,6 +109,38 @@ pub fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Validate that an override ID is a simple identifier (no path traversal).
+pub fn validate_override_id(id: &str) -> Result<(), String> {
+    const MAX_OVERRIDE_ID_LEN: usize = 128;
+
+    let decoded = url_decode_complete(id);
+    let trimmed = decoded.trim_matches([' ', '.']);
+
+    if trimmed.is_empty()
+        || decoded != trimmed
+        || decoded.len() > MAX_OVERRIDE_ID_LEN
+        || decoded.contains('/')
+        || decoded.contains('\\')
+        || decoded.contains(':')
+        || decoded.contains("..")
+        || decoded.contains('\0')
+        || decoded.chars().any(char::is_control)
+    {
+        return Err(String::from(
+            "Invalid override ID: contains unsafe characters or exceeds length limit",
+        ));
+    }
+
+    let stem = trimmed.split('.').next().unwrap_or(trimmed).trim();
+    if RESERVED_DEVICE_NAMES.contains(&stem.to_ascii_uppercase().as_str()) {
+        return Err(format!(
+            "Invalid override ID: '{id}' is a reserved Windows device name"
+        ));
+    }
+
+    Ok(())
+}
+
 /// Sanitize a user-supplied filename to prevent path traversal and injection attacks.
 ///
 /// Returns an error if the filename is empty, contains path traversal components,
@@ -451,5 +483,16 @@ mod tests {
         assert!(validate_plugin_id("CONIN$").is_err());
         assert!(validate_plugin_id("conout$").is_err());
         assert!(validate_plugin_id("CON .x").is_err());
+    }
+
+    #[test]
+    fn test_validate_override_id() {
+        assert!(validate_override_id("550e8400-e29b-41d4-a716-446655440000").is_ok());
+        assert!(validate_override_id("custom_override_1").is_ok());
+        assert!(validate_override_id("../etc/passwd").is_err());
+        assert!(validate_override_id("override:stream").is_err());
+        assert!(validate_override_id("override\r\n").is_err());
+        assert!(validate_override_id("CON").is_err());
+        assert!(validate_override_id("nul.txt").is_err());
     }
 }
