@@ -577,8 +577,21 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
                         // older backups may have a different schema version that
                         // wouldn't deserialize into Settings directly. The
                         // migration chain handles schema upgrades during reload.
-                        if serde_json::from_str::<serde_json::Value>(&content).is_err() {
-                            return Err("Extracted settings.json is not valid JSON".to_owned());
+                        let mut value = serde_json::from_str::<serde_json::Value>(&content)
+                            .map_err(|_| "Extracted settings.json is not valid JSON".to_owned())?;
+                        // A stored User-Agent the backend would reject (too
+                        // long, control characters) is dropped here instead
+                        // of committed: the scheduler ignores it, every sync
+                        // rejects it, and later settings writes would just
+                        // re-serialize it. The rest of the backup restores
+                        // as-is; the user re-enters the UA if they want one.
+                        if strip_invalid_subscription_user_agent(&mut value) {
+                            let cleaned = serde_json::to_string_pretty(&value).map_err(|e| {
+                                format!("Failed to serialize cleaned settings.json: {e}")
+                            })?;
+                            fs::write(&dest_path, cleaned).map_err(|e| {
+                                format!("Failed to write cleaned settings.json: {e}")
+                            })?;
                         }
                     }
                 }
@@ -781,6 +794,34 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
     ))
 }
 
+/// Drop an invalid `subscription_user_agent` from imported settings.
+/// The backend rejects it on every sync (`validate_user_agent`: over 512
+/// bytes, or control characters) and the scheduler ignores it, so keeping
+/// it would only leave a stale value that later settings writes
+/// re-serialize. An absent, empty, or valid value is untouched; a
+/// non-string value is left for the Settings conversion to reject.
+/// Returns true when the field was removed.
+fn strip_invalid_subscription_user_agent(settings: &mut serde_json::Value) -> bool {
+    let Some(obj) = settings.as_object_mut() else {
+        return false;
+    };
+    let Some(ua) = obj.get("subscription_user_agent") else {
+        return false;
+    };
+    let Some(text) = ua.as_str() else {
+        return false;
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if zephyr_core::config::subscription::validate_user_agent(trimmed).is_ok() {
+        return false;
+    }
+    obj.remove("subscription_user_agent");
+    true
+}
+
 /// Subscription metadata lives in `# URL: ` / `# SUB_INFO: ` comment lines
 /// that YAML re-serialization would discard. When a file had to be
 /// rewritten, carry those lines over to the new text (in original order,
@@ -944,6 +985,32 @@ fn map_rel_to_dest(rel: &Path, paths: &AppPaths) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_strip_invalid_subscription_user_agent() {
+        // A valid UA is kept.
+        let mut value = serde_json::json!({"subscription_user_agent": "clash-verge/2.3.0"});
+        assert!(!strip_invalid_subscription_user_agent(&mut value));
+        assert_eq!(value["subscription_user_agent"], "clash-verge/2.3.0");
+
+        // An oversized UA is dropped (same 512-byte cap as the backend).
+        let mut value = serde_json::json!({"subscription_user_agent": "a".repeat(513)});
+        assert!(strip_invalid_subscription_user_agent(&mut value));
+        assert!(value.get("subscription_user_agent").is_none());
+
+        // A UA with control characters is dropped.
+        let mut value = serde_json::json!({"subscription_user_agent": "MyAgent/1.0\nBeta"});
+        assert!(strip_invalid_subscription_user_agent(&mut value));
+        assert!(value.get("subscription_user_agent").is_none());
+
+        // An absent field is untouched.
+        let mut value = serde_json::json!({"other": 1});
+        assert!(!strip_invalid_subscription_user_agent(&mut value));
+
+        // A non-string value is left for the Settings conversion to reject.
+        let mut value = serde_json::json!({"subscription_user_agent": 42});
+        assert!(!strip_invalid_subscription_user_agent(&mut value));
+    }
 
     #[test]
     fn test_is_safe_archive_path() {
