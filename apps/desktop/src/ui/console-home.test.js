@@ -590,3 +590,86 @@ describe('Console Dashboard Width Threshold and Notification', () => {
         });
     });
 });
+
+describe('node host click-to-copy feedback', () => {
+    /**
+     * Build the console page from a fresh module (the build runs once
+     * per module) and mock the clipboard, so the test drives the real
+     * click handler.
+     * @param {() => Promise<void>} writeTextImpl
+     */
+    async function setupHostCopy(writeTextImpl) {
+        document.body.innerHTML = '<div data-page="console"></div><div data-page="home"></div>';
+        vi.resetModules();
+        const fresh = await import('./console-home.js');
+        const originalClipboard = navigator.clipboard;
+        const writeText = vi.fn(writeTextImpl);
+        Object.defineProperty(navigator, 'clipboard', {
+            value: { writeText },
+            configurable: true,
+            writable: true,
+        });
+        vi.useFakeTimers();
+        fresh.activateConsole();
+        const hostEl = /** @type {HTMLElement} */ (document.getElementById('dz-node-host'));
+        expect(hostEl).not.toBeNull();
+        return { fresh, hostEl, originalClipboard };
+    }
+
+    afterEach(() => {
+        vi.useRealTimers();
+        document.body.innerHTML = '';
+    });
+
+    it('does not leave the success color stuck after two quick copies', async () => {
+        const { fresh, hostEl, originalClipboard } = await setupHostCopy(async () => {});
+        try {
+            hostEl.textContent = 'host.example:8080';
+            hostEl.click();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(hostEl.style.color).toBe('var(--zephyr-color-success)');
+            // Second copy 500 ms later, inside the 1.2 s window.
+            await vi.advanceTimersByTimeAsync(500);
+            hostEl.textContent = 'host.example:8080';
+            hostEl.click();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(hostEl.style.color).toBe('var(--zephyr-color-success)');
+            // Past both timers: the color must be back to idle.
+            await vi.advanceTimersByTimeAsync(1200);
+            expect(hostEl.style.color).toBe('');
+        } finally {
+            fresh.deactivateConsole();
+            Object.defineProperty(navigator, 'clipboard', {
+                value: originalClipboard,
+                configurable: true,
+                writable: true,
+            });
+        }
+    });
+
+    it('does not leave the danger color stuck after two quick failures', async () => {
+        const { fresh, hostEl, originalClipboard } = await setupHostCopy(async () => {
+            throw new Error('denied');
+        });
+        try {
+            hostEl.textContent = 'host.example:8080';
+            hostEl.click();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(hostEl.style.color).toBe('var(--zephyr-color-danger)');
+            await vi.advanceTimersByTimeAsync(500);
+            hostEl.textContent = 'host.example:8080';
+            hostEl.click();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(hostEl.style.color).toBe('var(--zephyr-color-danger)');
+            await vi.advanceTimersByTimeAsync(1200);
+            expect(hostEl.style.color).toBe('');
+        } finally {
+            fresh.deactivateConsole();
+            Object.defineProperty(navigator, 'clipboard', {
+                value: originalClipboard,
+                configurable: true,
+                writable: true,
+            });
+        }
+    });
+});

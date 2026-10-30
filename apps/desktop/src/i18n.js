@@ -14906,10 +14906,14 @@ export function setLanguage(lang) {
         i18nLogger.warn(`Unknown language "${lang}", falling back to "en"`);
         resolvedLang = 'en';
     }
-    currentLang = resolvedLang;
+    // Persist before mutating anything: if the write throws (blocked
+    // or full localStorage), the module state and the DOM are left
+    // exactly as they were instead of claiming the new language while
+    // still showing the old one.
     if (typeof localStorage !== 'undefined') {
         localStorage.setItem('lang', resolvedLang);
     }
+    currentLang = resolvedLang;
     setHTMLAttributes(resolvedLang);
     applyTranslations();
 }
@@ -14963,11 +14967,27 @@ export function applyTranslations() {
         const sysProxyEnabled = sysProxyToggle?.checked ?? win._currentSysProxyEnabled ?? false;
         const tunEnabled = tunToggle?.checked ?? win._currentTunEnabled ?? false;
 
-        invoke(COMMANDS.TRAY.UPDATE_TRAY_TOGGLE_STATES, {
-            sysProxyEnabled,
-            tunEnabled,
-            currentMode: win._currentMode || 'rule',
-        }).catch(e => i18nLogger.warn("Failed to update tray menu", e));
+        // The tray update is best-effort: a missing IPC bridge (a
+        // non-Tauri preview) throws synchronously here, after the
+        // language already persisted and translated — it must not
+        // fail the switch, or the caller rolls back a language
+        // that already applied. Warn and continue so
+        // `I18N_APPLIED` still fires below. The `.catch()` only
+        // handles the async rejection, so it sits outside the
+        // `try`: a `try` around a call with a chained `.catch()`
+        // reads as if the `try` were for the rejection.
+        /** @type {Promise<unknown> | undefined} */
+        let trayUpdate;
+        try {
+            trayUpdate = invoke(COMMANDS.TRAY.UPDATE_TRAY_TOGGLE_STATES, {
+                sysProxyEnabled,
+                tunEnabled,
+                currentMode: win._currentMode || 'rule',
+            });
+        } catch (e) {
+            i18nLogger.warn("Failed to update tray menu", e);
+        }
+        trayUpdate?.catch(e => i18nLogger.warn("Failed to update tray menu", e));
     }
 
     Bus.emit(Events.I18N_APPLIED);

@@ -43,6 +43,7 @@ import { saveProxySelection } from './proxy-memory.js';
 import { invalidateProxiesCache, invalidateSettingsCache, invalidateConfigsCache, getSettingsCached } from './cache.js';
 import { getRunConfigCached, invalidateRunConfigCache } from './run-config-cache.js';
 import { getSubscriptionUserAgent } from './settings.js';
+import { noteExternalClipboardWrite, nextClipboardSeq } from './tray.js';
 import { setSysProxyEnabled, refreshSysProxyStatus } from './sysproxy.js';
 import { syncNoSubscriptionState } from './no-subscription.js';
 import { createProcessIcon } from './process-icon.js';
@@ -1905,22 +1906,55 @@ function _buildConsoleHome(container) {
     if (hostCopyEl) {
         hostCopyEl.setAttribute('role', 'button');
         hostCopyEl.tabIndex = 0;
+        // One shared restore timer for the copy feedback: a second
+        // copy within the 1.2 s window must not capture the feedback
+        // color (green, or danger after a failure) as the "original"
+        // and restore to it — the first timer would clear the color
+        // and the second would put the feedback color back, leaving
+        // it stuck. The original color is recorded only while no
+        // feedback is pending.
+        /** @type {ReturnType<typeof setTimeout> | undefined} */
+        let hostCopyTimer;
+        /** @type {string} */
+        let hostCopyOrig = '';
+        const flashHostCopy = (/** @type {string} */ color) => {
+            if (hostCopyTimer === undefined) {
+                hostCopyOrig = hostCopyEl.style.color;
+            } else {
+                clearTimeout(hostCopyTimer);
+            }
+            hostCopyEl.style.color = color;
+            hostCopyTimer = setTimeout(() => {
+                hostCopyEl.style.color = hostCopyOrig;
+                hostCopyTimer = undefined;
+            }, 1200);
+        };
         const copyHost = () => {
             const text = hostCopyEl.textContent || '';
             if (!text) return;
             const done = () => {
-                const orig = hostCopyEl.style.color;
-                hostCopyEl.style.color = 'var(--zephyr-color-success)';
-                setTimeout(() => { hostCopyEl.style.color = orig; }, 1200);
+                flashHostCopy('var(--zephyr-color-success)');
             };
             const failed = (/** @type {unknown} */ err) => {
                 consoleLogger.warn('Failed to copy node host', err);
-                const orig = hostCopyEl.style.color;
-                hostCopyEl.style.color = 'var(--zephyr-color-danger)';
-                setTimeout(() => { hostCopyEl.style.color = orig; }, 1200);
+                flashHostCopy('var(--zephyr-color-danger)');
             };
             if (navigator.clipboard?.writeText) {
-                navigator.clipboard.writeText(text).then(done).catch(failed);
+                // The sequence, taken when the write is requested: a
+                // direct write that resolves after a newer tray copy
+                // must not become the repair target for it.
+                const seq = nextClipboardSeq();
+                navigator.clipboard.writeText(text).then(() => {
+                    // This write bypasses copyToClipboard: tell the tray
+                    // module the newest copied text, so a repair in flight
+                    // re-asserts this text instead of overwriting it with
+                    // an older one. Only flash success when this write is
+                    // still the newest on the clipboard: a newer tray copy
+                    // may have claimed the record while this write was
+                    // pending, in which case the repair already
+                    // re-asserted that text.
+                    if (noteExternalClipboardWrite(text, seq)) done();
+                }).catch(failed);
             } else {
                 failed(new Error('Clipboard API unavailable'));
             }
