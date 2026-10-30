@@ -70,19 +70,19 @@ pub fn check_name_size(input: &str, label: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate that a plugin ID is a simple name (no path traversal).
-pub fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
-    const MAX_PLUGIN_ID_LEN: usize = 128;
+/// Validate that an identifier (plugin ID, override ID, etc.) is safe and contains no path traversal sequences or reserved characters.
+pub fn validate_safe_identifier(id: &str, entity_name: &str) -> Result<(), String> {
+    const MAX_ID_LEN: usize = 128;
 
     // Decode URL-encoded characters first to prevent bypass via %2e%2e etc.
-    let decoded = url_decode_complete(plugin_id);
+    let decoded = url_decode_complete(id);
     // Trim both ends: a leading dot/space must not smuggle a reserved name
-    // (e.g. ".CON") or the plugins directory itself (".") past validation.
+    // (e.g. ".CON") or directory traversal past validation.
     let trimmed = decoded.trim_matches([' ', '.']);
 
     if trimmed.is_empty()
         || decoded != trimmed
-        || decoded.len() > MAX_PLUGIN_ID_LEN
+        || decoded.len() > MAX_ID_LEN
         || decoded.contains('/')
         || decoded.contains('\\')
         || decoded.contains(':')
@@ -90,8 +90,8 @@ pub fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
         || decoded.contains('\0')
         || decoded.chars().any(char::is_control)
     {
-        return Err(String::from(
-            "Invalid plugin ID: contains unsafe characters or exceeds length limit",
+        return Err(format!(
+            "Invalid {entity_name}: contains unsafe characters or exceeds length limit"
         ));
     }
 
@@ -102,43 +102,21 @@ pub fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
     let stem = trimmed.split('.').next().unwrap_or(trimmed).trim();
     if RESERVED_DEVICE_NAMES.contains(&stem.to_ascii_uppercase().as_str()) {
         return Err(format!(
-            "Invalid plugin ID: '{plugin_id}' is a reserved Windows device name"
+            "Invalid {entity_name}: '{id}' is a reserved Windows device name"
         ));
     }
 
     Ok(())
 }
 
+/// Validate that a plugin ID is a simple name (no path traversal).
+pub fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
+    validate_safe_identifier(plugin_id, "plugin ID")
+}
+
 /// Validate that an override ID is a simple identifier (no path traversal).
 pub fn validate_override_id(id: &str) -> Result<(), String> {
-    const MAX_OVERRIDE_ID_LEN: usize = 128;
-
-    let decoded = url_decode_complete(id);
-    let trimmed = decoded.trim_matches([' ', '.']);
-
-    if trimmed.is_empty()
-        || decoded != trimmed
-        || decoded.len() > MAX_OVERRIDE_ID_LEN
-        || decoded.contains('/')
-        || decoded.contains('\\')
-        || decoded.contains(':')
-        || decoded.contains("..")
-        || decoded.contains('\0')
-        || decoded.chars().any(char::is_control)
-    {
-        return Err(String::from(
-            "Invalid override ID: contains unsafe characters or exceeds length limit",
-        ));
-    }
-
-    let stem = trimmed.split('.').next().unwrap_or(trimmed).trim();
-    if RESERVED_DEVICE_NAMES.contains(&stem.to_ascii_uppercase().as_str()) {
-        return Err(format!(
-            "Invalid override ID: '{id}' is a reserved Windows device name"
-        ));
-    }
-
-    Ok(())
+    validate_safe_identifier(id, "override ID")
 }
 
 /// Sanitize a user-supplied filename to prevent path traversal and injection attacks.
