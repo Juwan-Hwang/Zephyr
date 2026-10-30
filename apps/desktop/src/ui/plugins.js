@@ -36,6 +36,7 @@ import { showNotification, showModal, showConfirmModal } from './notifications.j
 import { createFocusTrap } from '../utils/focus-trap.js';
 import { showLinkDialog } from './link-dialog.js';
 import { createEditor, getEditorContent } from './editor/prism-editor.js';
+import { noteExternalClipboardWrite } from './tray.js';
 
 /**
  * Status text for the inline editor: "Ln 9, Col 31 · 248 chars".
@@ -2171,6 +2172,10 @@ function copyFullscreenOutput() {
     if (!text.trim()) return;
 
     navigator.clipboard.writeText(text).then(() => {
+        // This write bypasses copyToClipboard: tell the tray module
+        // the newest copied text, so a repair in flight re-asserts
+        // this text instead of overwriting it with an older one.
+        noteExternalClipboardWrite(text);
         if (copyBtn) {
             const originalText = copyBtn.textContent;
             copyBtn.textContent = t('overrideCopied') || 'Copied';

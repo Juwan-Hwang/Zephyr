@@ -43,6 +43,7 @@ import { saveProxySelection } from './proxy-memory.js';
 import { invalidateProxiesCache, invalidateSettingsCache, invalidateConfigsCache, getSettingsCached } from './cache.js';
 import { getRunConfigCached, invalidateRunConfigCache } from './run-config-cache.js';
 import { getSubscriptionUserAgent } from './settings.js';
+import { noteExternalClipboardWrite } from './tray.js';
 import { setSysProxyEnabled, refreshSysProxyStatus } from './sysproxy.js';
 import { syncNoSubscriptionState } from './no-subscription.js';
 import { createProcessIcon } from './process-icon.js';
@@ -1909,6 +1910,11 @@ function _buildConsoleHome(container) {
             const text = hostCopyEl.textContent || '';
             if (!text) return;
             const done = () => {
+                // This write bypasses copyToClipboard: tell the tray
+                // module the newest copied text, so a repair in flight
+                // re-asserts this text instead of overwriting it with
+                // an older one.
+                noteExternalClipboardWrite(text);
                 const orig = hostCopyEl.style.color;
                 hostCopyEl.style.color = 'var(--zephyr-color-success)';
                 setTimeout(() => { hostCopyEl.style.color = orig; }, 1200);
