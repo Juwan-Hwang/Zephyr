@@ -164,6 +164,19 @@ function invoke(cmd, args) {
   return _t.invoke(cmd, args);
 }
 
+/**
+ * Whether the Tauri IPC bridge is available in this page. Callers
+ * whose call is best-effort check this first instead of catching the
+ * synchronous throw `invoke` makes without a bridge: the throw happens
+ * after the caller's own work already applied, and catching it around
+ * a promise-returning call reads as if the catch were for the
+ * rejection.
+ * @returns {boolean}
+ */
+export function isIpcAvailable() {
+  return typeof _t?.invoke === 'function';
+}
+
 /** Listen to a Tauri event emitted from Rust backend.
  *  Since the event plugin's JS shim isn't loaded without global Tauri,
  *  we manually wire up via transformCallback + raw IPC.
