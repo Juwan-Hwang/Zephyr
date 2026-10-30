@@ -8,6 +8,7 @@ vi.mock('../utils/frontend-log.js', () => ({ forwardToBackend: vi.fn() }));
 // "[API] Tauri IPC not available" and fails the whole frontend suite.
 vi.mock('../api.js', () => ({
     invoke: vi.fn().mockResolvedValue({}),
+    isIpcAvailable: vi.fn().mockReturnValue(true),
 }));
 
 const { showNotification } = await import('./notifications.js');

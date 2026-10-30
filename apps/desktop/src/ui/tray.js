@@ -761,25 +761,508 @@ export function generateProxyEnvVars(format, port = 7890, scheme = 'http') {
 }
 
 /**
- * Copy text to clipboard with fallback for environments without clipboard API.
- * @param {string} text
+ * The newest text successfully copied, by any path, and the sequence
+ * of the copy that recorded it. The text alone cannot identify which
+ * copy the record belongs to: two copies of the same text, or a
+ * direct write requested before a newer tray copy but resolving
+ * after it, would otherwise corrupt the repair target. Every copy
+ * takes a sequence when it is requested; a record is only replaced
+ * by a newer sequence, and a failed copy only rolls back a record it
+ * still owns.
+ * @type {string | null}
+ */
+let latestCopiedText = null;
+/** @type {number} */
+let latestCopiedSeq = 0;
+/** Monotonic sequence handed out to clipboard copies. @type {number} */
+let clipboardSeq = 0;
+
+/**
+ * Take the sequence for a clipboard write that bypasses
+ * `copyToClipboard` (the fullscreen editor and the console host copy
+ * write directly). Capture it when the write is requested, and pass it
+ * to `noteExternalClipboardWrite` when the write succeeds: a direct
+ * write that was requested earlier but resolves later must not become
+ * the repair target for a newer copy.
+ * @returns {number}
+ */
+export function nextClipboardSeq() {
+    clipboardSeq += 1;
+    return clipboardSeq;
+}
+
+/**
+ * The sequence of the newest text that actually landed on the
+ * clipboard. Callers that queued a copy report its success only while
+ * it still owns the clipboard: an external copy landing after it
+ * replaces the text, and reusing the queued copy's success would
+ * report a copy that is no longer on the clipboard.
+ * @returns {number}
+ */
+export function getLatestLandedSeq() {
+    return latestLandedSeq;
+}
+
+/**
+ * Race a direct clipboard write against a timeout. A hung permission
+ * prompt leaves `writeText` unsettled forever, so the caller would
+ * stay silent with no feedback and no fallback — the same hang
+ * `copyToClipboard` already races against 5 s. The timeout rejects
+ * so the caller falls back (or reports failure); a write that lands
+ * after the timeout is simply not observed — the race already
+ * settled, and the fallback recorded whatever landed instead.
+ * @param {Promise<void>} write the pending clipboard write
+ * @param {number} [ms] timeout in ms
  * @returns {Promise<void>}
  */
-export async function copyToClipboard(text) {
-    try {
-        await navigator.clipboard.writeText(text);
-    } catch (_) {
-        // Fallback for environments without clipboard API
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        try {
-            document.execCommand('copy');
-        } finally {
-            document.body.removeChild(textarea);
+export function withClipboardTimeout(write, ms = 5000) {
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Clipboard write timed out')), ms);
+    });
+    return Promise.race([write, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+/**
+ * The newest text actually on the clipboard, as far as confirmed
+ * writes tell us — as opposed to `latestCopiedText`, which is the
+ * newest text any copy was *asked* for. A copy claims the record the
+ * moment it is requested, but it only lands when its write resolves;
+ * until then the clipboard still holds whatever landed before. The
+ * two must be told apart: repairing a stale landing towards a text
+ * that never landed, or rolling a failed copy back past a newer
+ * landing, both leave the tracker pointing somewhere the clipboard
+ * is not.
+ * @type {string | null}
+ */
+let latestLandedText = null;
+/** Sequence of `latestLandedText`; 0 means nothing has landed yet. */
+let latestLandedSeq = 0;
+
+/**
+ * Sequences of copies that failed both write paths. A failed copy's
+ * claim must not be resurrected by a later copy's rollback: when two
+ * overlapping copies fail in turn, the second one's rollback would
+ * otherwise restore the first one's failed claim, and an older
+ * reserved sequence would then be skipped without ever attempting its
+ * write. One entry per failed copy; failures are rare, so the set
+ * stays small.
+ * @type {Set<number>}
+ */
+const failedClipboardSeqs = new Set();
+
+/**
+ * Record a clipboard write that bypassed `copyToClipboard`. Only a
+ * newer sequence replaces the record: a direct write requested
+ * before a newer tray copy but resolving after it is stale, and must
+ * not overwrite the newer text. Only call on success — a failed
+ * external write landed nothing. A stale write has already landed on
+ * the clipboard and overwritten the newer tray text, so the newest
+ * copy is re-asserted — otherwise the clipboard keeps the older text
+ * while the tracker says the newer one. But only when the newer
+ * record has itself landed: a claimed-but-unlanded tray copy is not
+ * a repair target, and re-asserting it would overwrite the external
+ * text that actually landed. In that case the external write is the
+ * newest landing, and is remembered as such.
+ * @param {string} text
+ * @param {number} seq The sequence taken when the write was requested.
+ * @returns {boolean} True when this write's text is the newest thing on
+ * the clipboard, so the caller may report it as copied; false when a
+ * newer copy claimed the record and this text was repaired away. A
+ * direct write that bypasses `copyToClipboard` has no other way to
+ * learn it was superseded.
+ */
+export function noteExternalClipboardWrite(text, seq) {
+    if (seq > latestCopiedSeq) {
+        latestCopiedText = text;
+        latestCopiedSeq = seq;
+        latestLandedText = text;
+        latestLandedSeq = seq;
+        return true;
+    }
+    if (latestCopiedText !== null && latestCopiedText !== text) {
+        if (latestCopiedSeq === latestLandedSeq) {
+            // The newer claim has landed: this write is superseded,
+            // and the clipboard is repaired back to it.
+            reassertLatestCopy(latestCopiedText, latestCopiedSeq);
+            return false;
         }
+        if (seq > latestLandedSeq) {
+            // The newer claim has not landed yet: this write is the
+            // newest landing, and is remembered as such.
+            latestLandedText = text;
+            latestLandedSeq = seq;
+            return true;
+        }
+        if (latestLandedText !== null && latestLandedText !== text) {
+            reassertLatestCopy(latestLandedText, latestLandedSeq);
+        }
+        return false;
+    }
+    // The clipboard holds this exact text — but that alone does not
+    // settle it: a newer text may already have landed, and this stale
+    // write just overwrote it. Treat it like the stale branch above:
+    // record the landing when nothing newer landed yet; repair back to
+    // the newest landing when something did; stay quiet only when the
+    // newest landing already is this text. (When nothing was ever
+    // claimed the record is empty and this is false, but that cannot
+    // happen: a sequence is only stale once a newer claim exists.)
+    if (latestCopiedText === text) {
+        if (latestCopiedSeq === latestLandedSeq) return true;
+        if (seq > latestLandedSeq) {
+            latestLandedText = text;
+            latestLandedSeq = seq;
+            return true;
+        }
+        if (latestLandedText !== null && latestLandedText !== text) {
+            reassertLatestCopy(latestLandedText, latestLandedSeq);
+            return false;
+        }
+    }
+    return latestCopiedText === text;
+}
+
+/**
+ * Re-assert the newest text that actually landed, after a stale write
+ * overwrote the clipboard. Only a text that has landed is a repair
+ * target: re-asserting a claimed-but-unlanded copy would write a text
+ * whose own copy may still fail, leaving the clipboard holding a text
+ * the UI already reported as failed. When the newest claim has not
+ * landed yet, the newest landing stands — it is already on the
+ * clipboard, or is re-asserted here if the stale write differs from it.
+ * @param {string} currentText The stale text that just landed.
+ */
+function reassertNewestLanded(currentText) {
+    if (latestCopiedText !== null && latestCopiedText !== currentText && latestCopiedSeq === latestLandedSeq) {
+        reassertLatestCopy(latestCopiedText, latestCopiedSeq);
+    } else if (latestLandedText !== null && latestLandedText !== currentText) {
+        reassertLatestCopy(latestLandedText, latestLandedSeq);
+    }
+}
+
+/**
+ * Re-assert the newest copied text after a write lands late.
+ * Self-correcting: if a newer copy lands while this repair is still in
+ * flight, the repair re-asserts the newest text again instead of leaving
+ * the stale one on the clipboard. Each re-assertion is triggered by a
+ * newer user copy, so the chain ends once the newest text stops changing.
+ * Bounded like the main copy path: the write races the same 5 s timeout,
+ * and a rejected or timed-out repair falls back to the textarea path — a
+ * rejected repair landed nothing, but the stale text it was meant to
+ * replace is still on the clipboard, so swallowing the failure would
+ * leave the tracker claiming a text the clipboard does not hold. Only a
+ * write that actually lands updates the landing record.
+ * @param {string} expected
+ * @param {number} targetSeq The sequence of the record being repaired —
+ * the claim sequence when the claim has landed, the landing sequence
+ * when the landing is older than the claim. The caller takes it from
+ * the record it repairs: the text alone cannot identify it, because a
+ * newer pending copy of the same text may exist, and its sequence must
+ * not be claimed as this repair's landing.
+ */
+function reassertLatestCopy(expected, targetSeq) {
+    const onLanded = () => {
+        if (latestCopiedText === expected && latestCopiedSeq === targetSeq) {
+            // The repair landed the current record: it is now the
+            // newest thing actually on the clipboard.
+            latestLandedText = expected;
+            latestLandedSeq = targetSeq;
+        } else {
+            // A newer copy was requested while this repair was in
+            // flight: re-assert the newest text that actually
+            // landed (see `reassertNewestLanded`), not the newest
+            // claim — the claim may still fail, and writing it
+            // here would put a failed text on the clipboard.
+            reassertNewestLanded(expected);
+        }
+    };
+    const fallback = () => {
+        // A newer copy has already landed since this repair started:
+        // writing the older text now would only overwrite it and need
+        // another repair — skip it, the newer copy reports itself.
+        if (targetSeq < latestLandedSeq) return;
+        // Same textarea path as the main copy's fallback (see
+        // `copyToClipboard`): the repair runs outside any click, so the
+        // command may not be enabled — a failed fallback leaves the
+        // stale text, as before, but the attempt is bounded now and the
+        // next clipboard event re-triggers the repair.
+        try {
+            const textarea = document.createElement('textarea');
+            textarea.value = expected;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            const previouslyFocused = document.activeElement;
+            textarea.select();
+            try {
+                if (!document.execCommand('copy')) return;
+                onLanded();
+            } finally {
+                document.body.removeChild(textarea);
+                if (previouslyFocused instanceof HTMLElement) {
+                    previouslyFocused.focus();
+                }
+            }
+        } catch (_) {
+            // Best-effort: the next clipboard event re-triggers the repair.
+        }
+    };
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timeoutId;
+    const writePromise = navigator.clipboard.writeText(expected);
+    // Observe the write itself, not just the timeout race: a write
+    // that lands after the race already settled (timed out) would
+    // otherwise overwrite a newer copy without anyone noticing, and
+    // the tracker would keep claiming the newer text. `onLanded`
+    // either records this landing or, when a newer copy claimed the
+    // record meanwhile, re-asserts the newest landed text — so a
+    // second call from the race's success path would double-report
+    // it, and the race only clears the timer now.
+    writePromise.then(onLanded, () => {});
+    Promise.race([
+        writePromise,
+        new Promise((_, reject) => {
+            timeoutId = setTimeout(() => {
+                reject(new Error('Clipboard repair timed out'));
+            }, 5000);
+        }),
+    ]).then(
+        () => {
+            clearTimeout(timeoutId);
+        },
+        () => {
+            clearTimeout(timeoutId);
+            fallback();
+        },
+    );
+}
+
+/**
+ * Copy text to clipboard with fallback for environments without clipboard API.
+ * @param {string} text
+ * @param {number} [seq] The sequence taken when the copy was requested.
+ * Callers that await before copying (the settings copy button, which
+ * reads settings and config first) pass the sequence they took at click
+ * time, so a copy requested later cannot be overtaken by an older click
+ * that resumes first. Defaults to a fresh sequence.
+ * @returns {Promise<boolean>} True when this copy's text is the newest on
+ * the clipboard; false when a newer copy claimed the record while this
+ * write was in flight, so this text was repaired away and the caller
+ * must not report it as copied. Throws when nothing landed.
+ */
+export async function copyToClipboard(text, seq) {
+    // A clipboard write can hang: when the browser leaves the
+    // permission prompt unanswered, `writeText` may never settle, and a
+    // caller that serializes writes (the copy button's chain) would
+    // stall forever. Give it a few seconds, then fall back to the
+    // textarea path instead of waiting on it. The fallback is
+    // best-effort: it needs the click's transient activation, which the
+    // timeout (and the awaits before this call) may already have spent,
+    // so on the timeout path it is expected to fail — the late native
+    // write may still land afterwards.
+    let timeoutId;
+    // This copy's sequence, taken when it was requested: the record it
+    // claims, the rollback it may perform, and the repair it may
+    // trigger are all identified by it, not by the text — two copies
+    // of the same text are different copies.
+    const mySeq = seq ?? nextClipboardSeq();
+    // A caller that passed an older click-time sequence may already
+    // have been overtaken: a newer copy claimed the record while this
+    // click was awaiting, so writing now would put the older click's
+    // text on the clipboard last. Bail out silently — the newer copy
+    // reports itself — without claiming the record or touching the
+    // clipboard.
+    if (latestCopiedSeq > mySeq) return false;
+    // What was newest before this call: a failed copy rolls the record
+    // back to it, but only if this call still owns the record (see the
+    // rollback below). Nothing awaits between here and the assignment,
+    // so this capture is the record as of the assignment.
+    let previousCopiedText = latestCopiedText;
+    let previousCopiedSeq = latestCopiedSeq;
+    try {
+        // No permission preflight: the write itself decides — a denied
+        // permission rejects at once, an undecided one may sit on the
+        // prompt and land late (the repair below re-asserts the newest
+        // text then). Awaiting a permission query first could only
+        // delay the write past the click's transient activation (up to
+        // 2 s when the query hangs), after which both the write and
+        // the fallback fail.
+        // The newest text any copy was asked for. A native write that
+        // outlives its timeout still lands when it eventually resolves,
+        // so a late landing is repaired below by re-asserting this.
+        latestCopiedText = text;
+        latestCopiedSeq = mySeq;
+        const writePromise = navigator.clipboard.writeText(text);
+        // Prevent unhandled rejection if the timeout wins the race and the
+        // write rejects later.
+        writePromise.catch(() => {});
+        // A write cannot be cancelled once started: if it resolves after
+        // a newer copy ran, it lands the stale text over the newer one.
+        // That is not only the timed-out case — an external copy (or a
+        // concurrent one) can finish while this write is still pending,
+        // and resolving then overwrites it. Re-assert the newest text
+        // instead, so the clipboard ends up holding the latest copy. The
+        // repair re-checks on landing (see `reassertLatestCopy`): a
+        // repair that is itself still in flight when a newer copy lands
+        // re-asserts the newest text again instead of leaving its own
+        // stale text behind. The rejection handler is load-bearing:
+        // without it, a write that rejects leaves this derived promise
+        // rejected with nobody catching it (the `.catch` above only
+        // covers the original promise), and Vitest fails the run on the
+        // unhandled rejection. The repair only applies to writes that
+        // resolve; a rejected write landed nothing, so there is nothing
+        // to re-assert.
+        writePromise.then(
+            () => {
+                // This write landed: while it still owns the record it
+                // is the newest thing on the clipboard. A late landing
+                // (after a newer copy claimed the record) still counts
+                // when it is newer than the last recorded landing: this
+                // text is now on the clipboard, so it is the newest
+                // landing even though a newer claim is pending — without
+                // this, the repair below reverts to the older landing
+                // and the newest actually-landed text is lost. Only a
+                // landing older than the recorded one leaves the record
+                // alone, and the repair then re-asserts the newer text.
+                if (mySeq === latestCopiedSeq || mySeq > latestLandedSeq) {
+                    // A late landing after this copy's rollback: the
+                    // claim was rolled back to an older text, but this
+                    // text is now on the clipboard — restore the claim
+                    // too, or an older reserved sequence would later be
+                    // accepted as newer than this landing.
+                    if (mySeq > latestCopiedSeq) {
+                        latestCopiedText = text;
+                        latestCopiedSeq = mySeq;
+                    }
+                    latestLandedText = text;
+                    latestLandedSeq = mySeq;
+                }
+                // A newer copy claimed the record while this write was
+                // pending: re-assert the newest text that actually
+                // landed, not the newest claim — the claim may not
+                // have landed yet (see `reassertNewestLanded`).
+                reassertNewestLanded(text);
+            },
+            () => {},
+        );
+        await Promise.race([
+            writePromise,
+            new Promise((_, reject) => {
+                timeoutId = setTimeout(
+                    () => {
+                        reject(new Error('Clipboard write timed out'));
+                    },
+                    5000,
+                );
+            }),
+        ]);
+        // The native write resolved: this copy is the newest on the
+        // clipboard only while it still owns the record — a newer copy
+        // may have claimed it while the write was pending, in which
+        // case the repair above already re-asserted that newer text.
+        return latestCopiedSeq === mySeq;
+    } catch (_) {
+        // The failure reason does not change the fallback: any failure
+        // takes the textarea path, and the caller reports it if that
+        // fails too — so the error value itself is unused here.
+        // A newer copy has already landed: this stale text must not
+        // overwrite it — the fallback would only be repaired away
+        // again, and a rejected repair would leave the stale text on
+        // the clipboard. Report superseded; the newer copy reports
+        // itself.
+        if (mySeq < latestLandedSeq) return false;
+        try {
+            // Fallback for environments without clipboard API
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            // select() moves focus onto the textarea, so remember where
+            // it was: once the temporary element is removed, focus would
+            // otherwise be lost (the clicked button would no longer be
+            // focused).
+            const previouslyFocused = document.activeElement;
+            textarea.select();
+            try {
+                // execCommand returns false instead of throwing when the
+                // command is not enabled (no user activation, e.g. after the
+                // 5 s timeout above let the click's transient activation
+                // expire). Ignoring it would report a copy that never
+                // happened, so fail loudly and let the caller show the error.
+                if (!document.execCommand('copy')) {
+                    throw new Error('Copy command was not enabled');
+                }
+                // The fallback copy succeeded: it is the newest text now, so
+                // record it like a native write — otherwise a late landing
+                // of an earlier timed-out write would not be repaired (its
+                // guard compares against this value). Only a successful
+                // fallback records: a failed one must not become the text a
+                // later repair re-asserts. And only while this copy still
+                // owns the record: a newer copy may have claimed it while
+                // this write was pending, and re-recording then would put
+                // this older text back as the repair target.
+                if (mySeq >= latestCopiedSeq) {
+                    latestCopiedText = text;
+                    latestCopiedSeq = mySeq;
+                    latestLandedText = text;
+                    latestLandedSeq = mySeq;
+                    return true;
+                }
+                // A newer copy claimed the record while this write was
+                // pending, so the fallback just overwrote its text on
+                // the clipboard. That text is still the newest landing
+                // when nothing newer landed yet: record it, or the
+                // repair below reverts to the older landing. Report
+                // this copy as superseded so the caller does not show
+                // "Copied" for text that is no longer there.
+                if (mySeq > latestLandedSeq) {
+                    latestLandedText = text;
+                    latestLandedSeq = mySeq;
+                }
+                reassertNewestLanded(text);
+                return false;
+            } finally {
+                document.body.removeChild(textarea);
+                if (previouslyFocused instanceof HTMLElement) {
+                    previouslyFocused.focus();
+                }
+            }
+        } catch (fallbackError) {
+            // Both the native write and the fallback failed, so this
+            // copy landed nothing: roll the record back to what it was
+            // before this call, so a late landing of an earlier write
+            // does not re-assert this failed text over a newer copy.
+            // Record the failure first: a later overlapping copy's
+            // rollback must not resurrect this claim (see below).
+            failedClipboardSeqs.add(mySeq);
+            // Only roll back a record this call still owns: a newer
+            // copy may have claimed it since — of the same text, even
+            // — and the text alone cannot tell them apart. And only as
+            // far as the newest landing: a copy that landed while this
+            // one was pending (an external write, for example) is newer
+            // than the pre-call snapshot, and rolling past it would
+            // lose it from the record entirely.
+            if (latestCopiedSeq === mySeq) {
+                if (latestLandedSeq > previousCopiedSeq) {
+                    latestCopiedText = latestLandedText;
+                    latestCopiedSeq = latestLandedSeq;
+                } else if (failedClipboardSeqs.has(previousCopiedSeq)) {
+                    // The record this rollback would restore to is
+                    // itself a failed copy: it never landed, so keep
+                    // the newest landing as the claim instead of
+                    // resurrecting the failed text.
+                    latestCopiedText = latestLandedText;
+                    latestCopiedSeq = latestLandedSeq;
+                } else {
+                    latestCopiedText = previousCopiedText;
+                    latestCopiedSeq = previousCopiedSeq;
+                }
+            }
+            throw fallbackError;
+        }
+    } finally {
+        clearTimeout(timeoutId);
     }
 }
