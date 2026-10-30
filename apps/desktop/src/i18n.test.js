@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('./api.js', () => ({
     invoke: vi.fn().mockResolvedValue({}),
+    isIpcAvailable: vi.fn().mockReturnValue(true),
 }));
 import {
     translations,
+    currentLang,
     isRTL,
     t,
     setQAMode,
@@ -17,6 +19,8 @@ import {
     applyTranslations,
     setLanguage,
 } from './i18n.js';
+import { invoke, isIpcAvailable } from './api.js';
+import { Bus, Events } from './ui/events.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  translations data
@@ -414,5 +418,70 @@ describe('applyTranslations', () => {
         const btnEl = document.getElementById('btn-el');
         expect(btnEl?.getAttribute('title')).toBe('Paste');
         expect(btnEl?.getAttribute('aria-label')).toBe('Paste');
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  setLanguage
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('setLanguage', () => {
+    afterEach(() => {
+        document.documentElement.removeAttribute('dir');
+        document.documentElement.removeAttribute('lang');
+    });
+
+    it('leaves the language unchanged when persisting fails', () => {
+        // Persisting happens before any state or DOM change: a blocked
+        // or full localStorage must not leave the module claiming the
+        // new language while the UI still shows the old one.
+        const before = currentLang;
+        const target = before === 'zh' ? 'ja' : 'zh';
+        const beforeLangAttr = document.documentElement.lang;
+        // Spy the instance method, not Storage.prototype: happy-dom's
+        // localStorage does not dispatch through the global Storage
+        // prototype, so a prototype spy never fires.
+        const setItem = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+            throw new Error('blocked');
+        });
+        try {
+            expect(() => setLanguage(target)).toThrow('blocked');
+            expect(currentLang).toBe(before);
+            expect(document.documentElement.lang).toBe(beforeLangAttr);
+        } finally {
+            setItem.mockRestore();
+        }
+    });
+
+    it('still switches when the IPC bridge is missing', () => {
+        // `applyTranslations` ends with a tray IPC call; without the
+        // bridge there is nothing to call, and the language already
+        // persisted and translated. The tray update is skipped, so it
+        // must not fail the switch (the caller would roll back a
+        // language that already applied).
+        const ipcMock = vi.mocked(isIpcAvailable);
+        const invokeMock = vi.mocked(invoke);
+        ipcMock.mockReturnValue(false);
+        setLanguage('en');
+        invokeMock.mockClear();
+        document.body.innerHTML = `<span id="text-el" data-i18n="save">Save</span>`;
+        // The copy-feedback listener depends on this event: the test
+        // would pass if the emission were omitted, so pin it.
+        const applied = vi.fn();
+        const off = Bus.on(Events.I18N_APPLIED, applied);
+        try {
+            expect(() => setLanguage('zh')).not.toThrow();
+            expect(currentLang).toBe('zh');
+            expect(localStorage.getItem('lang')).toBe('zh');
+            expect(document.documentElement.lang).toBe('zh');
+            expect(document.getElementById('text-el')?.textContent).toBe('保存');
+            expect(applied).toHaveBeenCalledTimes(1);
+            expect(invokeMock).not.toHaveBeenCalled();
+        } finally {
+            off();
+            ipcMock.mockReturnValue(true);
+            setLanguage('en');
+            document.body.innerHTML = '';
+        }
     });
 });
