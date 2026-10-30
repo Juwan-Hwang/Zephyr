@@ -14,6 +14,7 @@ use crate::core_manager::write_file_secure;
 use crate::prism::overrides::overrides_model::{
     OverrideExt, OverrideItem, OverrideLog, OverrideMeta,
 };
+use crate::prism::types::validate_override_id;
 use crate::prism::PrismState;
 
 /// Global mutex that serializes all meta.json read-modify-write operations.
@@ -55,6 +56,7 @@ pub fn save_meta(state: &PrismState, meta: &OverrideMeta) -> Result<(), String> 
 
 /// Load a single override item by ID.
 pub fn load_item(state: &PrismState, id: &str) -> Result<OverrideItem, String> {
+    validate_override_id(id)?;
     let meta = load_meta(state)?;
     meta.items
         .into_iter()
@@ -93,6 +95,7 @@ pub fn update_item<F>(
 where
     F: FnMut(&mut OverrideItem) -> bool,
 {
+    validate_override_id(id)?;
     let _guard = acquire_meta_lock()?;
     let mut meta = load_meta_inner(state)?;
     let item = meta
@@ -117,6 +120,7 @@ where
 /// a single lock acquisition to prevent race conditions and ghost entries.
 /// File deletion is best-effort; failures are logged but not returned as errors.
 pub fn delete_item(state: &PrismState, id: &str) -> Result<(), String> {
+    validate_override_id(id)?;
     let _guard = acquire_meta_lock()?;
     let mut meta = load_meta_inner(state)?;
 
@@ -310,6 +314,7 @@ pub fn write_content(state: &PrismState, id: &str, content: &str) -> Result<(), 
 
 /// Save a log entry to an override item's log file (overwrites existing).
 pub fn save_log(state: &PrismState, id: &str, log: &OverrideLog) -> Result<(), String> {
+    validate_override_id(id)?;
     let dir = overrides_dir(state)?;
     let path = dir.join(format!("{id}.log.json"));
     let json = serde_json::to_string(log).map_err(|e| format!("Failed to serialize log: {e}"))?;
@@ -318,6 +323,7 @@ pub fn save_log(state: &PrismState, id: &str, log: &OverrideLog) -> Result<(), S
 
 /// Read the last execution log for an override item.
 pub fn read_log(state: &PrismState, id: &str) -> Result<OverrideLog, String> {
+    validate_override_id(id)?;
     let dir = overrides_dir(state)?;
     let path = dir.join(format!("{id}.log.json"));
     if !path.exists() {
@@ -331,6 +337,7 @@ pub fn read_log(state: &PrismState, id: &str) -> Result<OverrideLog, String> {
 /// Cheaper than `read_log` as it does not allocate a vector of `LogEntry`.
 /// Uses `BufReader` to stream the file instead of loading it entirely into memory.
 pub fn read_log_status(state: &PrismState, id: &str) -> Result<(bool, Option<String>), String> {
+    validate_override_id(id)?;
     let dir = overrides_dir(state)?;
     let path = dir.join(format!("{id}.log.json"));
     let file = match fs::File::open(&path) {
