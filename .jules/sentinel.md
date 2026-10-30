@@ -34,3 +34,7 @@
 **Vulnerability:** `is_trusted_update_url` and `parse_github_release_info` validated hostname strings against trusted GitHub hosts without verifying `parsed.scheme() == "https"`, allowing plaintext HTTP downloads of updater binaries and opening vectors for on-path adversary MITM attacks. Additionally, host check avoided allocation via suffix stripping with dot delimiter.
 **Learning:** Checking hostname patterns without enforcing encrypted transport protocol schemes permits silent fallback to plaintext traffic in updater workflows.
 **Prevention:** Always enforce `parsed.scheme() == "https"` alongside strict domain/subdomain checks on all URL-evaluating security boundary functions.
+## 2026-07-19 - Unvalidated User-Agent Input in IPC Commands
+**Vulnerability:** `update_subscription_user_agent` accepted arbitrary string inputs over IPC without length or control character checks. Passing newlines (`\r\n`) or oversized strings persisted invalid header values into settings, causing HTTP client building during subscription downloads to fail permanently and leading to persistent DoS.
+**Learning:** Setting values that map directly to HTTP request headers must be validated for length limits and control characters prior to persistence.
+**Prevention:** Always validate User-Agent strings (`validate_user_agent`) to enforce maximum length limits (<= 512 bytes) and reject control characters (`\r`, `\n`, `\0`) before writing to settings or constructing HTTP clients.
