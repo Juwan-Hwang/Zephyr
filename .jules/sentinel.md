@@ -38,3 +38,7 @@
 **Vulnerability:** `override_update` and `override_create` allowed persisting arbitrary URL strings (including unsupported schemes like `file://` or `javascript:` and oversized strings) directly into override metadata without scheme or length validation.
 **Learning:** Metadata update commands that bypass network download routines can easily omit URL scheme and length checks performed by network fetchers.
 **Prevention:** Always enforce centralized URL validation (`http`/`https` scheme check and length cap) across all IPC handlers that receive or update URL parameters.
+## 2026-07-19 - Unvalidated User-Agent Input in IPC Commands
+**Vulnerability:** `update_subscription_user_agent` accepted arbitrary string inputs over IPC without length or control character checks. Passing newlines (`\r\n`) or oversized strings persisted invalid header values into settings, causing HTTP client building during subscription downloads to fail permanently and leading to persistent DoS.
+**Learning:** Setting values that map directly to HTTP request headers must be validated for length limits and control characters prior to persistence.
+**Prevention:** Always validate User-Agent strings (`validate_user_agent`) to enforce maximum length limits (<= 512 bytes) and reject control characters (`\r`, `\n`, `\0`) before writing to settings or constructing HTTP clients.
