@@ -43,6 +43,7 @@ import { saveProxySelection } from './proxy-memory.js';
 import { invalidateProxiesCache, invalidateSettingsCache, invalidateConfigsCache, getSettingsCached } from './cache.js';
 import { getRunConfigCached, invalidateRunConfigCache } from './run-config-cache.js';
 import { getSubscriptionUserAgent } from './settings.js';
+import { noteExternalClipboardWrite, nextClipboardSeq } from './tray.js';
 import { setSysProxyEnabled, refreshSysProxyStatus } from './sysproxy.js';
 import { syncNoSubscriptionState } from './no-subscription.js';
 import { createProcessIcon } from './process-icon.js';
@@ -1920,7 +1921,21 @@ function _buildConsoleHome(container) {
                 setTimeout(() => { hostCopyEl.style.color = orig; }, 1200);
             };
             if (navigator.clipboard?.writeText) {
-                navigator.clipboard.writeText(text).then(done).catch(failed);
+                // The sequence, taken when the write is requested: a
+                // direct write that resolves after a newer tray copy
+                // must not become the repair target for it.
+                const seq = nextClipboardSeq();
+                navigator.clipboard.writeText(text).then(() => {
+                    // This write bypasses copyToClipboard: tell the tray
+                    // module the newest copied text, so a repair in flight
+                    // re-asserts this text instead of overwriting it with
+                    // an older one. Only flash success when this write is
+                    // still the newest on the clipboard: a newer tray copy
+                    // may have claimed the record while this write was
+                    // pending, in which case the repair already
+                    // re-asserted that text.
+                    if (noteExternalClipboardWrite(text, seq)) done();
+                }).catch(failed);
             } else {
                 failed(new Error('Clipboard API unavailable'));
             }

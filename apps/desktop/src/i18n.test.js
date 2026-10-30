@@ -5,6 +5,7 @@ vi.mock('./api.js', () => ({
 }));
 import {
     translations,
+    currentLang,
     isRTL,
     t,
     setQAMode,
@@ -414,5 +415,38 @@ describe('applyTranslations', () => {
         const btnEl = document.getElementById('btn-el');
         expect(btnEl?.getAttribute('title')).toBe('Paste');
         expect(btnEl?.getAttribute('aria-label')).toBe('Paste');
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  setLanguage
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('setLanguage', () => {
+    afterEach(() => {
+        document.documentElement.removeAttribute('dir');
+        document.documentElement.removeAttribute('lang');
+    });
+
+    it('leaves the language unchanged when persisting fails', () => {
+        // Persisting happens before any state or DOM change: a blocked
+        // or full localStorage must not leave the module claiming the
+        // new language while the UI still shows the old one.
+        const before = currentLang;
+        const target = before === 'zh' ? 'ja' : 'zh';
+        const beforeLangAttr = document.documentElement.lang;
+        // Spy the instance method, not Storage.prototype: happy-dom's
+        // localStorage does not dispatch through the global Storage
+        // prototype, so a prototype spy never fires.
+        const setItem = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+            throw new Error('blocked');
+        });
+        try {
+            expect(() => setLanguage(target)).toThrow('blocked');
+            expect(currentLang).toBe(before);
+            expect(document.documentElement.lang).toBe(beforeLangAttr);
+        } finally {
+            setItem.mockRestore();
+        }
     });
 });
