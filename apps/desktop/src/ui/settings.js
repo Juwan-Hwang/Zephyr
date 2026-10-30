@@ -218,9 +218,13 @@ function initCopyEnvSettings() {
                 copyBtn.dataset._originalText = textSpan.textContent || '';
             }
             textSpan.textContent = t.copyEnvCopied || 'Copied';
+            // The static aria-label would otherwise keep announcing the old
+            // name and hide the "Copied" feedback from screen readers.
+            copyBtn.setAttribute('aria-label', t.copyEnvCopied || 'Copied');
             copyBtn.style.color = 'var(--accent-primary, #007AFF)';
             const timeoutId = setTimeout(() => {
                 textSpan.textContent = copyBtn.dataset._originalText || '';
+                copyBtn.setAttribute('aria-label', getT().copyProxyEnv || 'Copy Proxy Env');
                 copyBtn.style.color = '';
                 delete copyBtn.dataset._originalText;
                 delete copyBtn.dataset._copyTimeout;
