@@ -189,8 +189,15 @@ function initCopyEnvSettings() {
     /** @type {() => Record<string, any>} */
     const getT = () => /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
 
+    /** Bumped on every copy click, so a stale handler or timer cannot undo a newer click's feedback. */
+    let copyFeedbackSeq = 0;
+
     // --- Copy button ---
     copyBtn?.addEventListener('click', async () => {
+        // This click owns the button only until a newer click starts: the
+        // awaits below (settings, config, clipboard) resolve out of order,
+        // so an earlier click must never restore over or blank a later one.
+        const mySeq = ++copyFeedbackSeq;
         try {
             // Clear any pending restore timeout to prevent text getting stuck
             if (copyBtn.dataset._copyTimeout) {
@@ -210,25 +217,46 @@ function initCopyEnvSettings() {
             if (!port) throw new Error('No proxy listener is configured');
             const text = generateProxyEnvVars(format, port, httpPort ? 'http' : 'socks5h');
             await copyToClipboard(text);
+            // A newer click has started since: it owns the button now, so
+            // this stale success must not overwrite its feedback or arm a
+            // timer that would later cut it short.
+            if (mySeq !== copyFeedbackSeq) return;
             const t = getT();
             // Visual feedback: briefly change button text (target span to preserve i18n)
             const textSpan = copyBtn.querySelector('span') || copyBtn;
-            // Store original text only on first click (not during "Copied" state)
-            if (!copyBtn.dataset._originalText) {
-                copyBtn.dataset._originalText = textSpan.textContent || '';
-            }
             textSpan.textContent = t.copyEnvCopied || 'Copied';
+            // The static aria-label would otherwise keep announcing the old
+            // name and hide the "Copied" feedback from screen readers.
+            copyBtn.setAttribute('aria-label', t.copyEnvCopied || 'Copied');
             copyBtn.style.color = 'var(--accent-primary, #007AFF)';
             const timeoutId = setTimeout(() => {
-                textSpan.textContent = copyBtn.dataset._originalText || '';
+                // Only the newest click may restore: an older timer must not
+                // cut short a newer click's feedback, and the label is
+                // re-read so a language switch during the window is not
+                // overwritten with the old language's text.
+                if (mySeq !== copyFeedbackSeq) return;
+                textSpan.textContent = getT().copyProxyEnv || 'Copy Proxy Env';
+                copyBtn.setAttribute('aria-label', getT().copyProxyEnv || 'Copy Proxy Env');
                 copyBtn.style.color = '';
-                delete copyBtn.dataset._originalText;
                 delete copyBtn.dataset._copyTimeout;
             }, 1500);
             copyBtn.dataset._copyTimeout = String(timeoutId);
         } catch (err) {
             settingsLogger.error('[copy-env] Failed to copy:', err);
             showNotification(`${getT().copyFailed || 'Copy failed'}: ${toError(err).message}`, 'error');
+            // A stale failure (an earlier click resolving after a later one
+            // succeeded) must not kill the newer "Copied" feedback, and the
+            // timer it would otherwise orphan must be cancelled, not just
+            // have its id deleted, or it later blanks the button.
+            if (mySeq !== copyFeedbackSeq) return;
+            if (copyBtn.dataset._copyTimeout) {
+                clearTimeout(Number(copyBtn.dataset._copyTimeout));
+                delete copyBtn.dataset._copyTimeout;
+            }
+            const textSpan = copyBtn.querySelector('span') || copyBtn;
+            textSpan.textContent = getT().copyProxyEnv || 'Copy Proxy Env';
+            copyBtn.setAttribute('aria-label', getT().copyProxyEnv || 'Copy Proxy Env');
+            copyBtn.style.color = '';
         }
     });
 
