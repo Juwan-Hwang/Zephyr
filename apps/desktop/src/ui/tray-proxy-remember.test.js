@@ -1,31 +1,12 @@
 // @ts-nocheck
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-const handlers = {};
-const api = {
-    getConfig: vi.fn(async () => ({})),
-    invoke: vi.fn(),
-    getProxies: vi.fn(async () => ({ proxies: {} })),
-    switchProxy: vi.fn(async () => true),
-    closeAllConnections: vi.fn(async () => {}),
-    listen: vi.fn(async (name, fn) => { handlers[name] = fn; return () => {}; }),
-};
-const memory = { saveProxySelection: vi.fn(async () => {}) };
-
-vi.mock('../api.js', () => api);
-vi.mock('./proxy-memory.js', () => memory);
-vi.mock('./lifecycle.js', () => ({ switchToConfig: vi.fn() }));
-const notifications = { showNotification: vi.fn() };
-vi.mock('./notifications.js', () => notifications);
-vi.mock('./proxies.js', () => ({ syncCoreConfig: vi.fn(async () => {}), refreshProxies: vi.fn(async () => {}) }));
-vi.mock('../utils/logger.js', () => {
-    const log = () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() });
-    return { trayLogger: log(), createLogger: log, apiLogger: log(), settingsLogger: log() };
-});
-vi.mock('./cache.js', () => ({ trayMenuCache: {}, TRAY_CACHE_TTL: 0, invalidateProxiesCache: vi.fn() }));
-vi.mock('./run-config-cache.js', () => ({ invalidateRunConfigCache: vi.fn() }));
-vi.mock('@zephyr/shared', () => ({ COMMANDS: { GET_SETTINGS: 'get_settings', UPDATE_TRAY_MENU: 'update_tray_menu' } }));
+import {
+    trayTestApi as api,
+    trayTestMemory as memory,
+    trayTestNotifications as notifications,
+    trayTestHandlers as handlers,
+} from './tray-mocks.js';
 
 const { initTrayEventListeners } = await import('./tray.js');
 await initTrayEventListeners();
