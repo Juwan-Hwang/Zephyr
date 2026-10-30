@@ -1281,7 +1281,7 @@ fn update_subscription_user_agent(
     app: tauri::AppHandle,
     user_agent: Option<String>,
 ) -> Result<(), String> {
-    if let Some(ref ua) = user_agent {
+    if let Some(ua) = user_agent.as_deref() {
         let trimmed = ua.trim();
         if !trimmed.is_empty() {
             zephyr_core::config::subscription::validate_user_agent(trimmed)

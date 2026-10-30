@@ -57,7 +57,10 @@ fn build_http_client_with_proxy(
 
     // Determine User-Agent: use provided UA if valid, or default to Zephyr
     let ua_to_use = match user_agent {
-        Some(ua) if !ua.trim().is_empty() && zephyr_core::config::subscription::validate_user_agent(ua.trim()).is_ok() => {
+        Some(ua)
+            if !ua.trim().is_empty()
+                && zephyr_core::config::subscription::validate_user_agent(ua.trim()).is_ok() =>
+        {
             ua.trim().to_owned()
         }
         _ => {
