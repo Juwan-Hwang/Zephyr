@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../api.js', () => ({
     invoke: vi.fn().mockResolvedValue({}),
+    isIpcAvailable: vi.fn().mockReturnValue(true),
 }));
 
 import { translations, setLanguage } from '../i18n.js';
