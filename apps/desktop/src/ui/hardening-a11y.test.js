@@ -430,3 +430,12 @@ describe('kv store and plugin action buttons accessibility', () => {
         expect(src).toMatch(/data-action="delete"[^>]*aria-label=/);
     });
 });
+
+describe('subscription action buttons accessibility', () => {
+    it('subscription card edit, delete, and update buttons carry aria-label attributes with subscription display name', () => {
+        const src = read('ui/settings/subscriptions.js');
+        expect(src).toMatch(/editBtn\.setAttribute\('aria-label',\s*`\$\{t\.editSubscription \|\| 'Edit'\}: \$\{displayName\}`\)/);
+        expect(src).toMatch(/delBtn\.setAttribute\('aria-label',\s*`\$\{t\.delete \|\| 'Delete'\}: \$\{displayName\}`\)/);
+        expect(src).toMatch(/updateBtn\.setAttribute\('aria-label',\s*`\$\{t\?\.update \|\| 'Update'\}: \$\{displayName\}`\)/);
+    });
+});

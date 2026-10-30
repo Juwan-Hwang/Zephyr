@@ -2043,7 +2043,7 @@ export function initSubscriptionSettings({
                 // eslint-disable-next-line no-unsanitized/property -- static SVG constant
                 updateBtn.innerHTML = SVG_ICONS.refresh; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
                 updateBtn.title = t.update;
-                updateBtn.setAttribute('aria-label', t?.update || 'Update');
+                updateBtn.setAttribute('aria-label', `${t?.update || 'Update'}: ${displayName}`);
                 // Spin the icon only: the button's hover background stays put.
                 const icon = updateBtn.querySelector('svg');
                 if (_subUpdating.has(configInfo.name)) {
