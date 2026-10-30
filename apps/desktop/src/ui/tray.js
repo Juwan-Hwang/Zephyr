@@ -766,8 +766,26 @@ export function generateProxyEnvVars(format, port = 7890, scheme = 'http') {
  * @returns {Promise<void>}
  */
 export async function copyToClipboard(text) {
+    // A clipboard write can hang: when the browser leaves the
+    // permission prompt unanswered, `writeText` may never settle, and a
+    // caller that serializes writes (the copy button's chain) would
+    // stall forever. Give it a few seconds, then fall back to the
+    // textarea path instead of waiting on it.
+    let timeoutId;
     try {
-        await navigator.clipboard.writeText(text);
+        const writePromise = navigator.clipboard.writeText(text);
+        // Prevent unhandled rejection if the timeout wins the race and the
+        // write rejects later.
+        writePromise.catch(() => {});
+        await Promise.race([
+            writePromise,
+            new Promise((_, reject) => {
+                timeoutId = setTimeout(
+                    () => reject(new Error('Clipboard write timed out')),
+                    5000,
+                );
+            }),
+        ]);
     } catch (_) {
         // Fallback for environments without clipboard API
         const textarea = document.createElement('textarea');
@@ -781,5 +799,7 @@ export async function copyToClipboard(text) {
         } finally {
             document.body.removeChild(textarea);
         }
+    } finally {
+        clearTimeout(timeoutId);
     }
 }
