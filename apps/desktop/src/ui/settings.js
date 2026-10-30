@@ -163,11 +163,96 @@ function getSubscriptionUserAgent() {
  * so the subscription scheduler can use it for auto-updates.
  * Uses atomic field-level update to avoid Read-Modify-Write race.
  */
+/** Monotonic generation for UA syncs: a stale catch must not roll back a newer edit. */
+let uaSyncSeq = 0;
+
+/**
+ * The last UA triple the backend accepted. A validation rejection must roll
+ * back to this — never to a snapshot taken inside the sync itself: by then
+ * the input listener has already overwritten localStorage with the rejected
+ * draft, so such a snapshot IS the bad value and the "revert" restores
+ * nothing. It is set only by a successful sync, never seeded from the values
+ * loaded at init: a previous session can end with an unsynced draft in
+ * localStorage, and seeding from that would "restore" the very draft that
+ * was just rejected.
+ * @type {{ enabled: string|null, type: string|null, custom: string|null }|null}
+ */
+let lastAcceptedUA = null;
+
+/**
+ * Refresh the fake-client controls from a restored triple. Registered by
+ * initFakeClient, which owns the toggle, the custom dropdown and the
+ * visibility rules; without it the rollback below could only restore
+ * storage and the custom input, leaving the other controls showing the
+ * rejected edit.
+ * @type {((triple: { enabled: string|null, type: string|null, custom: string|null }) => void)|null}
+ */
+let uaRollbackUI = null;
+
+/** Read the current UA triple from localStorage. */
+function readUATriple() {
+    return {
+        enabled: localStorage.getItem('fakeClientEnabled'),
+        type: localStorage.getItem('fakeClientType'),
+        custom: localStorage.getItem('fakeClientCustom'),
+    };
+}
+
 async function syncUserAgentToBackend() {
+    const ua = getSubscriptionUserAgent();
+    // The triple being sent: on success this is what the backend now holds.
+    const sent = readUATriple();
+    const seq = ++uaSyncSeq;
     try {
-        const ua = getSubscriptionUserAgent();
         await invoke(COMMANDS.UPDATE_SUBSCRIPTION_USER_AGENT, { userAgent: ua });
-    } catch { /* ignore */ }
+        lastAcceptedUA = sent;
+    } catch (err) {
+        // A newer sync has started, or the user has already typed a newer
+        // value (the input listener writes localStorage synchronously): the
+        // stale failure must not clobber the newer draft.
+        if (seq !== uaSyncSeq || getSubscriptionUserAgent() !== ua) return;
+        const message = toError(err).message || '';
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+        // Only a validation rejection means "revert to the saved value".
+        // Any other failure (IPC, settings persist) leaves the user's edit
+        // in place so the next edit retries it, instead of discarding a
+        // valid edit behind a misleading "rejected" notice.
+        const isValidationRejection =
+            message.includes('User-Agent string too long') ||
+            message.includes('User-Agent contains invalid control characters');
+        if (!isValidationRejection) {
+            settingsLogger.error('[fake-client] Failed to sync User-Agent:', err);
+            showNotification(t.userAgentSyncFailed || 'Failed to sync User-Agent; your edit is kept and will retry on the next change.', 'error');
+            return;
+        }
+        // Validation can only reject a custom text value: preset UAs are
+        // short and clean, and null always passes. Restore the last
+        // accepted triple to storage and refresh all three controls from
+        // it — restoring storage alone would leave the toggle and the
+        // preset select showing the rejected edit.
+        // (No accepted triple yet means no sync has ever succeeded this
+        // session, so there is nothing trustworthy to restore: keep the edit
+        // and say so instead of claiming a revert that did not happen.)
+        if (!lastAcceptedUA) {
+            settingsLogger.error('[fake-client] Failed to sync User-Agent:', err);
+            showNotification(t.userAgentSyncFailed || 'Failed to sync User-Agent; your edit is kept and will retry on the next change.', 'error');
+            return;
+        }
+        const { enabled, type, custom } = lastAcceptedUA;
+        if (enabled === null) localStorage.removeItem('fakeClientEnabled');
+        else localStorage.setItem('fakeClientEnabled', enabled);
+        if (type === null) localStorage.removeItem('fakeClientType');
+        else localStorage.setItem('fakeClientType', type);
+        if (custom === null) localStorage.removeItem('fakeClientCustom');
+        else localStorage.setItem('fakeClientCustom', custom);
+        if (uaRollbackUI) {
+            uaRollbackUI({ enabled, type, custom });
+        } else {
+            const customInput = /** @type {HTMLInputElement} */ (document.getElementById('fake-client-custom'));
+            if (customInput) customInput.value = custom ?? '';
+        }
+        showNotification(t.userAgentRejected || 'Custom User-Agent was rejected and has been reverted to the saved value.', 'error');
+    }
 }
 
 /** Debounced version for input events (avoids IPC on every keystroke). */
@@ -929,6 +1014,24 @@ function initFakeClient() {
             void syncUserAgentToBackend();
         },
     });
+
+    // A validation rejection rolls storage back to the last accepted
+    // triple; the visible controls must follow it, or the toggle and the
+    // type dropdown keep showing the rejected edit. setValue only moves
+    // the select and its trigger label — it does not re-fire onChange,
+    // so this cannot loop back into another sync.
+    uaRollbackUI = ({ enabled, type, custom }) => {
+        toggle.checked = enabled === null ? true : enabled === 'true';
+        const restoredType = type || 'clash-verge/1.6.0';
+        if (fakeClientDropdown) fakeClientDropdown.setValue(restoredType);
+        else select.value = restoredType;
+        if (!select.value) {
+            if (fakeClientDropdown) fakeClientDropdown.setValue('custom');
+            else select.value = 'custom';
+        }
+        customInput.value = custom ?? '';
+        updateVisibility();
+    };
 
     function updateVisibility() {
         if (toggle.checked) {

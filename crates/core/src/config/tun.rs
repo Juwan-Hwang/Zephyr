@@ -59,6 +59,9 @@ fn quoted_key_could_name(line: &str, key: &str) -> bool {
 /// token begins; an interior quote in a plain key (`don't`,
 /// `name 'x`) is ordinary text.
 fn mapping_colon_index(body: &str) -> Option<usize> {
+    if !body.contains(':') {
+        return None;
+    }
     let mut quote: Option<u8> = None;
     let mut prev: Option<u8> = None;
     let mut bytes = body.bytes().enumerate().peekable();
@@ -359,9 +362,9 @@ fn flow_collection_closes_on_line(text: &str) -> bool {
 /// order, exactly as the block-level check in
 /// `plain_value_has_mapping_colon` does: an alias naming an anchor
 /// not yet seen is malformed wherever it appears.
-fn flow_collection_has_invalid_content(
-    text: &str,
-    anchors: &mut std::collections::HashSet<String>,
+fn flow_collection_has_invalid_content<'a>(
+    text: &'a str,
+    anchors: &mut std::collections::HashSet<&'a str>,
 ) -> bool {
     let mut scan = FlowContentScan {
         at_token_start: true,
@@ -430,26 +433,20 @@ fn flow_collection_has_invalid_content(
                     if b == b'*' && scan.in_key_position() {
                         return true;
                     }
-                    let mut name_bytes = Vec::new();
+                    let name_start = text.len() - bytes.len();
                     let mut last = b;
                     while let Some(&next) = bytes.peek() {
                         if matches!(next, b' ' | b'\t' | b',' | b'}' | b']' | b'{' | b'[') {
                             break;
                         }
-                        name_bytes.push(next);
                         last = next;
                         bytes.next();
                     }
-                    // An alias is itself the node, so its name is
-                    // key text when in key position; an anchor
-                    // only prefixes the node that follows and is
-                    // not part of the key.
+                    let name_end = text.len() - bytes.len();
+                    let name = &text[name_start..name_end];
                     if b == b'*' {
-                        scan.capture_bytes(&name_bytes);
+                        scan.capture_bytes(name.as_bytes());
                     }
-                    // The delimiters are all ASCII, so the name
-                    // is a whole UTF-8 slice of the input.
-                    let name = String::from_utf8(name_bytes).unwrap_or_default();
                     if name.is_empty() {
                         return true;
                     }
@@ -858,9 +855,9 @@ fn block_scalar_header_has_junk(value: &str) -> bool {
 /// rules), as is anything past a ` #` comment start, and so is a
 /// flow collection that closes on the same line (its colons are
 /// flow syntax, not mapping separators).
-fn plain_value_has_mapping_colon(
-    body: &str,
-    anchors: &mut std::collections::HashSet<String>,
+fn plain_value_has_mapping_colon<'a>(
+    body: &'a str,
+    anchors: &mut std::collections::HashSet<&'a str>,
 ) -> bool {
     let entry = sequence_entry_body(body).unwrap_or(body);
     if entry.starts_with('{') || entry.starts_with('[') {
@@ -906,7 +903,7 @@ fn plain_value_has_mapping_colon(
             if token.len() < 2 {
                 return true;
             }
-            anchors.insert(token[1..].to_owned());
+            anchors.insert(&token[1..]);
         }
         match effective.split_once([' ', '\t']) {
             Some((_, rest)) => effective = rest.trim_start(),
@@ -1295,9 +1292,9 @@ fn starts_with_reserved_indicator(body: &str) -> bool {
 /// that does not close on the line may carry no mapping colon to
 /// judge (the entry itself, or an explicit key's value). Complete
 /// flow entries are fine — they close on the line.
-fn sequence_entry_forces_fallback(
-    body: &str,
-    anchors: &mut std::collections::HashSet<String>,
+fn sequence_entry_forces_fallback<'a>(
+    body: &'a str,
+    anchors: &mut std::collections::HashSet<&'a str>,
 ) -> bool {
     let Some(entry) = sequence_entry_body(body) else {
         return false;
@@ -1372,7 +1369,7 @@ fn indented_line_forces_fallback<'a>(
     saw_unindented_line: bool,
     last_content: &mut Option<(usize, bool)>,
     block_tracker: &mut BlockKindTracker<'a>,
-    anchors: &mut std::collections::HashSet<String>,
+    anchors: &mut std::collections::HashSet<&'a str>,
 ) -> bool {
     let indent = line.len() - line.trim_start().len();
     let trimmed_start = line.trim_start();
@@ -1447,7 +1444,7 @@ fn indented_line_forces_fallback<'a>(
 fn unindented_line_forces_fallback<'a>(
     line: &'a str,
     root_tracker: &mut RootKindTracker,
-    anchors: &mut std::collections::HashSet<String>,
+    anchors: &mut std::collections::HashSet<&'a str>,
     seen_keys: &mut std::collections::HashSet<&'a str>,
 ) -> bool {
     is_standalone_value_line(line)
