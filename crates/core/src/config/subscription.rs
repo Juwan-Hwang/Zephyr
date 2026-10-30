@@ -999,6 +999,22 @@ pub fn validate_subscription_name(name: &str) -> Result<String, crate::error::Ap
     crate::config::sanitizer::sanitize_base_filename(name.to_owned())
 }
 
+/// Validate User-Agent string length and characters to prevent HTTP header injection and settings bloat.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn validate_user_agent(ua: &str) -> Result<(), crate::error::AppError> {
+    if ua.len() > 512 {
+        return Err(crate::error::AppError::ConfigError(
+            "User-Agent string too long: maximum 512 bytes allowed".to_owned(),
+        ));
+    }
+    if ua.chars().any(char::is_control) {
+        return Err(crate::error::AppError::ConfigError(
+            "User-Agent contains invalid control characters".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 /// Dedicated error type for public host address validation, distinguishing SSRF policy blocks
 /// from transient or empty DNS lookup results.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1609,6 +1625,25 @@ pub fn select_global_candidate(
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_validate_user_agent() {
+        // Valid User-Agents
+        assert!(validate_user_agent("clash-verge/v2").is_ok());
+        assert!(validate_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)").is_ok());
+        assert!(validate_user_agent("Shadowrocket/3082 CFNetwork/3826.600.41").is_ok());
+
+        // Oversized User-Agent (> 512 bytes; the limit counts bytes, not chars)
+        let long_ua = "a".repeat(513);
+        let err = validate_user_agent(&long_ua).unwrap_err();
+        assert!(err.to_string().contains("512 bytes"), "{err}");
+
+        // User-Agent containing control characters (\r, \n, \0)
+        assert!(validate_user_agent("clash\r\nHeader: injected").is_err());
+        assert!(validate_user_agent("clash\nHeader: injected").is_err());
+        assert!(validate_user_agent("clash\0").is_err());
+        assert!(validate_user_agent("clash\x1b").is_err());
+    }
 
     #[test]
     fn test_is_private_ip_v4() {

@@ -163,11 +163,54 @@ function getSubscriptionUserAgent() {
  * so the subscription scheduler can use it for auto-updates.
  * Uses atomic field-level update to avoid Read-Modify-Write race.
  */
+/** Monotonic generation for UA syncs: a stale catch must not roll back a newer edit. */
+let uaSyncSeq = 0;
+
 async function syncUserAgentToBackend() {
+    const ua = getSubscriptionUserAgent();
+    // Snapshot the pre-send state: a validation rejection changes nothing on
+    // the backend, so this snapshot is exactly what a rollback must restore.
+    // Restoring the backend's raw UA string instead would be wrong: for a
+    // preset it is the preset string, not the user's earlier custom text.
+    const prevEnabled = localStorage.getItem('fakeClientEnabled');
+    const prevType = localStorage.getItem('fakeClientType');
+    const prevCustom = localStorage.getItem('fakeClientCustom');
+    const seq = ++uaSyncSeq;
     try {
-        const ua = getSubscriptionUserAgent();
         await invoke(COMMANDS.UPDATE_SUBSCRIPTION_USER_AGENT, { userAgent: ua });
-    } catch { /* ignore */ }
+    } catch (err) {
+        // A newer sync has started, or the user has already typed a newer
+        // value (the input listener writes localStorage synchronously): the
+        // stale failure must not clobber the newer draft.
+        if (seq !== uaSyncSeq || getSubscriptionUserAgent() !== ua) return;
+        const message = toError(err).message || '';
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+        // Only a validation rejection means "revert to the saved value".
+        // Any other failure (IPC, settings persist) leaves the user's edit
+        // in place so the next edit retries it, instead of discarding a
+        // valid edit behind a misleading "rejected" notice.
+        const isValidationRejection =
+            message.includes('User-Agent string too long') ||
+            message.includes('User-Agent contains invalid control characters');
+        if (!isValidationRejection) {
+            settingsLogger.error('[fake-client] Failed to sync User-Agent:', err);
+            showNotification(t.userAgentSyncFailed || 'Failed to sync User-Agent; your edit is kept and will retry on the next change.', 'error');
+            return;
+        }
+        // Validation can only reject a custom text value: preset UAs are
+        // short and clean, and null always passes. So restoring the snapshot
+        // plus the custom input covers every real rejection, and the toggle
+        // and preset select cannot diverge through this path.
+        if (prevEnabled === null) localStorage.removeItem('fakeClientEnabled');
+        else localStorage.setItem('fakeClientEnabled', prevEnabled);
+        if (prevType === null) localStorage.removeItem('fakeClientType');
+        else localStorage.setItem('fakeClientType', prevType);
+        if (prevCustom === null) localStorage.removeItem('fakeClientCustom');
+        else localStorage.setItem('fakeClientCustom', prevCustom);
+        const customInput = /** @type {HTMLInputElement} */ (document.getElementById('fake-client-custom'));
+        if (customInput) customInput.value = prevCustom ?? '';
+        showNotification(t.userAgentRejected || 'Custom User-Agent was rejected and has been reverted to the saved value.', 'error');
+    }
 }
 
 /** Debounced version for input events (avoids IPC on every keystroke). */

@@ -55,10 +55,28 @@ fn build_http_client_with_proxy(
         client_builder = client_builder.resolve(host, *addr);
     }
 
-    // Determine User-Agent: use provided UA, or default to Zephyr
+    // Determine User-Agent: use provided UA if valid, or default to Zephyr
     let ua_to_use = match user_agent {
-        Some(ua) if !ua.trim().is_empty() => ua.trim().to_owned(),
+        Some(ua)
+            if !ua.trim().is_empty()
+                && zephyr_core::config::subscription::validate_user_agent(ua.trim()).is_ok() =>
+        {
+            ua.trim().to_owned()
+        }
         _ => {
+            // A saved UA that no longer passes validation (e.g. over the
+            // 512-byte cap) used to be sent as-is; it is now replaced, so
+            // say so instead of silently swapping in the default on every
+            // download.
+            if let Some(ua) = user_agent {
+                if !ua.trim().is_empty() {
+                    crate::emit_warn!(
+                        Subscription,
+                        SUB_UA_INVALID,
+                        "Saved User-Agent failed validation, using default Zephyr User-Agent"
+                    );
+                }
+            }
             // Default Zephyr User-Agent with version
             let version = env!("CARGO_PKG_VERSION");
             format!("Zephyr/{version}")
