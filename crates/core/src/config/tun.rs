@@ -368,10 +368,7 @@ fn flow_collection_closes_on_line(text: &str) -> bool {
 /// order, exactly as the block-level check in
 /// `plain_value_has_mapping_colon` does: an alias naming an anchor
 /// not yet seen is malformed wherever it appears.
-fn flow_collection_has_invalid_content<'a>(
-    text: &'a str,
-    anchors: &mut Vec<&'a str>,
-) -> bool {
+fn flow_collection_has_invalid_content<'a>(text: &'a str, anchors: &mut Vec<&'a str>) -> bool {
     let mut scan = FlowContentScan {
         at_token_start: true,
         ..FlowContentScan::default()
@@ -862,10 +859,7 @@ fn block_scalar_header_has_junk(value: &str) -> bool {
 /// rules), as is anything past a ` #` comment start, and so is a
 /// flow collection that closes on the same line (its colons are
 /// flow syntax, not mapping separators).
-fn plain_value_has_mapping_colon<'a>(
-    body: &'a str,
-    anchors: &mut Vec<&'a str>,
-) -> bool {
+fn plain_value_has_mapping_colon<'a>(body: &'a str, anchors: &mut Vec<&'a str>) -> bool {
     let entry = sequence_entry_body(body).unwrap_or(body);
     if entry.starts_with('{') || entry.starts_with('[') {
         return !flow_collection_closes_on_line(entry)
@@ -1300,10 +1294,7 @@ fn starts_with_reserved_indicator(body: &str) -> bool {
 /// that does not close on the line may carry no mapping colon to
 /// judge (the entry itself, or an explicit key's value). Complete
 /// flow entries are fine — they close on the line.
-fn sequence_entry_forces_fallback<'a>(
-    body: &'a str,
-    anchors: &mut Vec<&'a str>,
-) -> bool {
+fn sequence_entry_forces_fallback<'a>(body: &'a str, anchors: &mut Vec<&'a str>) -> bool {
     let Some(entry) = sequence_entry_body(body) else {
         return false;
     };
