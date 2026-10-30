@@ -36,6 +36,7 @@ import { showNotification, showModal, showConfirmModal } from './notifications.j
 import { createFocusTrap } from '../utils/focus-trap.js';
 import { showLinkDialog } from './link-dialog.js';
 import { createEditor, getEditorContent } from './editor/prism-editor.js';
+import { noteExternalClipboardWrite, nextClipboardSeq } from './tray.js';
 
 /**
  * Status text for the inline editor: "Ln 9, Col 31 · 248 chars".
@@ -2170,7 +2171,15 @@ function copyFullscreenOutput() {
     const text = output.textContent || output.innerText || '';
     if (!text.trim()) return;
 
+    // The sequence, taken when the write is requested: a direct write
+    // that resolves after a newer tray copy must not become the repair
+    // target for it.
+    const seq = nextClipboardSeq();
     navigator.clipboard.writeText(text).then(() => {
+        // This write bypasses copyToClipboard: tell the tray module
+        // the newest copied text, so a repair in flight re-asserts
+        // this text instead of overwriting it with an older one.
+        noteExternalClipboardWrite(text, seq);
         if (copyBtn) {
             const originalText = copyBtn.textContent;
             copyBtn.textContent = t('overrideCopied') || 'Copied';
@@ -2189,15 +2198,23 @@ function copyFullscreenOutput() {
         document.body.appendChild(textarea);
         textarea.select();
         try {
-            document.execCommand('copy');
-            if (copyBtn) {
-                const originalText = copyBtn.textContent;
-                copyBtn.textContent = t('overrideCopied') || 'Copied';
-                copyBtn.style.color = 'var(--accent-primary, #007AFF)';
-                setTimeout(() => {
-                    copyBtn.textContent = originalText;
-                    copyBtn.style.color = '';
-                }, 1500);
+            // execCommand reports success with its return value: only
+            // note a fallback copy that actually landed, like the
+            // native path above — otherwise a late tray write would
+            // re-assert the stale tracker value over this text. The
+            // feedback is gated on the same result: a failed fallback
+            // copied nothing, so it must not show "Copied".
+            if (document.execCommand('copy')) {
+                noteExternalClipboardWrite(text, seq);
+                if (copyBtn) {
+                    const originalText = copyBtn.textContent;
+                    copyBtn.textContent = t('overrideCopied') || 'Copied';
+                    copyBtn.style.color = 'var(--accent-primary, #007AFF)';
+                    setTimeout(() => {
+                        copyBtn.textContent = originalText;
+                        copyBtn.style.color = '';
+                    }, 1500);
+                }
             }
         } catch (_e) {
             // silently fail
