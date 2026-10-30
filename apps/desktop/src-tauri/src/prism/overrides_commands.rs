@@ -7,6 +7,7 @@ use tauri::{Manager as _, State};
 
 use clash_prism_extension::ApplyOptions;
 
+use crate::backend_event::{codes, lock_critical, BackendModule};
 use crate::core_manager::core::fetch_util::fetch_url_content;
 use crate::core_manager::write_file_secure;
 use crate::prism::overrides::overrides_model::{
@@ -461,7 +462,13 @@ pub async fn override_set_content(
                 // the previously saved script.
                 let restored = match previous_patch {
                     Some(text) => write_file_secure(&patch_path, &text).is_ok(),
-                    None => std::fs::remove_file(&patch_path).is_ok(),
+                    None => {
+                        if patch_path.exists() {
+                            std::fs::remove_file(&patch_path).is_ok()
+                        } else {
+                            true
+                        }
+                    }
                 };
                 if !restored {
                     emit_warn!(
@@ -996,19 +1003,11 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
     // Get current active profile ID for scope filtering
     let current_profile_id: Option<String> = {
         let mihomo_state = state.app.state::<crate::MihomoState>();
-        let lock = match mihomo_state.0.lock() {
-            Ok(l) => l,
-            Err(e) => {
-                emit_warn!(
-                    Override,
-                    OVERRIDE_APPLY_FAILED,
-                    "MihomoState lock poisoned, overrides not applied: {e}"
-                );
-                // Not an empty success: nothing was applied, and the
-                // caller (restart recovery) has to count it as a failure.
-                return Err(format!("MihomoState lock poisoned: {e}"));
-            }
-        };
+        let lock = lock_critical(
+            &mihomo_state.0,
+            BackendModule::Override,
+            codes::OVERRIDE_APPLY_FAILED,
+        )?;
         lock.last_config_path().map(String::from)
     };
 
