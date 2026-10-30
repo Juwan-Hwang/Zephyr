@@ -319,40 +319,26 @@ describe('menu triggers accessibility', () => {
 describe('icon-only close and back buttons', () => {
     it('index.html buttons carry translatable aria-labels', () => {
         const doc = parseIndex();
-        for (const [id, key] of [
-            ['fullscreen-editor-close-btn', 'close'],
-            ['btn-back-settings', 'backToSettings'],
-            ['add-tunnel-btn', 'add'],
-            ['open-plugins-btn', 'overrideTitle'],
-            ['update-all-sub-btn', 'updateAll'],
-            ['add-sub-btn', 'addSubscription'],
-            ['copy-env-btn', 'copyProxyEnv'],
-            ['rl-btn-new-group', 'ruleLibraryNewGroup'],
-            ['rl-btn-import', 'ruleLibraryImport'],
-            ['plugin-new-btn', 'overrideNew'],
+        for (const [id, key, hasTitle] of [
+            ['fullscreen-editor-close-btn', 'close', false],
+            ['btn-back-settings', 'backToSettings', false],
+            ['add-tunnel-btn', 'add', false],
+            ['open-plugins-btn', 'overrideTitle', true],
+            ['update-all-sub-btn', 'updateAll', true],
+            ['add-sub-btn', 'addSubscription', true],
+            ['copy-env-btn', 'copyProxyEnv', true],
+            ['rl-btn-new-group', 'ruleLibraryNewGroup', true],
+            ['rl-btn-import', 'ruleLibraryImport', true],
+            ['plugin-new-btn', 'overrideNew', true],
         ]) {
             const btn = doc.getElementById(id);
             expect(btn, id).toBeTruthy();
             expect(btn?.getAttribute('aria-label'), id).toBeTruthy();
             expect(btn?.getAttribute('data-i18n-aria-label'), id).toBe(key);
-        }
-    });
-
-    it('header action buttons carry translatable title tooltips', () => {
-        const doc = parseIndex();
-        for (const [id, key] of [
-            ['open-plugins-btn', 'overrideTitle'],
-            ['update-all-sub-btn', 'updateAll'],
-            ['add-sub-btn', 'addSubscription'],
-            ['copy-env-btn', 'copyProxyEnv'],
-            ['rl-btn-new-group', 'ruleLibraryNewGroup'],
-            ['rl-btn-import', 'ruleLibraryImport'],
-            ['plugin-new-btn', 'overrideNew'],
-        ]) {
-            const btn = doc.getElementById(id);
-            expect(btn, id).toBeTruthy();
-            expect(btn?.getAttribute('title'), id).toBeTruthy();
-            expect(btn?.getAttribute('data-i18n-title'), id).toBe(key);
+            if (hasTitle) {
+                expect(btn?.getAttribute('title'), id).toBeTruthy();
+                expect(btn?.getAttribute('data-i18n-title'), id).toBe(key);
+            }
         }
     });
 
