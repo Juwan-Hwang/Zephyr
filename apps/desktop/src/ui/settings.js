@@ -93,6 +93,7 @@ import { withResetChanges } from './settings/reset-merge.js';
 import { selectSegment } from './seg-control.js';
 import { openUpdateDialog, showPendingUpdateNote } from './update-dialog.js';
 import { createClientVersionFetcher, isValidClientVersions } from './settings/client-version-fetch.js';
+import { uaTripleFromBackendUA } from './settings/ua-triple.js';
 
 let __langDropdown = null;
 /** @type {(() => Promise<void>) | null} */
@@ -158,16 +159,215 @@ function getSubscriptionUserAgent() {
     return getFakeClientUA();
 }
 
+/** Monotonic generation for UA syncs: a stale catch must not roll back a newer edit. */
+let uaSyncSeq = 0;
+
+/**
+ * The last UA triple the backend accepted. A validation rejection must roll
+ * back to this — never to a snapshot taken inside the sync itself: by then
+ * the input listener has already overwritten localStorage with the rejected
+ * draft, so such a snapshot IS the bad value and the "revert" restores
+ * nothing. It is set only by a successful sync, never seeded from the values
+ * loaded at init: a previous session can end with an unsynced draft in
+ * localStorage, and seeding from that would "restore" the very draft that
+ * was just rejected.
+ * @type {{ enabled: string|null, type: string|null, custom: string|null }|null}
+ */
+let lastAcceptedUA = null;
+
+/**
+ * Refresh the fake-client controls from a restored triple. Registered by
+ * initFakeClient, which owns the toggle, the custom dropdown and the
+ * visibility rules; without it the rollback below could only restore
+ * storage and the custom input, leaving the other controls showing the
+ * rejected edit.
+ * @type {((triple: { enabled: string|null, type: string|null, custom: string|null }) => void)|null}
+ */
+let uaRollbackUI = null;
+
+/** Read the current UA triple from localStorage. */
+function readUATriple() {
+    return {
+        enabled: localStorage.getItem('fakeClientEnabled'),
+        type: localStorage.getItem('fakeClientType'),
+        custom: localStorage.getItem('fakeClientCustom'),
+    };
+}
+
+/**
+ * Write a UA triple back to storage and refresh the fake-client controls
+ * from it. Restoring storage alone would leave the toggle and the preset
+ * select showing the rejected edit.
+ * @param {{ enabled: string|null, type: string|null, custom: string|null }} triple
+ */
+function restoreUATriple(triple) {
+    const { enabled, type, custom } = triple;
+    if (enabled === null) localStorage.removeItem('fakeClientEnabled');
+    else localStorage.setItem('fakeClientEnabled', enabled);
+    if (type === null) localStorage.removeItem('fakeClientType');
+    else localStorage.setItem('fakeClientType', type);
+    if (custom === null) localStorage.removeItem('fakeClientCustom');
+    else localStorage.setItem('fakeClientCustom', custom);
+    if (uaRollbackUI) {
+        uaRollbackUI({ enabled, type, custom });
+    } else {
+        const customInput = /** @type {HTMLInputElement} */ (document.getElementById('fake-client-custom'));
+        if (customInput) customInput.value = custom ?? '';
+    }
+}
+
+/**
+ * Read the UA the backend last accepted, as a triple the rollback can
+ * restore. Only used when no sync has succeeded this session, so there
+ * is no in-memory snapshot yet. A preset UA maps back to its preset;
+ * anything else is a custom text value. Returns null when the backend
+ * holds nothing, when the read fails, or when the user has already typed
+ * a newer value while the read was in flight (restoring then would
+ * clobber the newer draft).
+ * @param {string|null} sentUa the UA this sync just tried to send
+ * @returns {Promise<{ enabled: string|null, type: string|null, custom: string|null }|null>}
+ */
+async function readBackendAcceptedUA(sentUa) {
+    try {
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        if (getSubscriptionUserAgent() !== sentUa) return null;
+        return uaTripleFromBackendUA(settings?.subscription_user_agent);
+    } catch (readErr) {
+        settingsLogger.error('[fake-client] Failed to read the accepted User-Agent:', readErr);
+        return null;
+    }
+}
+
+/**
+ * Serializes UA syncs in call order: overlapping syncs used to commit
+ * out of order, so a success could be discarded as superseded while its
+ * value was live on the backend, and a later validation rejection would
+ * roll back to an older value the backend no longer holds. Each link
+ * runs even if the previous settled with an error, so one failure
+ * cannot stall later syncs; a stalled sync can still delay later ones,
+ * but syncs are debounced and IPC resolves quickly in practice.
+ * @type {Promise<unknown>}
+ */
+let uaSyncQueue = Promise.resolve();
+
+/**
+ * Run `task` on the UA sync queue, behind every sync enqueued so far.
+ * The backup import uses this so its publish and capture cannot
+ * interleave with a pending UA write (see the import handler). The
+ * queue itself never rejects, so one failure cannot stall later work;
+ * the task's own result (or rejection) is returned to the caller.
+ * @template T
+ * @param {() => Promise<T>} task
+ * @returns {Promise<T>}
+ */
+function runAfterUaSyncs(task) {
+    const result = uaSyncQueue.then(task, task);
+    uaSyncQueue = result.catch(() => {});
+    return result;
+}
+
 /**
  * Sync the current fake client UA to backend settings
  * so the subscription scheduler can use it for auto-updates.
  * Uses atomic field-level update to avoid Read-Modify-Write race.
+ * Runs serialized through `syncUserAgentToBackend`.
+ * @returns {Promise<boolean>} Whether the backend now holds the sent
+ * value. True when the sync landed, and when a newer sync supersedes
+ * this one (that sync carries the current value instead); false when
+ * the sync failed and the backend still holds the previous value.
  */
-async function syncUserAgentToBackend() {
+async function syncUserAgentToBackendNow() {
+    const ua = getSubscriptionUserAgent();
+    // The triple being sent: on success this is what the backend now holds.
+    // Custom text is only actually sent (and validated) while custom mode
+    // is on: when a preset is selected or the toggle is off, the stored
+    // custom text is an unsent draft, and saving it as "accepted" would
+    // let a later rejection restore a value that was never validated.
+    // Keep the previously accepted custom text in that case instead.
+    const current = readUATriple();
+    const sent = {
+        ...current,
+        custom:
+            current.enabled === 'true' && current.type === 'custom'
+                ? current.custom
+                : (lastAcceptedUA?.custom ?? null),
+    };
+    const seq = ++uaSyncSeq;
     try {
-        const ua = getSubscriptionUserAgent();
         await invoke(COMMANDS.UPDATE_SUBSCRIPTION_USER_AGENT, { userAgent: ua });
-    } catch { /* ignore */ }
+        // Only the newest sync may set the rollback snapshot: an older
+        // response arriving after a newer one must not rewind it, or a
+        // later validation rejection would restore the older triple.
+        if (seq === uaSyncSeq) lastAcceptedUA = sent;
+        return true;
+    } catch (err) {
+        // A newer sync has started, or the user has already typed a newer
+        // value (the input listener writes localStorage synchronously): the
+        // stale failure must not clobber the newer draft. That newer sync
+        // carries the current value, so there is no failure to report.
+        if (seq !== uaSyncSeq || getSubscriptionUserAgent() !== ua) return true;
+        const message = toError(err).message || '';
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')] ?? {};
+        // Only a validation rejection means "revert to the saved value".
+        // Any other failure (IPC, settings persist) leaves the user's edit
+        // in place so the next edit retries it, instead of discarding a
+        // valid edit behind a misleading "rejected" notice.
+        const isValidationRejection =
+            message.includes('User-Agent string too long') ||
+            message.includes('User-Agent contains invalid control characters');
+        if (!isValidationRejection) {
+            settingsLogger.error('[fake-client] Failed to sync User-Agent:', err);
+            showNotification(t.userAgentSyncFailed || 'Failed to sync User-Agent; your edit is kept and will retry on the next change.', 'error');
+            return false;
+        }
+        // Validation can only reject a custom text value: preset UAs are
+        // short and clean, and null always passes. Restore the last
+        // accepted triple to storage and refresh all three controls from
+        // it — restoring storage alone would leave the toggle and the
+        // preset select showing the rejected edit.
+        // (No accepted triple yet means no sync has ever succeeded this
+        // session — but the backend still holds the value it last
+        // accepted, from an earlier session. A saved draft rejected on
+        // the first sync of the session must roll back to that, or the
+        // UI keeps showing the draft while the backend keeps its own
+        // value: manual downloads send the frontend value and fall back
+        // to the default when it is invalid, while scheduled downloads
+        // use the backend value, so the two would silently disagree.
+        // When the backend holds nothing, the disabled triple is the
+        // restore (the backend uses its default UA exactly then). Only
+        // when the read itself fails, or the stored value is not
+        // trustworthy, is there nothing to restore: then keep the edit
+        // and say so instead of claiming a revert that did not happen.)
+        if (!lastAcceptedUA) {
+            const backendTriple = await readBackendAcceptedUA(ua);
+            if (backendTriple) {
+                lastAcceptedUA = backendTriple;
+                restoreUATriple(backendTriple);
+                showNotification(t.userAgentRejected || 'Custom User-Agent was rejected and has been reverted to the saved value.', 'error');
+                return false;
+            }
+            settingsLogger.error('[fake-client] Failed to sync User-Agent:', err);
+            showNotification(t.userAgentSyncFailed || 'Failed to sync User-Agent; your edit is kept and will retry on the next change.', 'error');
+            return false;
+        }
+        restoreUATriple(lastAcceptedUA);
+        showNotification(t.userAgentRejected || 'Custom User-Agent was rejected and has been reverted to the saved value.', 'error');
+        return false;
+    }
+}
+
+/**
+ * Serialized entry point for UA syncs: enqueue the sync behind any
+ * still-running one instead of firing it concurrently.
+ * @returns {Promise<boolean>} Whether the backend now holds the sent
+ * value (see `syncUserAgentToBackendNow`); false when the sync failed.
+ */
+function syncUserAgentToBackend() {
+    const synced = uaSyncQueue
+        .then(syncUserAgentToBackendNow, syncUserAgentToBackendNow)
+        .catch(() => false);
+    uaSyncQueue = synced;
+    return synced;
 }
 
 /** Debounced version for input events (avoids IPC on every keystroke). */
@@ -930,6 +1130,50 @@ function initFakeClient() {
         },
     });
 
+    // A validation rejection rolls storage back to the last accepted
+    // triple; the visible controls must follow it, or the toggle and the
+    // type dropdown keep showing the rejected edit. setValue only moves
+    // the select and its trigger label — it does not re-fire onChange,
+    // so this cannot loop back into another sync.
+    uaRollbackUI = ({ enabled, type, custom }) => {
+        toggle.checked = enabled === null ? true : enabled === 'true';
+        // The disabled triple carries no type, but the dropdown shows a
+        // preset: use the one actually offered — once the version lookup
+        // has run, the option carries the fetched version, not the 1.6.0
+        // fallback, so writing the fallback would sync a UA the dropdown
+        // no longer shows. Same lookup as the reset path.
+        const vergeOpt = select?.querySelector('option[value^="clash-verge"]');
+        const defaultType = vergeOpt
+            ? /** @type {HTMLOptionElement} */ (vergeOpt).value
+            : 'clash-verge/1.6.0';
+        const restoredType = type || defaultType;
+        if (type === null) {
+            // The disabled triple carries no type, but the dropdown shows
+            // the default preset: persist it, or re-enabling the toggle
+            // later would sync a null UA while the UI still shows the
+            // preset. (The not-offered branch below still overwrites this
+            // with Custom when the preset itself is gone.)
+            localStorage.setItem('fakeClientType', restoredType);
+        }
+        if (fakeClientDropdown) fakeClientDropdown.setValue(restoredType);
+        else select.value = restoredType;
+        let restoredCustom = custom ?? '';
+        if (!select.value) {
+            if (fakeClientDropdown) fakeClientDropdown.setValue('custom');
+            else select.value = 'custom';
+            // The restored preset is no longer offered (a version fetch
+            // replaced it): showing Custom while storage still holds the
+            // preset would leave later custom edits ignored, because the
+            // UA is read from storage by type. Keep the UA string itself
+            // unchanged by carrying it as the custom text instead.
+            localStorage.setItem('fakeClientType', 'custom');
+            localStorage.setItem('fakeClientCustom', restoredType);
+            restoredCustom = restoredType;
+        }
+        customInput.value = restoredCustom;
+        updateVisibility();
+    };
+
     function updateVisibility() {
         if (toggle.checked) {
             /** @type {HTMLElement} */ (optionsContainer).classList.remove('max-h-0', 'opacity-0', 'overflow-hidden');
@@ -943,6 +1187,10 @@ function initFakeClient() {
         } else {
             /** @type {HTMLElement} */ (optionsContainer).classList.remove('max-h-40', 'opacity-100');
             /** @type {HTMLElement} */ (optionsContainer).classList.add('max-h-0', 'opacity-0', 'overflow-hidden');
+            // The feature is off, so no versions are needed: stop scheduled
+            // retries too. This also covers a validation rollback that
+            // restores the disabled state while a lookup is in flight.
+            versionFetcher.pause();
             setTimeout(() => { if (customContainer) customContainer.classList.add('hidden'); }, 300);
         }
     }
@@ -971,20 +1219,30 @@ function initFakeClient() {
             if (flclashBtn) { flclashBtn.setAttribute('data-value', versions.flclash); flclashBtn.textContent = `Flclash (${versions.flclash})`; flclashBtn.setAttribute('data-label', `Flclash (${versions.flclash})`); }
         }
 
-        if (savedType && savedType.startsWith('clash-verge')) {
+        // Read the current selection, not the init-time one: the user may
+        // have switched preset (or picked Custom) while the lookup was
+        // pending, and applying the stale preset would overwrite that
+        // choice and sync the wrong UA to the backend.
+        const currentType = localStorage.getItem('fakeClientType') || 'clash-verge/1.6.0';
+        if (currentType.startsWith('clash-verge')) {
             select.value = versions.verge;
             localStorage.setItem('fakeClientType', versions.verge);
-        } else if (savedType && savedType.startsWith('mihomo-party')) {
+        } else if (currentType.startsWith('mihomo-party')) {
             select.value = versions.mihomo_party;
             localStorage.setItem('fakeClientType', versions.mihomo_party);
-        } else if (savedType && savedType.startsWith('Flclash')) {
+        } else if (currentType.startsWith('Flclash')) {
             select.value = versions.flclash;
             localStorage.setItem('fakeClientType', versions.flclash);
         } else {
-            select.value = savedType;
+            select.value = currentType;
         }
 
         if (fakeClientDropdown) fakeClientDropdown.syncUI();
+        // The init sync ran before this fetch finished, so the backend
+        // still holds the old preset version: sync the replaced preset
+        // now, or the scheduler keeps using the old UA until the next
+        // manual change.
+        void syncUserAgentToBackend();
     }
 
     toggle.addEventListener('change', () => {
@@ -1673,17 +1931,33 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 const fakeClientToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-fake-client'));
                 if (fakeClientToggle) {
                     fakeClientToggle.checked = true;
-                    localStorage.setItem('fakeClientEnabled', 'true');
-                    localStorage.removeItem('fakeClientType');
-                    localStorage.removeItem('fakeClientCustom');
+                    // Reset to the Clash Verge option that is actually
+                    // offered: once the version lookup has run, the option
+                    // carries the fetched version, not the 1.6.0 fallback,
+                    // so writing the fallback would sync a UA the dropdown
+                    // no longer shows. Refresh through the same restore
+                    // path the rollback uses, so the dropdown label and
+                    // the custom editor visibility follow the reset too.
                     const fakeClientSelect = /** @type {HTMLSelectElement} */ (document.getElementById('fake-client-select'));
-                    if (fakeClientSelect) fakeClientSelect.value = 'clash-verge/1.6.0';
-                    const optionsContainer = document.getElementById('fake-client-options');
-                    if (optionsContainer) {
-                        optionsContainer.classList.remove('max-h-0', 'opacity-0');
-                        optionsContainer.classList.add('max-h-40', 'opacity-100');
-                    }
-                    successItems.push('fakeClient');
+                    const vergeOpt = fakeClientSelect?.querySelector('option[value^="clash-verge"]');
+                    const resetType = vergeOpt
+                        ? /** @type {HTMLOptionElement} */ (vergeOpt).value
+                        : 'clash-verge/1.6.0';
+                    restoreUATriple({ enabled: 'true', type: resetType, custom: null });
+                    // The reset changed the fake-client triple without
+                    // syncing it: the backend would keep the pre-reset UA
+                    // for scheduled downloads, and `lastAcceptedUA` would
+                    // still hold the pre-reset triple, so a later
+                    // validation rejection would restore the pre-reset
+                    // values and undo the reset. Sync now, and count the
+                    // step as failed if the sync does not land — the
+                    // controls would otherwise show the preset while
+                    // scheduled downloads keep the old UA.
+                    await trackResult('fakeClient', async () => {
+                        if (!await syncUserAgentToBackend()) {
+                            throw new Error(t.userAgentSyncFailed || 'Failed to sync User-Agent');
+                        }
+                    });
                 }
 
                 // Reset theme mode
@@ -2431,22 +2705,63 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 return;
             }
             appStore.set('isNetworkUpdating', true);
-            let result;
+            // The import and its capture run as one link on the UA sync
+            // queue, behind every sync enqueued so far: a sync that
+            // started before the import must not commit after the import
+            // publishes and before the capture reads, or it silently
+            // overwrites the imported User-Agent — and the capture would
+            // then read the stale value back and re-assert it. While
+            // this link runs, a sync from a later edit waits behind it
+            // and sends the value storage holds then: the imported
+            // value, or the newer edit.
+            let imported;
             try {
-                result = await invoke(COMMANDS.MISC.IMPORT_BACKUP);
+                imported = await runAfterUaSyncs(async () => {
+                    const importResult = await invoke(COMMANDS.MISC.IMPORT_BACKUP);
+                    const importedSettings = await invoke(COMMANDS.GET_SETTINGS) || {};
+                    // The import replaced the backend settings, so the
+                    // fake-client snapshot from before the import is
+                    // stale: a sync rejection landing before the reload
+                    // would restore the pre-import triple to storage, and
+                    // the reloaded page would then sync it back to the
+                    // backend, undoing the import's User-Agent. Refresh
+                    // the snapshot (and storage) from the imported value
+                    // now. An invalid imported value is left alone — the
+                    // import already strips those, and the rejection path
+                    // keeps the edit when it cannot map one.
+                    const importedTriple = uaTripleFromBackendUA(
+                        importedSettings.subscription_user_agent,
+                    );
+                    if (importedTriple) {
+                        lastAcceptedUA = importedTriple;
+                        restoreUATriple(importedTriple);
+                        // Re-assert the imported value behind any sync
+                        // that started before the import: the queue runs
+                        // it after that sync settles, so a late response
+                        // cannot leave the pre-import snapshot (and the
+                        // backend value) in place. The reloaded page
+                        // re-syncs the same value on init as well.
+                        void syncUserAgentToBackend();
+                    }
+                    return {
+                        result: importResult,
+                        configPath: importedSettings.last_config || 'config.yaml',
+                        customArgs: importedSettings.custom_args || [],
+                    };
+                });
             } catch (err) {
                 appStore.set('isNetworkUpdating', false);
                 throw err;
             }
-            showNotification(result, 'success');
-            // Reload settings and restart core in the background to avoid
-            // blocking the UI. The import is already complete at this point.
+            showNotification(imported.result, 'success');
+            // Restart the core in the background to avoid blocking the
+            // UI. The import and its settings capture are already
+            // complete at this point.
             void (async () => {
                 let reloadDelay = 0;
                 try {
-                    const importedSettings = await invoke(COMMANDS.GET_SETTINGS) || {};
-                    const configPath = importedSettings.last_config || 'config.yaml';
-                    const customArgs = importedSettings.custom_args || [];
+                    const configPath = imported.configPath;
+                    const customArgs = imported.customArgs;
                     abortLatencyTests();
                     const coreResult = await restartCore(configPath, customArgs);
                     // A fallback is saved before the reload, and its warning
