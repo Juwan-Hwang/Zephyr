@@ -109,6 +109,12 @@ export function showNotification(message, type = 'info', title = null, { log = t
         closeBtn.type = 'button';
         closeBtn.className = 'toast-close';
         closeBtn.setAttribute('aria-label', _tr('dismiss', 'Dismiss'));
+        closeBtn.setAttribute('title', _tr('dismiss', 'Dismiss'));
+        // Mark the keys so a language switch re-translates a still-visible
+        // sticky toast instead of leaving its tooltip and accessible name
+        // in the old language.
+        closeBtn.dataset.i18nTitle = 'dismiss';
+        closeBtn.dataset.i18nAriaLabel = 'dismiss';
         closeBtn.textContent = '×';
         closeBtn.addEventListener('click', () => dismiss());
         notif.appendChild(closeBtn);

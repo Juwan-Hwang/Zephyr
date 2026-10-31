@@ -495,15 +495,27 @@ fn extract_name_from_rules_fast(content: &str) -> FastScan {
 /// Shared by the fast path and the full parser so the two cannot drift apart.
 fn rule_policy_name(rule_str: &str) -> Option<&str> {
     let name = rule_str.split(',').nth(2)?.trim();
-    let upper = name.to_uppercase();
-    if upper.is_empty()
-        || upper == "DIRECT"
-        || upper == "REJECT"
-        || upper == "MATCH"
-        || upper == "PROXY"
-        || upper == "PASS"
-        || upper == "DROP"
-    {
+    // Zero-allocation case-insensitive comparisons against generic policy target names.
+    // Non-ASCII names keep the previous Unicode-aware uppercasing: `to_uppercase`
+    // folds characters like `ß` (so `paß` still matches `PASS`), while the ASCII
+    // comparison does not, and the old behaviour is what callers relied on.
+    let is_generic = if name.is_ascii() {
+        name.eq_ignore_ascii_case("DIRECT")
+            || name.eq_ignore_ascii_case("REJECT")
+            || name.eq_ignore_ascii_case("MATCH")
+            || name.eq_ignore_ascii_case("PROXY")
+            || name.eq_ignore_ascii_case("PASS")
+            || name.eq_ignore_ascii_case("DROP")
+    } else {
+        let upper = name.to_uppercase();
+        upper == "DIRECT"
+            || upper == "REJECT"
+            || upper == "MATCH"
+            || upper == "PROXY"
+            || upper == "PASS"
+            || upper == "DROP"
+    };
+    if name.is_empty() || is_generic {
         return None;
     }
     if name.len() > 64 {
@@ -904,6 +916,17 @@ fn is_unsafe_destination_v4(bits: u32) -> bool {
         || v4_in_cidr(bits, 0xf000_0000, 4)
 }
 
+#[inline]
+fn ends_with_ignore_ascii_case(s: &str, suffix: &str) -> bool {
+    let s_bytes = s.as_bytes();
+    let suffix_bytes = suffix.as_bytes();
+    s_bytes
+        .len()
+        .checked_sub(suffix_bytes.len())
+        .and_then(|offset| s_bytes.get(offset..))
+        .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix_bytes))
+}
+
 /// Check if a host is a private or local address (SSRF protection)
 #[must_use]
 pub fn is_private_host(host: &str) -> bool {
@@ -915,21 +938,41 @@ pub fn is_private_host(host: &str) -> bool {
     if normalized.is_empty() {
         return false;
     }
-    let host_lower = normalized.to_lowercase();
 
-    if host_lower == "localhost"
-        || host_lower.ends_with(".localhost")
-        || host_lower.ends_with(".local")
-        || host_lower.ends_with(".internal")
-        || host_lower.ends_with(".intranet")
-        || host_lower.ends_with(".private")
-        || host_lower.ends_with(".lan")
-        || host_lower == "home.arpa"
-        || host_lower.ends_with(".home.arpa")
-        || host_lower.ends_with(".home")
-        || host_lower.ends_with(".corp")
-    {
-        return true;
+    // Zero-allocation case-insensitive checks without allocating a lowercase String per host.
+    // Non-ASCII hosts keep the previous Unicode-aware lowercasing so their
+    // classification stays exactly what it was before this refactor.
+    if normalized.is_ascii() {
+        if normalized.eq_ignore_ascii_case("localhost")
+            || ends_with_ignore_ascii_case(normalized, ".localhost")
+            || ends_with_ignore_ascii_case(normalized, ".local")
+            || ends_with_ignore_ascii_case(normalized, ".internal")
+            || ends_with_ignore_ascii_case(normalized, ".intranet")
+            || ends_with_ignore_ascii_case(normalized, ".private")
+            || ends_with_ignore_ascii_case(normalized, ".lan")
+            || normalized.eq_ignore_ascii_case("home.arpa")
+            || ends_with_ignore_ascii_case(normalized, ".home.arpa")
+            || ends_with_ignore_ascii_case(normalized, ".home")
+            || ends_with_ignore_ascii_case(normalized, ".corp")
+        {
+            return true;
+        }
+    } else {
+        let host_lower = normalized.to_lowercase();
+        if host_lower == "localhost"
+            || host_lower.ends_with(".localhost")
+            || host_lower.ends_with(".local")
+            || host_lower.ends_with(".internal")
+            || host_lower.ends_with(".intranet")
+            || host_lower.ends_with(".private")
+            || host_lower.ends_with(".lan")
+            || host_lower == "home.arpa"
+            || host_lower.ends_with(".home.arpa")
+            || host_lower.ends_with(".home")
+            || host_lower.ends_with(".corp")
+        {
+            return true;
+        }
     }
 
     let unbracketed = normalized
@@ -971,10 +1014,20 @@ pub fn is_literal_private_host(host: &str) -> bool {
     if normalized.is_empty() {
         return false;
     }
-    let host_lower = normalized.to_lowercase();
 
-    if host_lower == "localhost" || host_lower.ends_with(".localhost") {
-        return true;
+    // Zero-allocation case-insensitive checks for ASCII hosts; non-ASCII hosts
+    // keep the previous Unicode-aware lowercasing (see `is_private_host`).
+    if normalized.is_ascii() {
+        if normalized.eq_ignore_ascii_case("localhost")
+            || ends_with_ignore_ascii_case(normalized, ".localhost")
+        {
+            return true;
+        }
+    } else {
+        let host_lower = normalized.to_lowercase();
+        if host_lower == "localhost" || host_lower.ends_with(".localhost") {
+            return true;
+        }
     }
 
     let unbracketed = normalized
@@ -3277,6 +3330,30 @@ mod tests {
         assert_eq!(
             select_global_candidate(&map).map(|(c, _)| c),
             Some("Top-LB".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_ends_with_ignore_ascii_case_multibyte_utf8() {
+        assert!(ends_with_ignore_ascii_case("node.LOCAL", ".local"));
+        assert!(ends_with_ignore_ascii_case("测试.local", ".LOCAL"));
+        assert!(!ends_with_ignore_ascii_case("测试.com", ".local"));
+        // Does not panic when byte offset s.len() - suffix.len() lands inside a multi-byte UTF-8 char
+        assert!(!ends_with_ignore_ascii_case("中国", ".com"));
+        assert!(is_private_host("测试.local"));
+        assert!(!is_private_host("测试.com"));
+    }
+
+    #[test]
+    fn test_rule_policy_name_unicode_generic_folding() {
+        // `paß` uppercases to `PASS`, so it is still a generic target even
+        // though the ASCII-only comparison would not match it.
+        assert_eq!(rule_policy_name("DOMAIN-SUFFIX,example.com,paß"), None);
+        // Dotless `ı` uppercases to `I`, so `dırect` is still `DIRECT`.
+        assert_eq!(rule_policy_name("DOMAIN-SUFFIX,example.com,dırect"), None);
+        assert_eq!(
+            rule_policy_name("DOMAIN-SUFFIX,example.com,NodeGroup"),
+            Some("NodeGroup")
         );
     }
 }
