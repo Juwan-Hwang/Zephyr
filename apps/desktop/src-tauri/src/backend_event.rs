@@ -243,6 +243,8 @@ pub mod codes {
     pub const SUB_DIRECT_DOWNLOAD_FAILED: u16 = 2015;
     /// Retrying subscription fetch through local proxy.
     pub const SUB_PROXY_RETRY: u16 = 2016;
+    /// A saved User-Agent failed validation and was replaced with the default.
+    pub const SUB_UA_INVALID: u16 = 2017;
 
     // Prism: 3000-3999
     pub const PRISM_APPLY_FAILED: u16 = 3001;
