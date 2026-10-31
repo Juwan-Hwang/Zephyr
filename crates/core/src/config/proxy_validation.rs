@@ -35,11 +35,11 @@ pub fn validate_proxy_server(server: &str) -> Result<(), AppError> {
         ));
     }
 
-    // Parse host and port from server string
-    let hp = parse_host_port(server)?;
+    // Parse host and port slices from server string without heap allocation
+    let (host, port) = parse_host_port_slices(server)?;
 
     // Reject port 0 — OS would assign a random port, causing confusion
-    if hp.port == "0" {
+    if port == "0" {
         return Err(AppError::ConfigError(
             "Port 0 is not allowed (OS would assign a random port)".to_owned(),
         ));
@@ -47,7 +47,7 @@ pub fn validate_proxy_server(server: &str) -> Result<(), AppError> {
 
     // Validate that host is a loopback address
     // First try to parse as IP address directly
-    if let Ok(ip) = hp.host.parse::<IpAddr>() {
+    if let Ok(ip) = host.parse::<IpAddr>() {
         if !ip.is_loopback() {
             return Err(AppError::ConfigError(
                 "Only loopback addresses (127.0.0.1, ::1) are allowed for security reasons"
@@ -57,24 +57,22 @@ pub fn validate_proxy_server(server: &str) -> Result<(), AppError> {
         return Ok(());
     }
 
-    // Handle special hostname cases
-    let host_lower = hp.host.to_lowercase();
-    if host_lower == "localhost" {
+    // Handle special hostname cases (zero allocation ASCII check)
+    if host.eq_ignore_ascii_case("localhost") {
         return Ok(());
     }
 
     // Reject any other hostname that's not localhost
     // This prevents attacks like "127.0.0.1.evil.com"
     Err(AppError::ConfigError(format!(
-        "Invalid proxy host '{}': only localhost, 127.0.0.1, or ::1 are allowed",
-        hp.host
+        "Invalid proxy host '{host}': only localhost, 127.0.0.1, or ::1 are allowed"
     )))
 }
 
-/// Parse host and port from a proxy server string.
-/// Handles formats: "host:port", "[ipv6]:port", "localhost:port"
-#[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn parse_host_port(server: &str) -> Result<HostPort, AppError> {
+/// Parse host and port from a proxy server string into borrowed slices.
+/// Zero-allocation helper for high-frequency validation routines.
+#[inline]
+fn parse_host_port_slices(server: &str) -> Result<(&str, &str), AppError> {
     if server.is_empty() {
         return Err(AppError::ConfigError(
             "Proxy server address cannot be empty".to_owned(),
@@ -84,16 +82,16 @@ pub fn parse_host_port(server: &str) -> Result<HostPort, AppError> {
     // Handle IPv6 literal with port, e.g. [::1]:8080
     if server.starts_with('[') {
         if let Some(end_bracket) = server.rfind(']') {
-            let host = server[1..end_bracket].to_owned();
+            let host = &server[1..end_bracket];
             let remainder = &server[end_bracket + 1..];
             if let Some(port_str) = remainder.strip_prefix(':') {
-                let port = port_str.trim().to_owned();
+                let port = port_str.trim();
                 if !port.is_empty() {
                     // Validate port is a valid number
                     if port.parse::<u16>().is_err() {
                         return Err(AppError::ParseError(format!("Invalid port number: {port}")));
                     }
-                    return Ok(HostPort { host, port });
+                    return Ok((host, port));
                 }
             }
         }
@@ -104,20 +102,31 @@ pub fn parse_host_port(server: &str) -> Result<HostPort, AppError> {
 
     // Handle IPv4 or hostname
     if let Some(last_colon) = server.rfind(':') {
-        let host = server[..last_colon].trim().to_owned();
-        let port = server[last_colon + 1..].trim().to_owned();
+        let host = server[..last_colon].trim();
+        let port = server[last_colon + 1..].trim();
         if !host.is_empty() && !port.is_empty() {
             // Validate port is a valid number
             if port.parse::<u16>().is_err() {
                 return Err(AppError::ParseError(format!("Invalid port number: {port}")));
             }
-            return Ok(HostPort { host, port });
+            return Ok((host, port));
         }
     }
 
     Err(AppError::ParseError(
         "Invalid proxy server format, expected host:port".to_owned(),
     ))
+}
+
+/// Parse host and port from a proxy server string.
+/// Handles formats: "host:port", "[ipv6]:port", "localhost:port"
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn parse_host_port(server: &str) -> Result<HostPort, AppError> {
+    let (host, port) = parse_host_port_slices(server)?;
+    Ok(HostPort {
+        host: host.to_owned(),
+        port: port.to_owned(),
+    })
 }
 
 #[cfg(test)]
