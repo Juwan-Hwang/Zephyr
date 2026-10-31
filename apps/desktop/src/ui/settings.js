@@ -218,9 +218,13 @@ function initCopyEnvSettings() {
                 copyBtn.dataset._originalText = textSpan.textContent || '';
             }
             textSpan.textContent = t.copyEnvCopied || 'Copied';
+            // The static aria-label would otherwise keep announcing the old
+            // name and hide the "Copied" feedback from screen readers.
+            copyBtn.setAttribute('aria-label', t.copyEnvCopied || 'Copied');
             copyBtn.style.color = 'var(--accent-primary, #007AFF)';
             const timeoutId = setTimeout(() => {
                 textSpan.textContent = copyBtn.dataset._originalText || '';
+                copyBtn.setAttribute('aria-label', getT().copyProxyEnv || 'Copy Proxy Env');
                 copyBtn.style.color = '';
                 delete copyBtn.dataset._originalText;
                 delete copyBtn.dataset._copyTimeout;
@@ -229,6 +233,17 @@ function initCopyEnvSettings() {
         } catch (err) {
             settingsLogger.error('[copy-env] Failed to copy:', err);
             showNotification(`${getT().copyFailed || 'Copy failed'}: ${toError(err).message}`, 'error');
+            // A re-click during the "Copied" window clears the restore timer
+            // up front, so a failed re-click would otherwise leave the button
+            // stuck on "Copied" forever: put the original label back here.
+            if (copyBtn.dataset._originalText) {
+                const textSpan = copyBtn.querySelector('span') || copyBtn;
+                textSpan.textContent = copyBtn.dataset._originalText;
+                copyBtn.setAttribute('aria-label', getT().copyProxyEnv || 'Copy Proxy Env');
+                copyBtn.style.color = '';
+                delete copyBtn.dataset._originalText;
+                delete copyBtn.dataset._copyTimeout;
+            }
         }
     });
 

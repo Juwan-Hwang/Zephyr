@@ -232,7 +232,7 @@
                             <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
                             <span data-i18n="updateAll">Update All</span>
                         </button>
-                        <button id="add-sub-btn" class="btn-accent">
+                        <button id="add-sub-btn" class="btn-accent" title="Add Subscription" data-i18n-title="addSubscription" aria-label="Add Subscription" data-i18n-aria-label="addSubscription">
                             <svg aria-hidden="true" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             <span data-i18n="add">Add</span>
                         </button>
@@ -278,7 +278,7 @@
                             />
                             <!-- New override dropdown -->
                             <div class="relative">
-                                <button id="plugin-new-btn" class="btn-accent text-xs px-3 py-1.5 flex items-center gap-1" aria-haspopup="menu" aria-expanded="false">
+                                <button id="plugin-new-btn" class="btn-accent text-xs px-3 py-1.5 flex items-center gap-1" aria-haspopup="menu" aria-expanded="false" title="New" data-i18n-title="overrideNew" aria-label="New" data-i18n-aria-label="overrideNew">
                                     <svg aria-hidden="true" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                     <span data-i18n="overrideNew">新建</span>
                                 </button>
@@ -399,11 +399,11 @@
                         <span id="rl-stats" class="text-xs text-[var(--text-muted)] tabular-nums whitespace-nowrap truncate"></span>
                     </div>
                     <div class="flex items-center gap-3">
-                        <button type="button" id="rl-btn-new-group" class="btn-ghost">
+                        <button type="button" id="rl-btn-new-group" class="btn-ghost" title="New Group" data-i18n-title="ruleLibraryNewGroup" aria-label="New Group" data-i18n-aria-label="ruleLibraryNewGroup">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/><path d="M12 10v6"/><path d="M9 13h6"/></svg>
                             <span data-i18n="ruleLibraryNewGroup">New Group</span>
                         </button>
-                        <button type="button" id="rl-btn-import" class="btn-accent">
+                        <button type="button" id="rl-btn-import" class="btn-accent" title="Import Rules" data-i18n-title="ruleLibraryImport" aria-label="Import Rules" data-i18n-aria-label="ruleLibraryImport">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             <span data-i18n="ruleLibraryImport">Import Rules</span>
                         </button>
@@ -911,7 +911,7 @@
                                         <button type="button" id="copy-env-format-btn" class="env-format-chip" aria-haspopup="menu" aria-expanded="false" data-i18n-title="copyEnvFormat" title="Shell Format"><span id="copy-env-format-label">Bash</span><svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
                                         <div id="copy-env-format-menu" role="menu" class="hidden absolute end-0 top-[calc(100%+6px)] w-40 rounded-lg border border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-elevated)] shadow-2xl z-30"><div class="menu-scroll"></div></div>
                                     </div>
-                                    <button type="button" id="copy-env-btn" class="row-action"><span data-i18n="copy">Copy</span></button>
+                                    <button type="button" id="copy-env-btn" class="row-action" title="Copy Proxy Env" data-i18n-title="copyProxyEnv" aria-label="Copy Proxy Env" data-i18n-aria-label="copyProxyEnv"><span data-i18n="copy">Copy</span></button>
                                 </div>
                             </div>
 
