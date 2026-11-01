@@ -753,6 +753,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
                 flag.0.store(true, std::sync::atomic::Ordering::SeqCst);
             }
             let state = app.state::<MihomoState>();
+            let _user_stop = crate::core_manager::core::core_process::note_user_stop();
             let _ = crate::core_manager::stop_core_inner(app, &state);
             if let Err(e) = sys_proxy::clear_sys_proxy(app) {
                 emit_warn!(
