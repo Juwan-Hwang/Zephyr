@@ -16,6 +16,9 @@ import { fetchAndConvertSRRules } from '../rules.js';
 import { SVG_ICONS } from './icons.js';
 import { getActiveConfigContent } from './advanced.js';
 import { validateConfig, isPrismRule } from './prism.js';
+import { configUpdateOutcome } from './config-update.js';
+import { toError } from '../types/guards.js';
+import { readRunningProfile } from './running-profile.js';
 
 // --- State ---
 
@@ -23,6 +26,33 @@ import { validateConfig, isPrismRule } from './prism.js';
 let currentConfigRules = [];
 /** @type {string[]} */
 let originalConfigRules = [];
+/**
+ * The profile the rules on the page were read from: '' when read while the
+ * core ran its minimal config, null before a read or when they belong to no
+ * profile known to run.
+ * @type {string|null}
+ */
+let rulesProfile = null;
+
+/** Bumped on each read of the rules: a save started before it owns no baseline. */
+let rulesLoads = 0;
+/** Rules saves that changed the profile or the core: a read that began
+ * before one finished may hold the rules from before it. */
+let rulesSaves = 0;
+
+/**
+ * A save left the rules live in the core but not in the profile (a partial
+ * save): Save stays available, also once the list matches the profile again,
+ * because the core still runs the other list.
+ */
+let profileBehindCore = false;
+/**
+ * Rules a partial save made live that their profile file did not take,
+ * with that profile: the page shows them (still unsaved) when it is read
+ * again while that profile runs, not the file's older rules.
+ * @type {{ profile: string, rules: any[] } | null}
+ */
+let unsavedLiveRules = null;
 
 // --- Public API ---
 
@@ -124,15 +154,39 @@ export async function initRulesPage() {
 // --- Internal ---
 
 async function loadRules() {
+    rulesLoads += 1;
+    // Reads can overlap (the page reopened, a refused save reading again):
+    // only the newest one fills the page, so an older read finishing last
+    // never puts another profile's rules under the newer owner.
+    const load = rulesLoads;
+    const savesAtLoad = rulesSaves;
+    profileBehindCore = false;
     try {
-        const activeConfig = await getActiveConfigContent();
+        // The rules of the profile the core runs (which can be one not
+        // stored as the active profile yet). With no profile known or its
+        // file unreadable, the stored profile's rules are shown and owned
+        // by no profile, so they cannot be saved (see `rulesSaveRefused`).
+        const running = await readRunningProfile();
+        const activeConfig = running
+            ? await invoke(COMMANDS.READ_CONFIG_FILE, { configPath: running })
+                .then((/** @type {string} */ content) => ({ configName: running, content }))
+                .catch(() => getActiveConfigContent())
+            : await getActiveConfigContent();
+        if (load !== rulesLoads) return;
+        // A save finished while this read ran: what it read may predate the
+        // saved rules, so it reads again.
+        if (savesAtLoad !== rulesSaves) {
+            await loadRules();
+            return;
+        }
         if (!activeConfig) {
             currentConfigRules = [];
             originalConfigRules = [];
+            rulesProfile = null;
             void renderRulesList();
             return;
         }
-        const { content } = activeConfig;
+        const { content, configName } = activeConfig;
 
         if (typeof jsyaml === 'undefined') {
             const t = /** @type {any} */ (translations)[currentLang];
@@ -142,9 +196,20 @@ async function loadRules() {
         const _loadedConfig = jsyaml.load(content);
         currentConfigRules = (/** @type {any} */ (_loadedConfig)).rules || [];
         originalConfigRules = [...currentConfigRules];
+        if (running && configName === running) rulesProfile = running;
+        else rulesProfile = running === '' ? '' : null;
+        // A partial save of this profile left the core on newer rules than
+        // its file: those are shown, with Save kept for the retry.
+        if (unsavedLiveRules && rulesProfile && unsavedLiveRules.profile === rulesProfile) {
+            currentConfigRules = [...unsavedLiveRules.rules];
+            profileBehindCore = true;
+        } else if (rulesProfile) {
+            unsavedLiveRules = null;
+        }
         void renderRulesList();
         updateSaveRulesBtnVisibility();
     } catch (err) {
+        if (load !== rulesLoads) return;
         showNotification(/** @type {any} */ (translations)[currentLang].notifRulesLoadFailed, 'error');
         rulesLogger.error('Failed to load rules', err);
     }
@@ -295,6 +360,87 @@ async function importSRRules() {
     }
 }
 
+/**
+ * Whether the core rejects the config it runs once it carries `rules`. That
+ * is the run config: the profile with its overrides applied (groups an
+ * override adds included), whose rules the save replaces before the core
+ * reloads it. Only when it accepts that config as it is: a config the check
+ * cannot pass anyway (a provider path it cannot reach from the check, say)
+ * tells nothing about the rules, and the check being unavailable or the
+ * config unreadable skips it.
+ * @param {unknown} config the run config as read_config returns it
+ * @param {any[]} rules
+ * @returns {Promise<boolean>}
+ */
+async function rulesRejected(config, rules) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+        rulesLogger.warn('Rules validation skipped: the running config could not be read');
+        return false;
+    }
+    try {
+        if (await validateConfig(jsyaml.dump({ ...config, rules }))) return false;
+        if (!await validateConfig(jsyaml.dump(config))) {
+            rulesLogger.warn('Rules validation inconclusive: the running config fails the check without them');
+            return false;
+        }
+        return true;
+    } catch (validationErr) {
+        rulesLogger.warn('Rules validation skipped:', validationErr);
+        return false;
+    }
+}
+
+/**
+ * The backend's error when the running profile changed before the save
+ * (config_manager.rs PROFILE_CHANGED_MEANWHILE); nothing was saved.
+ */
+export const PROFILE_CHANGED_MEANWHILE = 'the running profile changed before the save; nothing was saved';
+
+function notifyProfileChanged() {
+    showNotification(/** @type {any} */ (translations)[currentLang].notifRulesProfileChanged
+        || 'The active profile changed while the rules were checked, so they were not saved.', 'warning');
+}
+
+function notifyNoProfile() {
+    showNotification(/** @type {any} */ (translations)[currentLang].notifRulesNoProfile
+        || 'No profile is running (the core runs its minimal config), so the rules were not saved.', 'warning');
+}
+
+/**
+ * Whether the rules on the page cannot be saved while `running` runs:
+ * which profile runs is unknown, none does (the minimal config), or the
+ * rules belong to another profile or to none known (switched away since
+ * they were read, or read when the running profile was unknown): saving
+ * them would replace the running profile's rules, so they are read again.
+ * @param {string|null} running the running profile, read uncached
+ * @param {string|null} owner the profile the rules were read from, taken
+ *   with them when the save began
+ * @returns {Promise<boolean>}
+ */
+async function rulesSaveRefused(running, owner) {
+    if (running === null) {
+        notifyProfileUnknown();
+        return true;
+    }
+    if (running === '') {
+        notifyNoProfile();
+        // The rules on the page belong to no running profile now: they are
+        // read again, so Save no longer offers them.
+        if (owner !== '') await loadRules();
+        return true;
+    }
+    if (owner === running) return false;
+    if (owner === null) notifyProfileUnknown();
+    else notifyProfileChanged();
+    await loadRules();
+    return true;
+}
+
+function notifyProfileUnknown() {
+    showNotification(/** @type {any} */ (translations)[currentLang].notifRulesProfileUnknown
+        || 'The active profile could not be read, so the rules were not saved. Try saving again.', 'warning');
+}
+
 async function saveRules() {
     const btn = /** @type {HTMLButtonElement} */ (document.getElementById('save-rules-btn'));
     if (!btn) return;
@@ -304,40 +450,146 @@ async function saveRules() {
     btn.disabled = true;
 
     try {
-        const activeConfig = await getActiveConfigContent();
-        if (!activeConfig) {
-            throw new Error("No valid configuration file found to save rules.");
-        }
-        const { configName: _configName, content } = activeConfig;
+        // The list this save sends and the profile it was read from, taken
+        // together before any await: a reload for another profile meanwhile
+        // replaces both, and its rules must not go out under this check.
+        // Edits made while the save is in flight are not in it, so they stay
+        // unsaved (Save stays visible) when it ends.
+        const savingRules = [...currentConfigRules];
+        const ownerAtSave = rulesProfile;
+        const loadAtSave = rulesLoads;
+        // The profile these rules are checked against; a switch while the
+        // check runs would otherwise save them into a profile never checked.
+        // Unreadable: which profile they would land in cannot be told.
+        const profileBefore = await readRunningProfile();
+        if (await rulesSaveRefused(profileBefore, ownerAtSave)) return;
+        // The config the core runs now: the save replaces its rules and the
+        // core reloads it. Unreadable: the check is skipped, the backend
+        // still saves and reports what it could not save.
+        /** @type {unknown} */
+        const runningConfig = await invoke(COMMANDS.READ_CONFIG).catch((readErr) => {
+            rulesLogger.warn('Reading the running config for the rules check failed:', readErr);
+            return null;
+        });
 
         if (typeof jsyaml === 'undefined') {
             const t = /** @type {any} */ (translations)[currentLang];
             showNotification(t.jsYamlSaveError || 'js-yaml is not loaded. Cannot save/load rules.', 'error');
             return;
         }
-        const _saveConfig = jsyaml.load(content);
+        // The profile as the next start checks it: without the overrides,
+        // which apply only after that check. Unreadable: that check is skipped.
+        /** @type {unknown} */
+        const profileConfig = await invoke(COMMANDS.READ_CONFIG_FILE, { configPath: profileBefore })
+            .then((content) => jsyaml.load(String(content)))
+            .catch((readErr) => {
+                rulesLogger.warn('Reading the profile for the rules check failed:', readErr);
+                return null;
+            });
 
-        // Validate rules config before applying
-        try {
-            const testConfig = jsyaml.dump({ rules: currentConfigRules });
-            const isValid = await validateConfig(testConfig);
-            if (!isValid) {
-                rulesLogger.warn('Rules validation failed, applying anyway');
-            }
-        } catch (validationErr) {
-            rulesLogger.warn('Rules validation skipped:', validationErr);
+        // Validate before applying: the whole running config with the new
+        // rules, since rules name its groups and providers (rules alone
+        // would fail on every policy that is a group); and the profile with
+        // them, since a rule that names a group only an override adds passes
+        // the first and fails the check the next start of the profile runs.
+        if (await rulesRejected(runningConfig, savingRules) || await rulesRejected(profileConfig, savingRules)) {
+            // Not saved: the next start of the profile would fail its check.
+            showNotification(/** @type {any} */ (translations)[currentLang].notifRulesInvalid
+                || 'The core rejected the profile with these rules, so they were not saved.', 'error');
+            return;
+        }
+        const profileNow = await readRunningProfile();
+        if (profileNow === null) {
+            notifyProfileUnknown();
+            return;
+        }
+        if (profileNow !== profileBefore) {
+            notifyProfileChanged();
+            return;
         }
 
-        const result = await invoke(COMMANDS.UPDATE_CONFIG, { patch: { rules: currentConfigRules } });
-        await closeAllConnections();
+        /** @type {any} */
+        let result;
+        try {
+            // The backend refuses the save, under the start lock, once
+            // another profile runs: a switch can still land after the read
+            // above. An empty name (the minimal config runs) is refused once
+            // a profile runs, too.
+            result = await invoke(COMMANDS.UPDATE_CONFIG, {
+                patch: { rules: savingRules },
+                expectProfile: profileBefore,
+            });
+        } catch (saveErr) {
+            // Not a parse failure: the backend could not save them (the core
+            // is still starting, say). Show its reason; the rules stay unsaved.
+            rulesLogger.error('Save failed', saveErr);
+            if (String(saveErr).includes(PROFILE_CHANGED_MEANWHILE)) {
+                notifyProfileChanged();
+                return;
+            }
+            showNotification(toError(saveErr).message || /** @type {any} */ (translations)[currentLang].notifRulesParseFailed, 'error');
+            return;
+        }
+        const outcome = configUpdateOutcome(/** @type {any} */ (result));
+        if (outcome !== 'failed') rulesSaves += 1;
+        // Kept across page reads too: the core runs these rules, the
+        // profile file still has the older ones. Recorded before any await,
+        // so a read of the page while connections close shows them.
+        if (outcome === 'partial' && ownerAtSave) {
+            unsavedLiveRules = { profile: ownerAtSave, rules: savingRules };
+        } else if (outcome !== 'failed' && unsavedLiveRules?.profile === ownerAtSave) {
+            unsavedLiveRules = null;
+        }
+        // A read of the same profile that finished while the save ran may
+        // have found the file's older rules. Unless the page was edited since
+        // that read, it shows what was saved: as saved, or as unsaved after a
+        // partial save (the core runs them, the profile file does not).
+        if (outcome !== 'failed' && loadAtSave !== rulesLoads && ownerAtSave
+            && rulesProfile === ownerAtSave && !profileBehindCore
+            && JSON.stringify(currentConfigRules) === JSON.stringify(originalConfigRules)
+            && JSON.stringify(currentConfigRules) !== JSON.stringify(savingRules)) {
+            currentConfigRules = [...savingRules];
+            if (outcome === 'partial') {
+                profileBehindCore = true;
+            } else {
+                originalConfigRules = [...savingRules];
+            }
+            void renderRulesList();
+            updateSaveRulesBtnVisibility();
+        }
 
-        originalConfigRules = [...currentConfigRules];
-        updateSaveRulesBtnVisibility();
+        // Connections that keep the old routing are closed once the core
+        // runs the new rules; while it does not (a restart is still needed),
+        // closing them would only cut traffic. A failed close is a leftover,
+        // not a failed save.
+        if ((/** @type {any} */ (result))?.hot_reload_success) {
+            await closeAllConnections().catch((closeErr) => rulesLogger.warn('Failed to close connections after saving rules', closeErr));
+        }
 
-        if (result && (/** @type {any} */ (result)).hot_reload_success) {
+        // The page was read again meanwhile (reopened for another profile):
+        // its baseline is that read's, not this save's.
+        if (loadAtSave === rulesLoads) {
+            // A partial save left the active profile without the rules: keep
+            // them marked unsaved so Save stays available for a retry.
+            if (outcome === 'partial') {
+                profileBehindCore = true;
+            } else if (outcome !== 'failed') {
+                originalConfigRules = savingRules;
+                profileBehindCore = false;
+            }
+            updateSaveRulesBtnVisibility();
+        }
+
+        if (outcome === 'applied') {
             showNotification(/** @type {any} */ (translations)[currentLang].notifRulesSaved, 'success');
+        } else if (outcome === 'failed') {
+            // Neither the core nor the active profile took the rules.
+            showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesParseFailed, 'error');
+        } else if (outcome === 'partial') {
+            // Live now, but the active profile did not take the rules.
+            showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'warning');
         } else {
-            showNotification(result?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'info');
+            showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'info');
         }
     } catch (err) {
         showNotification(/** @type {any} */ (translations)[currentLang].notifRulesParseFailed, 'error');
@@ -353,7 +605,8 @@ function updateSaveRulesBtnVisibility() {
     const saveBtn = document.getElementById('save-rules-btn');
     if (!saveBtn) return;
 
-    const isModified = JSON.stringify(currentConfigRules) !== JSON.stringify(originalConfigRules);
+    const isModified = profileBehindCore
+        || JSON.stringify(currentConfigRules) !== JSON.stringify(originalConfigRules);
 
     if (isModified) {
         saveBtn.classList.remove('hidden');

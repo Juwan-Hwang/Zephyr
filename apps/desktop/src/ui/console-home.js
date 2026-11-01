@@ -21,7 +21,8 @@
  * view-switch in the header — mirrors the original homepage layout.
  */
 
-import { getConnections, testProxy, getLatencyTestSignal, resetLatencyTestController, switchProxyResult, getConfig, invoke, closeAllConnections, getProxiesMerged } from '../api.js';
+import { getConnections, testProxy, getLatencyTestSignal, resetLatencyTestController, switchProxyResult, SWITCH_BUSY, isLatestSwitch, coreReplacements, getConfig, invoke, closeAllConnections, getProxiesMerged } from '../api.js';
+import { noNetworkChangeSince } from './network-change.js';
 import { appStore } from './state.js';
 
 import { Bus, Events } from './events.js';
@@ -37,7 +38,8 @@ import { t, applyTranslations } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
 import { syncCoreConfig, resolveLeafNode, notifySwitchFailed } from './proxies.js';
 import { switchToConfig } from './lifecycle.js';
-import { activeProfile, currentProfile } from './active-profile.js';
+import { currentProfile } from './active-profile.js';
+import { readRunningProfile } from './running-profile.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { saveProxySelection } from './proxy-memory.js';
 import { invalidateProxiesCache, invalidateSettingsCache, invalidateConfigsCache, getSettingsCached } from './cache.js';
@@ -48,6 +50,17 @@ import { setSysProxyEnabled, refreshSysProxyStatus } from './sysproxy.js';
 import { syncNoSubscriptionState } from './no-subscription.js';
 import { createProcessIcon } from './process-icon.js';
 import { mirrorTunToggle } from './tun.js';
+
+/**
+ * The profile a node switch is filed under, read when it is clicked: a
+ * failed read is no profile, and then nothing is saved.
+ * @returns {Promise<string>}
+ */
+async function profileForSwitch() {
+    // Live: a cached read could still name the profile a switch replaced.
+    return (await readRunningProfile()) ?? '';
+}
+
 
 /** Map app language code to BCP-47 locale tag for Intl APIs. */
 const LOCALE_TAGS = { en: 'en', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', ru: 'ru-RU', es: 'es-ES', fa: 'fa-IR', tk: 'tk-TM', my: 'my-MM', ar: 'ar-SA', ur: 'ur-PK', sw: 'sw-KE', tr: 'tr-TR', vi: 'vi-VN' };
@@ -1256,7 +1269,20 @@ async function selectPickerNode(i) {
             showNotification(t('notifSwitchFailed'), 'error');
             return;
         }
-        const { ok: success, reason } = await switchProxyResult(targetGroup, n.name);
+        // The profile the click was made under, read in the switch's turn so
+        // a later click cannot go out first: a profile switch while the
+        // request runs must not file this node under the one that replaced it.
+        const coreAtClick = coreReplacements();
+        const { ok: success, reason, prepared: profileAtClick = '', seq: switchSeq } = await switchProxyResult(targetGroup, n.name, {
+            prepare: profileForSwitch,
+            // A change that began meanwhile could carry its own node over
+            // this switch, or take it to the core that replaces this one.
+            canSend: noNetworkChangeSince(),
+        });
+        if (reason === SWITCH_BUSY) {
+            showNotification(t('consoleSubUpdateBusy'), 'info');
+            return;
+        }
         if (!success) {
             notifySwitchFailed(reason);
             return;
@@ -1264,15 +1290,23 @@ async function selectPickerNode(i) {
         // Switch succeeded — post-switch steps are non-critical.
         activeNodeIdx = i;
         invalidateProxiesCache();
+        // A core that replaced the one switched (a restart meanwhile) runs
+        // its own selection: its connections stay, nothing is recorded.
+        if (coreReplacements() !== coreAtClick) {
+            renderPicker();
+            setPicker(false);
+            return;
+        }
         try {
             await closeAllConnections();
         } catch (e) {
             consoleLogger.warn('Failed to close connections after node switch', e);
         }
         try {
-            const settings = await getSettingsCached();
-            const profileName = activeProfile(settings, 'config.yaml');
-            if (profileName) {
+            const profileName = await profileForSwitch();
+            // Rapid clicks can finish out of order: only the newest switch
+            // that can stand, from any surface, is recorded.
+            if (profileName && profileName === profileAtClick && isLatestSwitch(targetGroup, switchSeq)) {
                 await saveProxySelection(profileName, { node: n.name, group: targetGroup });
             }
         } catch (e) { consoleLogger.warn('Failed to save proxy selection', e); }

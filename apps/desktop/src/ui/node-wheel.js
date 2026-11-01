@@ -4,18 +4,30 @@
  * Extracted from ui.js for modularity.
  */
 
-import { getProxies, switchProxyResult, abortLatencyTests, closeAllConnections } from '../api.js';
+import { getProxies, switchProxyResult, SWITCH_BUSY, abortLatencyTests, closeAllConnections, isLatestSwitch, coreReplacements } from '../api.js';
+import { noNetworkChangeSince } from './network-change.js';
 import { nodeWheelLogger } from '../utils/logger.js';
 import { t } from '../i18n.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { sortProxiesByLatency, syncCoreConfig, renderProxies, notifySwitchFailed, resolveLeafNode } from './proxies.js';
 import { appStore } from './state.js';
-import { invalidateProxiesCache, getSettingsCached } from './cache.js';
-import { activeProfile } from './active-profile.js';
+import { invalidateProxiesCache } from './cache.js';
+import { readRunningProfile } from './running-profile.js';
 import { saveProxySelection } from './proxy-memory.js';
 import { resetObservedGroup } from './observed-group.js';
 import { getDelayColorClass } from '../utils/format.js';
 import { showNotification } from './notifications.js';
+
+/**
+ * The profile a node switch is filed under, read when it is clicked: a
+ * failed read is no profile, and then nothing is saved.
+ * @returns {Promise<string>}
+ */
+async function profileForSwitch() {
+    // Live: a cached read could still name the profile a switch replaced.
+    return (await readRunningProfile()) ?? '';
+}
+
 
 /** Hover dwell before the wheel opens (ms). */
 export const WHEEL_HOVER_OPEN_DELAY = 300;
@@ -154,23 +166,52 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
     // Increment BEFORE async operations to maintain click order
     const currentSession = ++_switchSessionCounter;
     _pendingSessions.add(currentSession);
+    // The core the switch was made on: one that replaced it meanwhile runs
+    // its own selection and keeps its connections.
+    const coreAtClick = coreReplacements();
 
     // Use uiGroupName from appStore for accurate group targeting
     const targetGroup = appStore.get('uiGroupName') || mainGroup;
     let success = false;
     /** @type {unknown} */
     let failure = null;
+    // The profile the click was made under, read in the switch's turn so a
+    // later click cannot go out first: a profile switch while the request
+    // runs must not file this node under the one that replaced it.
+    let profileAtClick = '';
+    /** @type {number | undefined} */
+    let switchSeq;
     try {
-        ({ ok: success, reason: failure } = await switchProxyResult(targetGroup, name));
+        ({ ok: success, reason: failure, prepared: profileAtClick = '', seq: switchSeq } = await switchProxyResult(targetGroup, name, {
+            prepare: profileForSwitch,
+            // A change that began meanwhile could carry its own node over
+            // this switch, or take it to the core that replaces this one.
+            canSend: noNetworkChangeSince(),
+        }));
     } catch (error) {
         failure = error;
         nodeWheelLogger.error('Node switch failed:', error);
+    }
+    if (failure === SWITCH_BUSY) {
+        _pendingSessions.delete(currentSession);
+        if (_switchSessionCounter === currentSession && nameEl?.textContent === t('switching')) {
+            nameEl.textContent = previousName;
+        }
+        showNotification(t('consoleSubUpdateBusy'), 'info');
+        return;
     }
     _pendingSessions.delete(currentSession);
     if (success) {
         // Responses can land out of order: only a newer accepted switch supersedes this one.
         if (currentSession > _acceptedSession) _acceptedSession = currentSession;
-        await afterWheelSwitch(targetGroup, name, currentSession);
+        if (coreReplacements() !== coreAtClick) {
+            invalidateProxiesCache();
+            if (_switchSessionCounter === currentSession && nameEl?.textContent === t('switching')) {
+                nameEl.textContent = previousName;
+            }
+            return;
+        }
+        await afterWheelSwitch(targetGroup, name, currentSession, profileAtClick, switchSeq);
         return;
     }
     // A GLOBAL selection is routed through the backend and reported as a
@@ -192,8 +233,10 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
  * @param {string} targetGroup
  * @param {string} name
  * @param {number} currentSession
+ * @param {string} profileAtClick the profile the switch was clicked under
+ * @param {number} [switchSeq] the switch's number, for isLatestSwitch
  */
-async function afterWheelSwitch(targetGroup, name, currentSession) {
+async function afterWheelSwitch(targetGroup, name, currentSession, profileAtClick, switchSeq) {
     invalidateProxiesCache();
     // The observed exit node described the old selection; drop it so the pill
     // and home figures follow the new node (the watcher re-confirms it if active).
@@ -207,9 +250,10 @@ async function afterWheelSwitch(targetGroup, name, currentSession) {
         // A later click that fails must not drop this save: the core still runs this
         // node. Only a newer switch the core also accepted makes it stale.
         if (_acceptedSession !== currentSession) return;
-        const settings = await getSettingsCached();
-        const profileName = activeProfile(settings, 'config.yaml');
-        if (profileName && _acceptedSession === currentSession) {
+        const profileName = await profileForSwitch();
+        // A later switch from another surface (a node card) stands over this one too.
+        if (profileName && profileName === profileAtClick && _acceptedSession === currentSession
+            && isLatestSwitch(targetGroup, switchSeq)) {
             await saveProxySelection(profileName, { node: name, group: targetGroup });
         }
     }).catch((e) => {

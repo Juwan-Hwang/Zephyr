@@ -241,7 +241,7 @@ Desktop package commands:
 pnpm --filter @zephyr/desktop typecheck
 pnpm --filter @zephyr/desktop test
 pnpm --filter @zephyr/desktop lint
-pnpm --filter @zephyr/desktop build:css
+pnpm --filter @zephyr/desktop build:frontend   # CSS + CodeMirror bundle (src/cm6.bundle.js is committed)
 ```
 
 Rust-side verification:

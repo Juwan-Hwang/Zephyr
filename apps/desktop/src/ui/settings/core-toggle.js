@@ -1,0 +1,247 @@
+// @ts-check
+/**
+ * A settings switch that changes the core config (unified delay, IPv6, allow
+ * LAN): applied through `update_config`, then kept in settings.json, which
+ * overrides every profile when the core starts.
+ *
+ * @module ui/settings/core-toggle
+ */
+
+/** The request chain of each switch, so its saves run in click order. */
+const chains = new WeakMap();
+/** The number of the latest click of each switch. */
+const clicks = new WeakMap();
+/** Saves not finished yet, of every switch. */
+const pending = new Set();
+/** Saves not finished yet, per switch. */
+const pendingOf = new WeakMap();
+/** The value the core last took for each switch. */
+const applied = new WeakMap();
+/**
+ * Switches whose last save needs a core restart: the core still runs the
+ * recorded value, which the switch no longer shows, so a later click does
+ * not take what the switch showed as what the core runs.
+ * @type {WeakSet<object>}
+ */
+const awaitingRestart = new WeakSet();
+/**
+ * While Restore Defaults runs: resolves when it is done. A click meanwhile
+ * saves once it is, with the value the switch shows then.
+ * @type {Promise<void>|null}
+ */
+let paused = null;
+/** Restore Defaults runs not released yet: the switches stay paused until none is left. */
+let pauses = 0;
+/** Restore Defaults runs started so far. */
+let resets = 0;
+/**
+ * What each switch showed before its first click held by a reset: clicks
+ * held do not reach the core, so this is still what it runs.
+ */
+let shownBeforeHeld = new WeakMap();
+
+/**
+ * @typedef {Object} CoreToggleDeps
+ * @property {(patch: Record<string, any>) => Promise<boolean|'restart'|'partial'>} saveCore
+ *   apply a patch to the core (shows its own notice for 'restart' / 'partial' / false)
+ * @property {(value: boolean) => Promise<void>} persist write the choice to settings.json; rejects on failure
+ * @property {(message: string, kind: 'error'|'info'|'success'|'warning') => void} notify
+ * @property {() => Record<string, string>} texts the current translations
+ */
+
+/**
+ * Save the value the switch shows now. Saves of one switch run one after
+ * another in click order, so the core ends on the last click. A failed save
+ * puts the switch back only when it was the last click: a newer one decides
+ * what the switch ends on (on, off, on again with the first save failing
+ * leaves it on, as the last save sets). It goes back to the value the core
+ * last took, which after queued clicks need not be the opposite of the
+ * failed one. When settings.json does not take the value, the core
+ * runs it but the next start would bring the old one back, so the save is
+ * reported as failed instead of applied.
+ * @param {{ checked: boolean }} toggle
+ * @param {string} coreKey the core config key (`ipv6`)
+ * @param {CoreToggleDeps} deps
+ * @returns {Promise<boolean|'restart'|'partial'|'unsaved'>} the outcome of this click
+ */
+export function applyCoreToggle(toggle, coreKey, deps) {
+    const wanted = toggle.checked;
+    // With no save of this switch running, it showed what the core runs
+    // before this click. Not while Restore Defaults runs: the switch then
+    // shows the default it is setting, and the reset noted what the core
+    // runs before changing it (noteCoreToggleApplied).
+    if (!pendingOf.get(toggle) && paused === null
+        && !(awaitingRestart.has(toggle) && applied.has(toggle))) applied.set(toggle, !wanted);
+    pendingOf.set(toggle, (pendingOf.get(toggle) ?? 0) + 1);
+    const click = (clicks.get(toggle) ?? 0) + 1;
+    clicks.set(toggle, click);
+    const isLatest = () => clicks.get(toggle) === click;
+    const previous = chains.get(toggle) || Promise.resolve();
+    const gate = paused;
+    if (gate !== null && !shownBeforeHeld.has(toggle)) shownBeforeHeld.set(toggle, !wanted);
+    const run = previous.then(async () => {
+        if (gate === null) return saveCoreToggle(toggle, coreKey, wanted, deps, isLatest);
+        // Clicked during a reset: the reset may have set the switch since,
+        // or the click came after it; either way what it shows now is newest.
+        await gate;
+        return saveCoreToggle(toggle, coreKey, toggle.checked, deps, isLatest);
+    });
+    const settled = run.catch(() => {});
+    chains.set(toggle, settled);
+    pending.add(settled);
+    void settled.then(() => {
+        pending.delete(settled);
+        pendingOf.set(toggle, (pendingOf.get(toggle) ?? 1) - 1);
+    });
+    return run;
+}
+
+/**
+ * @typedef {Object} CoreToggleMark
+ * @property {number} clicks the switch's clicks so far
+ * @property {number} resets Restore Defaults runs started so far
+ * @property {boolean} busy a save of the switch, or a reset, was running
+ */
+
+/**
+ * A mark for {@link coreToggleChangedSince}: where a read of the switch's
+ * value starts.
+ * @param {{ checked: boolean }} toggle
+ * @returns {CoreToggleMark}
+ */
+export function coreToggleMark(toggle) {
+    return {
+        clicks: clicks.get(toggle) ?? 0,
+        resets,
+        busy: (pendingOf.get(toggle) ?? 0) > 0 || paused !== null,
+    };
+}
+
+/**
+ * Whether the switch may show something newer than a value read since
+ * `mark` was taken (the settings page loading), so that value must not be
+ * put on it: the switch was clicked, Restore Defaults ran or is running, a
+ * save of it is still running, or one was running when the mark was taken
+ * (the read may hold the value from before that save, also once it has
+ * finished).
+ * @param {{ checked: boolean }} toggle
+ * @param {CoreToggleMark} mark coreToggleMark(toggle) from before the read
+ * @returns {boolean}
+ */
+export function coreToggleChangedSince(toggle, mark) {
+    return mark.busy
+        || mark.resets !== resets
+        || (clicks.get(toggle) ?? 0) !== mark.clicks
+        || (pendingOf.get(toggle) ?? 0) > 0
+        || paused !== null;
+}
+
+/**
+ * Record the value the core took for the switch outside its own saves
+ * (Restore Defaults sends its defaults in one core update): a click whose
+ * save fails afterwards puts the switch back to this value.
+ * @param {{ checked: boolean }} toggle
+ * @param {boolean} value
+ */
+export function noteCoreToggleApplied(toggle, value) {
+    applied.set(toggle, value);
+    awaitingRestart.delete(toggle);
+}
+
+/**
+ * The value the core last took for the switch, when one is recorded.
+ * @param {{ checked: boolean }} toggle
+ * @returns {boolean|undefined}
+ */
+export function coreToggleApplied(toggle) {
+    return applied.get(toggle);
+}
+
+/**
+ * The value the core runs for the switch once its saves have finished (the
+ * reset's pause waits for them): the value the core last accepted, which a
+ * click held by the reset has not changed. Without a recorded one, what the
+ * switch showed before such a click.
+ * @param {{ checked: boolean }} toggle
+ * @returns {boolean}
+ */
+export function coreToggleShownBeforeHeld(toggle) {
+    if (applied.has(toggle)) return Boolean(applied.get(toggle));
+    return shownBeforeHeld.has(toggle) ? Boolean(shownBeforeHeld.get(toggle)) : toggle.checked;
+}
+
+/**
+ * Whether the switch was clicked since the running reset paused the saves:
+ * that click is held, and the switch keeps showing what the user chose.
+ * @param {{ checked: boolean }} toggle
+ * @returns {boolean}
+ */
+export function coreToggleClickedDuringReset(toggle) {
+    return shownBeforeHeld.has(toggle);
+}
+
+/**
+ * Pause switch saves for Restore Defaults: resolves once every save started
+ * so far has finished, so none lands on top of the reset, and holds the ones
+ * clicked from now on until the returned release is called, so none races
+ * the reset's own core update and settings save.
+ * @returns {Promise<() => void>} release
+ */
+export async function pauseCoreToggles() {
+    const started = [...pending];
+    resets += 1;
+    pauses += 1;
+    /** @type {() => void} */
+    let open = () => {};
+    const outer = paused;
+    const gate = new Promise((resolve) => { open = () => resolve(undefined); });
+    // Clicks held now wait for every reset still running, this one too.
+    paused = outer === null ? gate : Promise.all([outer, gate]).then(() => undefined);
+    await Promise.all(started);
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        open();
+        pauses -= 1;
+        if (pauses === 0) {
+            paused = null;
+            shownBeforeHeld = new WeakMap();
+        }
+    };
+}
+
+/**
+ * @param {{ checked: boolean }} toggle
+ * @param {string} coreKey
+ * @param {boolean} wanted
+ * @param {CoreToggleDeps} deps
+ * @param {() => boolean} isLatest whether no click came after this one
+ * @returns {Promise<boolean|'restart'|'partial'|'unsaved'>}
+ */
+async function saveCoreToggle(toggle, coreKey, wanted, deps, isLatest) {
+    const ok = await deps.saveCore({ [coreKey]: wanted });
+    const t = deps.texts() || {};
+    if (!ok) {
+        // saveCore has told the user why already: no second error toast.
+        if (isLatest()) toggle.checked = applied.get(toggle) ?? !wanted;
+        return false;
+    }
+    // 'restart': the files hold the value, the core runs the old one until
+    // it restarts, so the record of what it runs stays as it was.
+    if (ok === 'restart') {
+        awaitingRestart.add(toggle);
+    } else {
+        applied.set(toggle, wanted);
+        awaitingRestart.delete(toggle);
+    }
+    try {
+        await deps.persist(wanted);
+    } catch {
+        deps.notify(t.saveFailed || 'Failed to save', 'warning');
+        return 'unsaved';
+    }
+    // 'restart' / 'partial': kept, with the notice saveCore already showed.
+    if (ok === true) deps.notify(t.settingApplied || 'Applied', 'success');
+    return ok;
+}
