@@ -7,7 +7,7 @@
  */
 
 import { decideGroupMismatch } from './group-mismatch.js';
-import { switchProxy, switchProxyResult, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies, getProxiesMerged, SPECIAL_PROXY_NAMES } from '../api.js';
+import { switchProxy, switchProxyResult, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies, getProxiesMerged, SPECIAL_PROXY_NAMES, proxySwitchMark, proxySwitchedSince } from '../api.js';
 import { proxyLogger } from '../utils/logger.js';
 import { getDelayColorClass } from '../utils/format.js';
 import { buildLatencyPriorityQueue } from '../utils/array.js';
@@ -24,10 +24,12 @@ import { smartScore, smartNextInterval, smartRank, smartConfig, failoverReport }
 import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType, isGroup as hasGroupMembers, isNonProxyExit, isRealOutboundNode, providerMembersPending, providerPageState } from './proxy-groups.js';
 import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
+import { knownSelectionRevision, knownSelectionChangedSince } from './known-selection.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
 import { queueSmartConfigWrite, syncSmartShown, readAutoTestEnabled } from './settings/auto-switch.js';
 import { postRestartRecovery, restartedProfile, withPageBusy } from './lifecycle.js';
 import { activeProfile, currentProfile } from './active-profile.js';
+import { readRunningProfile } from './running-profile.js';
 import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
 import { renderTunStatus } from './tun-status.js';
 import { updateModeUI } from './modes.js';
@@ -1102,11 +1104,14 @@ async function reportFailover(name, success) {
     const activeLeaf = currentNode ? resolveLeafNode(currentNode, proxyMap) : null;
     const activeNode = activeLeaf || currentNode;
     if (!activeNode || (name !== activeNode && name !== currentNode)) return;
+    // The profile the result belongs to: an action for it does nothing once
+    // another profile runs (its same-named group is another group).
+    const testedProfile = await readRunningProfile();
     try {
         const action = await failoverReport(name, success);
         if (action) {
             void (async () => {
-                try { await handleFailoverAction(action); }
+                try { await handleFailoverAction(action, testedProfile); }
                 catch { /* ignore failover action errors */ }
             })();
         }
@@ -1117,63 +1122,177 @@ async function reportFailover(name, success) {
 let _isFailovering = false;
 
 /**
- * Handle a failover action returned by the failover engine.
- * Switches to the best available node (lowest latency) in the current group.
- * @param {{failedNode: string, failureCount: number, target: string}} action
+ * Outbound types failover never switches to: none of them is a proxy. DIRECT
+ * would send the traffic out unproxied, the others drop it or hand it back to
+ * the rules (PASS, PASS-RULE, Rematch). Compared lowercased without
+ * separators (`Reject-Drop` = `rejectdrop`, `PassRule` = `passrule`).
  */
-async function handleFailoverAction(action) {
+const NOT_FAILOVER_TARGETS = new Set(['direct', 'reject', 'rejectdrop', 'compatible', 'pass', 'passrule', 'rematch', 'dns']);
+
+/**
+ * Whether the proxy entry is one of the outbounds failover never picks.
+ * @param {any} entry
+ * @returns {boolean}
+ */
+function isNotFailoverTarget(entry) {
+    const type = String(entry?.type ?? '').toLowerCase().replace(/[^a-z]/g, '');
+    return NOT_FAILOVER_TARGETS.has(type);
+}
+
+/**
+ * The nodes failover may switch the group to: not the failed node, nor one
+ * that leads to it, nor an outbound that is not a proxy, nor a nested group
+ * that currently leads to one (a selector sitting on DIRECT).
+ * @param {{ all: string[] }} group
+ * @param {Record<string, any>} proxyMap
+ * @param {string} failedNode
+ * @returns {string[]}
+ */
+function failoverCandidates(group, proxyMap, failedNode) {
+    return group.all.filter((n) => {
+        if (n === failedNode) return false;
+        const entry = proxyMap[n];
+        if (!entry || isNotFailoverTarget(entry)) return false;
+        const leaf = resolveLeafNode(n, proxyMap);
+        if (leaf && leaf !== n && isNotFailoverTarget(proxyMap[leaf] ?? { type: leaf })) return false;
+        return leaf !== failedNode;
+    });
+}
+
+/**
+ * The last measured delay of a candidate (of the node it leads to), or
+ * Infinity when it has none usable.
+ * @param {string} name
+ * @param {Record<string, any>} proxyMap
+ * @returns {number}
+ */
+function lastDelayOf(name, proxyMap) {
+    const leaf = resolveLeafNode(name, proxyMap);
+    const history = (leaf ? proxyMap[leaf] : proxyMap[name])?.history;
+    const lastDelay = history?.length ? history[history.length - 1]?.delay : undefined;
+    return isInvalidDelay(lastDelay) ? Infinity : lastDelay;
+}
+
+/**
+ * The node to switch to: the engine's own target when it is a candidate,
+ * otherwise the candidate with the lowest last delay (the first when none
+ * has one).
+ * @param {string[]} candidates non-empty
+ * @param {Record<string, any>} proxyMap
+ * @param {string} target
+ * @returns {string}
+ */
+function pickFailoverTarget(candidates, proxyMap, target) {
+    if (target !== 'next' && candidates.includes(target)) return target;
+    let bestNode = null;
+    let bestDelay = Infinity;
+    for (const name of candidates) {
+        const delay = lastDelayOf(name, proxyMap);
+        if (delay < bestDelay) {
+            bestDelay = delay;
+            bestNode = name;
+        }
+    }
+    return bestNode || candidates[0];
+}
+
+/**
+ * Whether the switch still makes sense by the core's live state: the group
+ * still sits on the failed node (or on a group leading to it), and the
+ * target is still one failover may pick (a nested group the core has moved
+ * to DIRECT since the cached read is not).
+ * @param {string} groupName
+ * @param {string} failedNode
+ * @param {string} targetNode
+ * @returns {Promise<boolean>}
+ */
+async function liveStillCallsForSwitch(groupName, failedNode, targetNode) {
+    const live = /** @type {Record<string, any>|null} */ (await getProxies()
+        .then(getProxiesMerged)
+        .then((/** @type {any} */ d) => d?.proxies)
+        .catch(() => null));
+    if (!live) return false;
+    const group = live[groupName];
+    const now = group?.now;
+    if (!now || !Array.isArray(group.all)) return false;
+    if (now !== failedNode && resolveLeafNode(now, live) !== failedNode) return false;
+    return failoverCandidates(group, live, failedNode).includes(targetNode);
+}
+
+/**
+ * Handle a failover action returned by the failover engine.
+ * Switches to the best available node (lowest latency) in the current group,
+ * and saves it as the profile's choice: a restart then restores it rather
+ * than the failed node, and a profile switch whose read of the live
+ * selection times out saves it too. Saved only when the same profile runs
+ * before and after the switch (a profile switch that finished meanwhile
+ * would otherwise file the new profile's node under the old one) and no
+ * other choice was recorded meanwhile (a node the user picked during the
+ * switch is newer). Nothing is switched when the running profile cannot be
+ * read or changed, or when a node switch was sent meanwhile or is still on
+ * its way (the user's pick could land after this one), nor when the test
+ * that called for it ran under another profile.
+ * Exported for tests.
+ * @param {{failedNode: string, failureCount: number, target: string}} action
+ * @param {string|null} [testedProfile] the running profile when the failed
+ *   test was reported (null: unreadable then); omitted: not checked
+ */
+export async function handleFailoverAction(action, testedProfile) {
     if (_isFailovering) return;
     _isFailovering = true;
     try {
         const uiGroupName = appStore.get('uiGroupName');
         if (!uiGroupName) return;
 
-        const proxyMap = /** @type {Record<string, any>} */ (await getProxiesCached().then(getProxiesMerged).then(d => d?.proxies).catch(() => null));
-        if (!proxyMap) return;
-
-        const group = proxyMap[uiGroupName];
-        if (!group?.all?.length) return;
-
-        const currentNode = group.now;
-        const activeLeaf = resolveLeafNode(currentNode, proxyMap);
-        if (action.failedNode !== currentNode && action.failedNode !== activeLeaf) return;
-
-        const candidates = group.all.filter(/** @param {string} n */ n => {
-            if (n === action.failedNode) return false;
-            const entry = proxyMap[n];
-            if (!entry) return false;
-            const nodeType = entry.type?.toLowerCase() || '';
-            if (nodeType === 'reject' || nodeType === 'compatible' || nodeType === 'pass') return false;
-            const leaf = resolveLeafNode(n, proxyMap);
-            if (leaf === action.failedNode) return false;
-            return true;
-        });
-
-        if (candidates.length === 0) return;
-
-        let targetNode;
-        if (action.target !== 'next' && candidates.includes(action.target)) {
-            targetNode = action.target;
-        } else {
-            let bestNode = null;
-            let bestDelay = Infinity;
-            for (const name of candidates) {
-                const leaf = resolveLeafNode(name, proxyMap);
-                const lookupEntry = leaf ? proxyMap[leaf] : proxyMap[name];
-                const history = lookupEntry?.history;
-                if (history && history.length > 0) {
-                    const lastDelay = history[history.length - 1]?.delay;
-                    if (!isInvalidDelay(lastDelay) && lastDelay < bestDelay) {
-                        bestDelay = lastDelay;
-                        bestNode = name;
-                    }
-                }
-            }
-            targetNode = bestNode || candidates[0];
+        // The profile the switch applies to, read before the groups and
+        // again after the switch. A choice recorded after this (the user
+        // picking a node meanwhile) is newer than the failover's and stays.
+        const revisionBefore = knownSelectionRevision();
+        const switchMark = proxySwitchMark();
+        const runningProfile = await readRunningProfile();
+        if (runningProfile === null) return;
+        if (testedProfile !== undefined && testedProfile !== runningProfile) {
+            proxyLogger.info('Failover skipped: the failed test ran under another profile');
+            return;
         }
 
-        const success = await switchProxy(uiGroupName, targetNode);
+        const proxyMap = /** @type {Record<string, any>} */ (await getProxiesCached().then(getProxiesMerged).then(d => d?.proxies).catch(() => null));
+        const group = proxyMap?.[uiGroupName];
+        if (!group?.all?.length) return;
+
+        const activeLeaf = resolveLeafNode(group.now, proxyMap);
+        if (action.failedNode !== group.now && action.failedNode !== activeLeaf) return;
+
+        const candidates = failoverCandidates(group, proxyMap, action.failedNode);
+        if (candidates.length === 0) return;
+        const targetNode = pickFailoverTarget(candidates, proxyMap, action.target);
+        // The selection as it is right before the switch, read live: a node
+        // the user picked while this ran is not replaced, and a target that
+        // no longer qualifies is not taken.
+        if (!await liveStillCallsForSwitch(uiGroupName, action.failedNode, targetNode)) return;
+        // The node was picked from this profile's groups: when another
+        // profile came up while they loaded (or which one runs cannot be
+        // read), its same-named group may not be the one that failed.
+        if (await readRunningProfile() !== runningProfile) return;
+        // A user pick still on its way could land after a check of the live
+        // selection. One made from here on is sent after this switch (the
+        // switches of a group go out in order), so the core ends on it.
+        if (proxySwitchedSince(switchMark)) return;
+
+        /** @type {boolean} */
+        let success;
+        try {
+            success = await switchProxy(uiGroupName, targetNode);
+        } catch (e) {
+            proxyLogger.warn(`Failover switch to '${targetNode}' was refused:`, e);
+            return;
+        }
         if (success) {
+            // The minimal config runs: no profile to save the choice under.
+            if (runningProfile && await readRunningProfile() === runningProfile
+                && !knownSelectionChangedSince(revisionBefore, runningProfile)) {
+                await saveProxySelection(runningProfile, { group: uiGroupName, node: targetNode });
+            }
             showNotification(
                 t('failoverSwitched', { failed: action.failedNode, target: targetNode }),
                 'success'

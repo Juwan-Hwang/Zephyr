@@ -599,6 +599,60 @@ export async function getProxiesMerged(existingData) {
  * @throws {ApiError}
  */
 export async function switchProxyResult(group, name) {
+  proxySwitchStarts += 1;
+  proxySwitchesInFlight += 1;
+  // Switches of one group go out one at a time, in the order they were
+  // made: the core then ends on the last one made (the one a user click
+  // records), whatever order it would answer overlapping requests in.
+  const before = switchQueues.get(group) ?? Promise.resolve();
+  const mine = before.then(() => sendProxySwitch(group, name));
+  /** @type {Promise<unknown>} */
+  const settled = mine.catch(() => undefined);
+  switchQueues.set(group, settled);
+  try {
+    return await mine;
+  } finally {
+    proxySwitchesInFlight -= 1;
+    if (switchQueues.get(group) === settled) switchQueues.delete(group);
+  }
+}
+
+/** Node switches started so far, and the ones not answered yet. */
+let proxySwitchStarts = 0;
+let proxySwitchesInFlight = 0;
+/**
+ * The last switch sent or waiting for each group (settles, never rejects).
+ * @type {Map<string, Promise<unknown>>}
+ */
+const switchQueues = new Map();
+
+/**
+ * Where an automatic switch (failover, a carried node) starts: pass it to
+ * proxySwitchedSince right before sending its own switch.
+ * @returns {number}
+ */
+export function proxySwitchMark() {
+  return proxySwitchStarts;
+}
+
+/**
+ * Whether a node switch started after `mark` was taken, or one is still
+ * waiting for the core's answer: a choice the user sent may then land after
+ * (or not be visible yet to) a check of the live selection, and an automatic
+ * switch sent now could replace it.
+ * @param {number} mark proxySwitchMark() from before
+ * @returns {boolean}
+ */
+export function proxySwitchedSince(mark) {
+  return proxySwitchStarts !== mark || proxySwitchesInFlight > 0;
+}
+
+/**
+ * @param {string} group
+ * @param {string} name
+ * @returns {Promise<{ ok: boolean, reason: unknown, error?: ApiError }>}
+ */
+async function sendProxySwitch(group, name) {
   try {
     // GLOBAL switches go through the backend so the user-change generation is
     // bumped under the restore lock; otherwise an in-flight fallback restore
@@ -712,7 +766,33 @@ export async function closeAllConnections() {
  */
 export async function getConnections() {
   const res = await apiFetch('/connections');
-  return res.json();
+  // apiFetch's timeout ends with the headers: a body that never completes
+  // would leave this pending (and the page's refresh waiting on it) forever.
+  return readJsonWithin(res, DEFAULT_TIMEOUT, '/connections');
+}
+
+/**
+ * `res.json()`, failing with an {@link ApiError} when the body has not
+ * arrived within `ms` (the body is cancelled then).
+ * @param {Response} res
+ * @param {number} ms
+ * @param {string} endpoint
+ * @returns {Promise<any>}
+ */
+async function readJsonWithin(res, ms, endpoint) {
+  /** @type {ReturnType<typeof setTimeout>|undefined} */
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      try { res.body?.cancel().catch(() => {}); } catch { /* already read */ }
+      reject(new ApiError(`Request timeout (${ms}ms): ${endpoint}`, { endpoint }));
+    }, ms);
+  });
+  try {
+    return await Promise.race([res.json(), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

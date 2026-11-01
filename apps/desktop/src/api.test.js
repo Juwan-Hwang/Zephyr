@@ -413,6 +413,49 @@ describe('switchProxy', () => {
         await expect(switchProxy('Proxy', 'Bad')).rejects.toThrow();
         vi.unstubAllGlobals();
     });
+
+    it('counts a switch as started and in flight until it is answered', async () => {
+        const api = await import('./api.js');
+        /** @type {(v: any) => void} */
+        let answer = () => {};
+        vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { answer = resolve; })));
+        const mark = api.proxySwitchMark();
+        expect(api.proxySwitchedSince(mark)).toBe(false);
+        const pending = api.switchProxyResult('Proxy', 'node-a.example');
+        expect(api.proxySwitchedSince(mark)).toBe(true);
+        await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+        answer({ ok: true });
+        expect(await pending).toEqual({ ok: true, reason: null });
+        // Answered: only the newer start counts now.
+        expect(api.proxySwitchedSince(mark)).toBe(true);
+        expect(api.proxySwitchedSince(api.proxySwitchMark())).toBe(false);
+    });
+
+    it('sends switches of one group in the order they were made', async () => {
+        const api = await import('./api.js');
+        /** @type {Array<{ body: string, answer: (v: any) => void }>} */
+        const sent = [];
+        vi.stubGlobal('fetch', vi.fn((url, init) => new Promise((resolve) => {
+            sent.push({ body: `${url} ${init.body}`, answer: resolve });
+        })));
+        const first = api.switchProxyResult('Proxy', 'node-a.example');
+        const second = api.switchProxyResult('Proxy', 'node-b.example');
+        const other = api.switchProxyResult('Other', 'node-c.example');
+        await vi.waitFor(() => expect(sent).toHaveLength(2));
+        // The second switch of Proxy waits for the first; Other does not.
+        expect(sent.map((s) => s.body)).toEqual([
+            expect.stringContaining('/proxies/Proxy {"name":"node-a.example"}'),
+            expect.stringContaining('/proxies/Other {"name":"node-c.example"}'),
+        ]);
+        sent[0].answer({ ok: false, status: 500, statusText: 'Error', text: async () => '' });
+        await vi.waitFor(() => expect(sent).toHaveLength(3));
+        expect(sent[2].body).toContain('/proxies/Proxy {"name":"node-b.example"}');
+        sent[1].answer({ ok: true });
+        sent[2].answer({ ok: true });
+        expect((await first).ok).toBe(false);
+        expect((await second).ok).toBe(true);
+        expect((await other).ok).toBe(true);
+    });
 });
 
 describe('getConfig', () => {
@@ -495,6 +538,26 @@ describe('getConnections', () => {
         const result = await getConnections();
         expect(result).toEqual(mockData);
         vi.unstubAllGlobals();
+    });
+
+    it('gives up on a body that never arrives', async () => {
+        vi.useFakeTimers();
+        try {
+            const cancel = vi.fn(() => Promise.resolve());
+            vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+                ok: true,
+                body: { cancel },
+                json: () => new Promise(() => {}),
+            }));
+            const pending = getConnections();
+            const failed = expect(pending).rejects.toBeInstanceOf(ApiError);
+            await vi.advanceTimersByTimeAsync(10_000);
+            await failed;
+            expect(cancel).toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+            vi.unstubAllGlobals();
+        }
     });
 });
 
