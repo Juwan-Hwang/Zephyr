@@ -67,8 +67,13 @@ let _connPaused = false;
 /** Bumped on each Pause, so a request already in flight does not move the frozen rows. */
 let _pauseGen = 0;
 
-/** Debounce flag to prevent overlapping fetches */
-let isFetching = false;
+/**
+ * Page generation of the fetch in flight (null when none), so overlapping
+ * fetches of one page are skipped while a fetch left over from a destroyed
+ * page does not hold back the new page's first fetch.
+ * @type {number|null}
+ */
+let fetchingGeneration = null;
 
 /** Grand totals (kept for future use) */
 let _totalDownloaded = 0;
@@ -78,7 +83,10 @@ let _totalUploaded = 0;
 let _unsubI18n = null;
 /** @type {Function|null} */
 let _unsubTheme = null;
-/** Generation counter to invalidate stale poll callbacks on re-init */
+/**
+ * Page lifecycle generation, bumped on every init and destroy: poll callbacks
+ * and fetch responses from an earlier generation are dropped.
+ */
 let _pollGeneration = 0;
 /** @type {(() => void) | null} Visibility change handler, cleaned up on destroy. */
 let _visibilityHandler = null;
@@ -254,6 +262,8 @@ export function initConnectionsPage() {
  * Clean up resources when navigating away.
  */
 export function destroyConnectionsPage() {
+    // Invalidate poll callbacks and requests still in flight for this page.
+    _pollGeneration++;
     if (connectionsPollTimer != null) {
         clearTimeout(connectionsPollTimer);
         connectionsPollTimer = null;
@@ -405,12 +415,16 @@ function archiveConnectionOnce(conn, at) {
 }
 
 async function fetchAndRenderConnections() {
-    if (isFetching) return;
-    isFetching = true;
+    const generation = _pollGeneration;
+    if (fetchingGeneration === generation) return;
+    fetchingGeneration = generation;
 
     try {
         const pauseGen = _pauseGen;
         const data = await getConnections();
+        // The page was destroyed or re-initialized while this request was in
+        // flight: its response belongs to a page that no longer exists.
+        if (generation !== _pollGeneration) return;
         // Paused while this request was in flight: leave the frozen list as it is.
         if (_connPaused && pauseGen !== _pauseGen) return;
         const rawConns = (/** @type {any} */ (data)).connections || [];
@@ -496,6 +510,7 @@ async function fetchAndRenderConnections() {
         }
 
     } catch (err) {
+        if (generation !== _pollGeneration) return;
         const metaEl = document.getElementById('connections-meta');
         const t = /** @type {any} */ (translations)[currentLang] ?? {};
         if (metaEl) {
@@ -506,7 +521,8 @@ async function fetchAndRenderConnections() {
             connectionsLogger.warn('Fetch error', err);
         }
     } finally {
-        isFetching = false;
+        // A newer page's fetch may have started meanwhile; leave its mark.
+        if (fetchingGeneration === generation) fetchingGeneration = null;
     }
 }
 

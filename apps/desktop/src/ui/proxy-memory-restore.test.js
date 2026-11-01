@@ -167,4 +167,12 @@ describe('restoreProxySelectionResult', () => {
         await expect(restoreProxySelectionResult('a.yaml')).resolves.toBe('restored');
         expect(api.switchProxy.mock.calls).toEqual([['Main', 'HK']]);
     });
+
+    it('records a restored node as the known selection of its profile and group', async () => {
+        api.switchProxy.mockResolvedValue(true);
+        store.get.mockImplementation((key) => (key === 'uiGroupName' ? 'Main' : null));
+        await expect(restoreProxySelectionResult('a.yaml')).resolves.toBe('restored');
+        expect(store.set).toHaveBeenCalledWith('lastKnownSelection', { profile: 'a.yaml', group: 'Main', node: 'HK' });
+        store.get.mockImplementation(() => null);
+    });
 });

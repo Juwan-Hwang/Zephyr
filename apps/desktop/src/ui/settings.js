@@ -93,6 +93,7 @@ import { withResetChanges } from './settings/reset-merge.js';
 import { selectSegment } from './seg-control.js';
 import { openUpdateDialog, showPendingUpdateNote } from './update-dialog.js';
 import { createClientVersionFetcher, isValidClientVersions } from './settings/client-version-fetch.js';
+import { configUpdateOutcome } from './config-update.js';
 
 let __langDropdown = null;
 /** @type {(() => Promise<void>) | null} */
@@ -735,7 +736,7 @@ function initLogSettingsModal() {
             void (async () => {
                 try {
                     showNotification(t.logExporting || 'Exporting logs...');
-                    const path = await invoke('export_logs', {
+                    const path = await invoke(COMMANDS.EXPORT_LOGS, {
                         logType,
                         fromDate: from,
                         toDate: to,
@@ -765,7 +766,7 @@ function initLogSettingsModal() {
 
         modal.querySelector('#log-open-folder')?.addEventListener('click', async () => {
             try {
-                await invoke('open_log_folder');
+                await invoke(COMMANDS.OPEN_LOG_FOLDER);
             } catch (err) {
                 settingsLogger.error('[log-settings] Failed to open folder:', err);
             }
@@ -2081,8 +2082,9 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     // ---- Save config to core ----
     /**
      * @param {Record<string, any>} patch
-     * @returns {Promise<boolean|'restart'>} true when hot-reloaded, 'restart' when saved
-     *   but the core must restart (already announced), false when it failed
+     * @returns {Promise<boolean|'restart'>} true when hot-reloaded and saved everywhere,
+     *   'restart' when the change was kept with a caveat already announced (the core must
+     *   restart, or the active profile could not be updated), false when it failed
      */
     async function saveConfigToCore(patch) {
         try {
@@ -2090,10 +2092,20 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             const result = await invoke(COMMANDS.UPDATE_CONFIG, { patch });
             await syncCoreConfig();
 
-            if (result && !result.hot_reload_success) {
+            // No result object (an old backend): treat as applied, as before.
+            const outcome = result ? configUpdateOutcome(result) : 'applied';
+            if (outcome === 'partial') {
+                // The run config took the change but the profile did not: it
+                // works now and is lost when the profile is loaded again.
                 /** @type {any} */
                 const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
-                showNotification(result.message || t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
+                showNotification(result?.message || t2.failedSaveSettings || 'Failed to save settings to core', 'warning');
+                return 'restart';
+            }
+            if (outcome === 'restart') {
+                /** @type {any} */
+                const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
+                showNotification(result?.message || t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
                 return 'restart';
             }
             return true;

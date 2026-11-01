@@ -2,7 +2,6 @@ use rand::RngExt as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Manager as _, State};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
@@ -34,7 +33,8 @@ use super::tun_manager::{
     kill_managed_root_mihomo_as_root_verified, restart_core_as_root, set_tun_mode,
 };
 use super::{
-    AppPaths, CoreData, CoreStartResult, MihomoState, ProxyEndpoint, ProxyScheme, CORE_STARTING,
+    wait_for_start_lock, AppPaths, CoreData, CoreStartResult, MihomoState, ProxyEndpoint,
+    ProxyScheme, StartLockWait, CORE_ALREADY_STARTING, CORE_START_LOCK, CORE_START_LOCK_TIMEOUT,
 };
 
 #[cfg(target_os = "windows")]
@@ -1556,6 +1556,7 @@ pub async fn start_core_inner(
         secret,
         force,
         None,
+        StartLockWait::Bounded,
     ))
     .await
 }
@@ -1570,7 +1571,11 @@ pub const CORE_START_SUPERSEDED: &str = "core already restarted by another start
 /// [`CORE_START_SUPERSEDED`] and leaves the newer core alone (a restart of the
 /// same profile keeps the port and config, but not the start time). A core
 /// with no start time stopped or exited meanwhile: the start goes ahead.
-#[allow(clippy::cognitive_complexity)]
+///
+/// `lock_wait` says how long to wait for a start still running: a bounded
+/// wait gives up with [`CORE_ALREADY_STARTING`]; a background restart waits
+/// for it to end and then checks again whether it still has to run.
+#[allow(clippy::cognitive_complexity, clippy::too_many_arguments)]
 pub async fn start_core_with(
     app: AppHandle,
     state: State<'_, MihomoState>,
@@ -1579,46 +1584,23 @@ pub async fn start_core_with(
     secret: Option<String>,
     force: Option<bool>,
     expect_started_at: Option<Option<std::time::Instant>>,
+    lock_wait: StartLockWait,
 ) -> Result<CoreStartResult, String> {
-    // Wait for any previous core start operation to complete (max 10s)
-    let mut wait_ms = 0;
-    while CORE_STARTING
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        if wait_ms > 10000 {
-            // A guarded restart (resume recovery) only stands in for a core
-            // nobody else is starting: one still starting after 10 s (a
-            // macOS TUN start waiting for authorization) supersedes it, and
-            // taking the lock from it would run two starts at once.
-            if expect_started_at.is_some() {
-                return Err(CORE_START_SUPERSEDED.to_owned());
-            }
-            emit_warn!(
-                Core,
-                CORE_START_FAILED,
-                "Core start lock timeout, forcing reset"
-            );
-            CORE_STARTING.store(false, Ordering::SeqCst);
-            if CORE_STARTING
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok()
-            {
-                break;
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        wait_ms += 200;
-    }
-
-    // Reset flag on function exit
-    struct ResetGuard;
-    impl Drop for ResetGuard {
-        fn drop(&mut self) {
-            CORE_STARTING.store(false, Ordering::SeqCst);
-        }
-    }
-    let _guard = ResetGuard;
+    // Wait for any earlier start to finish. Only the start holding the
+    // guard releases the lock, so one still running after the timeout (a
+    // macOS TUN start waiting for authorization) keeps it: a bounded start
+    // gives up instead of running alongside it. A background restart waits
+    // it out: the earlier start may fail, and the check below then still
+    // finds the core it has to replace.
+    let Some(_start_guard) = wait_for_start_lock(&CORE_START_LOCK, lock_wait).await else {
+        emit_warn!(
+            Core,
+            CORE_START_FAILED,
+            "Core start lock still held after {}s; another start is in progress",
+            CORE_START_LOCK_TIMEOUT.as_secs()
+        );
+        return Err(CORE_ALREADY_STARTING.to_owned());
+    };
 
     if let Some(expected) = expect_started_at {
         let current = state
@@ -1766,7 +1748,7 @@ pub async fn start_core_with(
         }
     }
 
-    // Check if core is already running with the SAME config (under CORE_STARTING protection).
+    // Check if core is already running with the SAME config (under CORE_START_LOCK protection).
     // If the requested config differs from the current one, we must restart to apply it.
     // Also extract port/secret for drain before killing.
     let drain_info: Option<(u16, String)> = {
@@ -2645,6 +2627,41 @@ pub async fn start_core(
         secret,
         force,
     ))
+    .catch_unwind()
+    .await
+    .map_err(|payload| {
+        let msg = crate::backend_event::panic_to_string(payload);
+        crate::emit_error!(Core, CORE_PANIC_GUARD, "Panic in start_core: {msg}");
+        format!("Internal error in start_core: {msg}")
+    })
+    .and_then(std::convert::identity)
+}
+
+/// [`start_core`] for the restart onto a core binary the updater just
+/// installed. It waits for a start still in progress instead of giving up
+/// after [`CORE_START_LOCK_TIMEOUT`]: giving up would make the updater roll
+/// the binary back while that other start may already be running it.
+pub async fn start_core_after_pending(
+    app: AppHandle,
+    state: State<'_, MihomoState>,
+    config_path: String,
+    custom_args: Vec<String>,
+    secret: Option<String>,
+    force: Option<bool>,
+) -> Result<CoreStartResult, String> {
+    use futures_util::future::FutureExt as _;
+    use std::panic::AssertUnwindSafe;
+
+    AssertUnwindSafe(Box::pin(start_core_with(
+        app,
+        state,
+        config_path,
+        custom_args,
+        secret,
+        force,
+        None,
+        StartLockWait::UntilFree,
+    )))
     .catch_unwind()
     .await
     .map_err(|payload| {

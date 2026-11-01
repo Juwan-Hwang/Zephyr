@@ -33,48 +33,116 @@ import { translations } from './i18n.js';
 // fail at runtime with "command not found".
 
 describe('Backend ↔ Frontend IPC command contract', () => {
-    // Derive backend commands from COMMANDS (all non-namespace-ref string values).
-    // This keeps the test in sync automatically as new commands are added.
-    const NAMESPACE_REFS = new Set([
-        'CORE', 'CONFIG_FILES', 'SYS_PROXY', 'TUN', 'TRAY', 'UPDATER',
-        'SHORTCUTS', 'SCHEDULER', 'SETTINGS', 'MISC', 'CRYPTO', 'SUBSCRIPTION', 'PRISM', 'RULE',
-        'PLUGIN', 'SCRIPT', 'SMART', 'FAILOVER', 'KV', 'TRACE_ADVANCED', 'OVERRIDE', 'NETWORK_OPTIM',
-        'NETWORK_COORDINATOR',
+    const srcTauriDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src-tauri/src');
+
+    /**
+     * Commands registered with Tauri, read from the Rust source (not from
+     * COMMANDS): every `generate_handler![...]` list in lib.rs, each entry
+     * mapped from its path (`prism::prism_apply`) to the command name Tauri
+     * exposes (`prism_apply`).
+     * @param {string} source
+     * @returns {string[]}
+     */
+    function registeredCommands(source) {
+        const names = [];
+        const re = /generate_handler!\s*\[([\s\S]*?)\]/g;
+        let m;
+        while ((m = re.exec(source)) !== null) {
+            const body = m[1]
+                .replace(/\/\*[\s\S]*?\*\//g, '')
+                .replace(/\/\/[^\n]*/g, '')
+                .replace(/#\[[^\]]*\]/g, '');
+            for (const entry of body.split(',')) {
+                const item = entry.trim();
+                if (item) names.push(item.split('::').pop().trim());
+            }
+        }
+        return names;
+    }
+
+    /**
+     * Every command name in COMMANDS, namespaces included.
+     * @param {Record<string, unknown>} obj
+     * @returns {string[]}
+     */
+    function commandValues(obj) {
+        /** @type {string[]} */
+        const out = [];
+        for (const v of Object.values(obj)) {
+            if (typeof v === 'string') out.push(v);
+            else if (v && typeof v === 'object') out.push(...commandValues(/** @type {Record<string, unknown>} */ (v)));
+        }
+        return out;
+    }
+
+    // Registered for the backend's own use (or kept for API completeness) and
+    // not called from the UI. Anything else registered must be in COMMANDS.
+    const BACKEND_ONLY = new Set([
+        'prism_get_last_trace',
+        'script_execute_write',
     ]);
-    const backendCommands = Object.values(COMMANDS).filter(
-        v => typeof v === 'string' && v.length > 0
-    );
+
+    const libSource = fs.readFileSync(path.join(srcTauriDir, 'lib.rs'), 'utf8');
+    const backendCommands = registeredCommands(libSource);
+    const backendSet = new Set(backendCommands);
+    const frontendSet = new Set(commandValues(COMMANDS));
+
+    it('reads the registered command list from lib.rs', () => {
+        // A parse that silently found nothing would make every check below pass.
+        expect(backendCommands.length).toBeGreaterThan(100);
+        expect(backendSet.has('start_core')).toBe(true);
+        expect(backendSet.has('prism_apply')).toBe(true);
+        for (const name of backendCommands) expect(name).toMatch(/^[a-z_][a-z0-9_]*$/);
+        expect(new Set(backendCommands).size, 'a command is registered twice').toBe(backendCommands.length);
+    });
+
+    it('no command is renamed away from its function name', () => {
+        // The parser maps a registration to its function name; a renamed
+        // command would need the parser to follow the rename.
+        /** @type {string[]} */
+        const renamed = [];
+        /** @param {string} dir */
+        const walk = (dir) => {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) walk(full);
+                else if (entry.name.endsWith('.rs')
+                    && /#\[tauri::command\([^)]*\brename\s*=/.test(fs.readFileSync(full, 'utf8'))) {
+                    renamed.push(path.relative(srcTauriDir, full));
+                }
+            }
+        };
+        walk(srcTauriDir);
+        expect(renamed).toEqual([]);
+    });
 
     it('every backend command has a matching COMMANDS entry', () => {
-        // Verify all COMMANDS values that aren't namespace refs are valid strings
-        const commandEntries = Object.entries(COMMANDS);
-        const invalid = commandEntries.filter(([key, value]) => {
-            if (NAMESPACE_REFS.has(key)) return false;
-            return typeof value !== 'string' || value.length === 0;
-        });
+        const missing = backendCommands.filter(name => !frontendSet.has(name) && !BACKEND_ONLY.has(name));
         expect(
-            invalid,
-            invalid.length > 0
-                ? `COMMANDS has non-string or empty values:\n  ${invalid.map(([k, v]) => `${k}: ${typeof v}`).join('\n  ')}`
-                : 'all COMMANDS values are valid strings'
+            missing,
+            `Registered in lib.rs but missing from COMMANDS (add it, or to BACKEND_ONLY):\n  ${missing.join('\n  ')}`
         ).toEqual([]);
     });
 
     it('COMMANDS has no orphan entries (every value maps to a real backend command)', () => {
-        // Since backendCommands is derived from COMMANDS, this checks for consistency.
-        const backendSet = new Set(backendCommands);
-        const commandEntries = Object.entries(COMMANDS);
-        const orphans = commandEntries.filter(([key, value]) => {
-            if (NAMESPACE_REFS.has(key)) return false; // namespace refs
-            return !backendSet.has(value);
-        });
-
+        const orphans = [...frontendSet].filter(name => !backendSet.has(name));
         expect(
-            orphans.map(([k]) => k),
-            orphans.length > 0
-                ? `Orphan COMMANDS entries with no backend registration:\n  ${orphans.map(([k, v]) => `${k}: ${v}`).join('\n  ')}`
-                : 'no orphans'
+            orphans,
+            `COMMANDS values with no generate_handler! registration (invoke would fail with "command not found"):\n  ${orphans.join('\n  ')}`
         ).toEqual([]);
+    });
+
+    it('BACKEND_ONLY lists only registered commands that COMMANDS does not have', () => {
+        const stale = [...BACKEND_ONLY].filter(name => !backendSet.has(name) || frontendSet.has(name));
+        expect(stale).toEqual([]);
+    });
+
+    it('every COMMANDS key maps to a non-empty string or a namespace', () => {
+        const invalid = Object.entries(COMMANDS).filter(([, value]) => {
+            if (value && typeof value === 'object') return false; // namespace ref
+            return typeof value !== 'string' || value.length === 0;
+        });
+        expect(invalid.map(([k]) => k)).toEqual([]);
     });
 
     it('PRISM namespace covers all prism_* commands', () => {
@@ -138,6 +206,7 @@ describe('UI → shared/index.js COMMANDS reference contract', () => {
         // settings.js
         'COMMANDS.SET_UI_SCALE', 'COMMANDS.EXEMPT_UWP_APPS', 'COMMANDS.GET_LATEST_CLIENT_VERSIONS',
         'COMMANDS.UPDATE_CONFIG', 'COMMANDS.UPDATE_GEO_DATA', 'COMMANDS.READ_CONFIG',
+        'COMMANDS.EXPORT_LOGS', 'COMMANDS.OPEN_LOG_FOLDER',
         'COMMANDS.UPDATE_CORE', 'COMMANDS.UPDATE_CLIENT',
         'COMMANDS.DELETE_CONFIG',
         // Rule Library (settings.js)

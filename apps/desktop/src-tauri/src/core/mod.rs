@@ -7,8 +7,52 @@ use std::sync::Mutex;
 // Global TUN mode flag
 pub static TUN_MODE_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-// Global lock to prevent concurrent core start operations
-pub static CORE_STARTING: AtomicBool = AtomicBool::new(false);
+/// Serializes core start operations. Only the start holding the guard can
+/// release it (by dropping it), so a start that waits too long gives up
+/// instead of taking the lock from one that is still running.
+pub static CORE_START_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// How long a start waits for an earlier one before giving up.
+pub const CORE_START_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The error a start returns when another start still holds the start lock
+/// after [`CORE_START_LOCK_TIMEOUT`].
+pub const CORE_ALREADY_STARTING: &str = "core is already starting; please wait and try again";
+
+/// Wait up to `timeout` for `lock`; `None` when it is still held then. The
+/// guard is the only way to release the lock, so a start that times out
+/// never runs alongside the one still holding it, and the earlier start
+/// finishing later cannot release a lock it no longer holds.
+pub async fn acquire_start_lock(
+    lock: &tokio::sync::Mutex<()>,
+    timeout: std::time::Duration,
+) -> Option<tokio::sync::MutexGuard<'_, ()>> {
+    tokio::time::timeout(timeout, lock.lock()).await.ok()
+}
+
+/// How long a start waits for an earlier one still holding the start lock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartLockWait {
+    /// Give up after [`CORE_START_LOCK_TIMEOUT`]: a start the user asked for
+    /// and is waiting on, which reports [`CORE_ALREADY_STARTING`] instead.
+    Bounded,
+    /// Wait until the earlier start ends, however long it takes: a background
+    /// restart that still has to run after it (resume recovery, the restart
+    /// onto a core binary the updater just installed).
+    UntilFree,
+}
+
+/// Take `lock` the way `wait` says; `None` only when a [`StartLockWait::Bounded`]
+/// wait ran out.
+pub async fn wait_for_start_lock(
+    lock: &tokio::sync::Mutex<()>,
+    wait: StartLockWait,
+) -> Option<tokio::sync::MutexGuard<'_, ()>> {
+    match wait {
+        StartLockWait::Bounded => acquire_start_lock(lock, CORE_START_LOCK_TIMEOUT).await,
+        StartLockWait::UntilFree => Some(lock.lock().await),
+    }
+}
 
 // Global lock to prevent concurrent TUN toggle operations (from both main UI and tray)
 pub static TUN_TOGGLING: AtomicBool = AtomicBool::new(false);
@@ -255,6 +299,8 @@ pub mod fetch_util;
 pub mod log_writer;
 pub mod network_optim;
 pub mod secure_io;
+#[cfg(test)]
+mod start_lock_test;
 pub mod subscription;
 pub mod subscription_scheduler;
 #[cfg(test)]

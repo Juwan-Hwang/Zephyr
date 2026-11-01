@@ -405,6 +405,8 @@ export const appStore = createStore('zephyr.app', {
     effectiveGroupName: null,
     observedGroupName: null,
     observedNodeName: null,
+    /** Last node choice known per profile + group ({ profile, group, node }), see known-selection.js. */
+    lastKnownSelection: null,
 
     // System state
     isSysProxyEnabled: false,
@@ -432,6 +434,7 @@ export const appStore = createStore('zephyr.app', {
     transientKeys: [
         // Proxy group resolver state — re-resolved each session.
         'uiGroupName', 'uiPrimaryGroupName', 'effectiveGroupName', 'observedGroupName', 'observedNodeName',
+        'lastKnownSelection',
         // Locks — must never survive a page reload. If the WebView is
         // refreshed while one of these is true (e.g. during a config switch
         // or latency test), the flag would be persisted to localStorage

@@ -50,15 +50,90 @@ pub fn read_config(app: AppHandle) -> Result<JsonValue, String> {
     read_config_with_io(&RealConfigIo, &run_config_path)
 }
 
+/// What happened to the original profile when a patch was saved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileSave {
+    /// No profile takes the patch: none is active, it is the run config
+    /// itself, or its file is gone.
+    NotNeeded,
+    /// The profile was updated.
+    Saved,
+    /// The profile could not be updated; the patch only lives in the run
+    /// config and is lost the next time the profile is loaded.
+    Failed {
+        /// The profile file name.
+        profile: String,
+        /// Why it was not updated.
+        reason: String,
+    },
+}
+
 /// Result of config update operation with detailed status
-#[derive(serde::Serialize)]
+#[derive(Debug, serde::Serialize)]
 pub struct ConfigUpdateResult {
-    /// Whether the config files were successfully written
+    /// Whether every file that should take the patch was written: the run
+    /// config and, when one is active, the original profile.
     pub files_saved: bool,
+    /// Whether the run config was written (always true on `Ok`).
+    pub run_config_saved: bool,
+    /// Whether the original profile took the patch (true when none needed it).
+    pub profile_saved: bool,
+    /// Why the original profile was not updated, when it was not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_error: Option<String>,
     /// Whether the core hot reload succeeded
     pub hot_reload_success: bool,
     /// Human-readable status message
     pub message: String,
+}
+
+/// Build the result of an update whose run config was written, from what
+/// happened to the profile and to the hot reload. A profile that could not
+/// take the patch is reported as such: the change is live (or will be after
+/// a restart) but is lost the next time that profile is loaded.
+#[must_use]
+pub fn config_update_result(
+    profile: &ProfileSave,
+    hot_reload_success: bool,
+    hot_reload_message: &str,
+) -> ConfigUpdateResult {
+    let reload_note = if hot_reload_success {
+        None
+    } else if hot_reload_message.is_empty() {
+        Some("Restart core to apply changes.".to_owned())
+    } else {
+        Some(format!(
+            "{hot_reload_message} - restart core to apply changes."
+        ))
+    };
+    let (profile_saved, profile_error, message) = match profile {
+        ProfileSave::Failed { profile, reason } => {
+            let saved_part = format!(
+                "Run config saved, but profile {profile} could not be updated ({reason}); \
+                 the change will be lost when that profile is loaded again."
+            );
+            let message = match &reload_note {
+                None => format!("Changes applied. {saved_part}"),
+                Some(note) => format!("{saved_part} {note}"),
+            };
+            (false, Some(reason.clone()), message)
+        }
+        ProfileSave::NotNeeded | ProfileSave::Saved => {
+            let message = match &reload_note {
+                None => "Configuration saved and applied successfully".to_owned(),
+                Some(note) => format!("Configuration saved. {note}"),
+            };
+            (true, None, message)
+        }
+    };
+    ConfigUpdateResult {
+        files_saved: profile_saved,
+        run_config_saved: true,
+        profile_saved,
+        profile_error,
+        hot_reload_success,
+        message,
+    }
 }
 
 #[tauri::command]
@@ -87,6 +162,7 @@ pub async fn update_config(
         )
     };
 
+    let mut profile_save = ProfileSave::NotNeeded;
     if let Some(profile_name) = &last_config_path {
         if profile_name != "run_config.yaml" {
             let profile_path = paths.profiles_dir.join(profile_name);
@@ -115,19 +191,31 @@ pub async fn update_config(
                 })
                 .await
                 .unwrap_or_else(|e| Err(format!("profile update task failed: {e}")));
-                match edited {
-                    Ok(true) => {}
-                    Ok(false) => emit_warn!(
-                        Config,
-                        CONFIG_PARSE_FAILED,
-                        "Profile {profile_name} was not updated: it could not be parsed or merged"
-                    ),
-                    Err(e) => emit_warn!(
-                        Config,
-                        CONFIG_PARSE_FAILED,
-                        "Failed to update profile {profile_name}: {e}"
-                    ),
-                }
+                profile_save = match edited {
+                    Ok(true) => ProfileSave::Saved,
+                    Ok(false) => {
+                        emit_warn!(
+                            Config,
+                            CONFIG_PARSE_FAILED,
+                            "Profile {profile_name} was not updated: it could not be parsed or merged"
+                        );
+                        ProfileSave::Failed {
+                            profile: profile_name.clone(),
+                            reason: "it could not be parsed or merged".to_owned(),
+                        }
+                    }
+                    Err(e) => {
+                        emit_warn!(
+                            Config,
+                            CONFIG_PARSE_FAILED,
+                            "Failed to update profile {profile_name}: {e}"
+                        );
+                        ProfileSave::Failed {
+                            profile: profile_name.clone(),
+                            reason: e,
+                        }
+                    }
+                };
             }
         }
     }
@@ -201,20 +289,11 @@ pub async fn update_config(
         }
     }
 
-    let files_saved = true;
-    let message = if hot_reload_success {
-        "Configuration saved and applied successfully".to_owned()
-    } else if !hot_reload_message.is_empty() {
-        format!("Configuration saved. {hot_reload_message} - restart core to apply changes.")
-    } else {
-        "Configuration saved. Restart core to apply changes.".to_owned()
-    };
-
-    Ok(ConfigUpdateResult {
-        files_saved,
+    Ok(config_update_result(
+        &profile_save,
         hot_reload_success,
-        message,
-    })
+        &hot_reload_message,
+    ))
 }
 
 #[cfg(test)]
@@ -373,5 +452,74 @@ mod tests {
         let patch = serde_json::json!({"tun": {"enable": true}});
         let (yaml, _) = update_config_core(&io, &path, &patch).unwrap();
         assert!(!yaml["tun"]["enable"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn update_result_reports_full_success() {
+        let result = config_update_result(&ProfileSave::Saved, true, "");
+        assert!(result.files_saved && result.profile_saved && result.run_config_saved);
+        assert!(result.hot_reload_success);
+        assert!(result.profile_error.is_none());
+        assert_eq!(
+            result.message,
+            "Configuration saved and applied successfully"
+        );
+
+        let none_needed = config_update_result(&ProfileSave::NotNeeded, true, "");
+        assert!(none_needed.files_saved && none_needed.profile_saved);
+    }
+
+    #[test]
+    fn update_result_reports_a_profile_that_did_not_take_the_patch() {
+        let failed = ProfileSave::Failed {
+            profile: "sample.yaml".to_owned(),
+            reason: "it could not be parsed or merged".to_owned(),
+        };
+        let result = config_update_result(&failed, true, "");
+        assert!(!result.files_saved);
+        assert!(!result.profile_saved);
+        assert!(result.run_config_saved);
+        assert!(result.hot_reload_success);
+        assert_eq!(
+            result.profile_error.as_deref(),
+            Some("it could not be parsed or merged")
+        );
+        assert!(!result.message.contains("successfully"));
+        assert!(result.message.contains("sample.yaml"));
+
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["files_saved"], false);
+        assert_eq!(json["profile_saved"], false);
+        assert_eq!(json["run_config_saved"], true);
+    }
+
+    #[test]
+    fn update_result_reports_both_a_failed_profile_and_a_failed_reload() {
+        let failed = ProfileSave::Failed {
+            profile: "sample.yaml".to_owned(),
+            reason: "disk full".to_owned(),
+        };
+        let result = config_update_result(&failed, false, "Core API unavailable for hot reload");
+        assert!(!result.files_saved && !result.hot_reload_success);
+        assert!(result.message.contains("disk full"));
+        assert!(result.message.contains("restart core"));
+    }
+
+    #[test]
+    fn update_result_reports_a_failed_reload_with_saved_files() {
+        let result =
+            config_update_result(&ProfileSave::Saved, false, "Hot reload returned status 500");
+        assert!(result.files_saved && !result.hot_reload_success);
+        assert_eq!(
+            result.message,
+            "Configuration saved. Hot reload returned status 500 - restart core to apply changes."
+        );
+        let bare = config_update_result(&ProfileSave::NotNeeded, false, "");
+        assert_eq!(
+            bare.message,
+            "Configuration saved. Restart core to apply changes."
+        );
+        let json = serde_json::to_value(&bare).unwrap();
+        assert!(json.get("profile_error").is_none());
     }
 }

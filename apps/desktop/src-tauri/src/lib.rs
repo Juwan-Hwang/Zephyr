@@ -2541,6 +2541,9 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
         None,
         Some(true), // Force restart: the old process may still be alive but unresponsive
         Some(started_at),
+        // A start still running may fail and leave this core unresponsive:
+        // wait for it, then the start time tells whether it replaced the core.
+        core_manager::core::StartLockWait::UntilFree,
     ))
     .await
     {

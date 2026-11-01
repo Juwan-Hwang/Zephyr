@@ -1518,7 +1518,9 @@ async fn update_core_inner(
         98,
     );
 
-    let result = core_manager::start_core(
+    // Waits for a start still in progress rather than giving up: a give-up
+    // here would roll back the binary that start may already be running.
+    let result = core_manager::core::core_process::start_core_after_pending(
         app.clone(),
         state,
         last_config,
