@@ -16,7 +16,9 @@ export const trayTestApi = {
     getConfig: vi.fn(async () => ({})),
     invoke: vi.fn(),
     getProxies: vi.fn(async () => ({ proxies: {} })),
-    switchProxy: vi.fn(async () => true),
+    switchProxyResult: vi.fn(async () => ({ ok: true, reason: null, seq: 1 })),
+    isLatestSwitch: vi.fn(() => true),
+    SWITCH_BUSY: 'busy',
     closeAllConnections: vi.fn(async () => {}),
     listen: vi.fn(async (name, fn) => { trayTestHandlers[name] = fn; return () => {}; }),
 };
