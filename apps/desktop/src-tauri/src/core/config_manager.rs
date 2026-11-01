@@ -739,6 +739,39 @@ fn remove_deleted_metadata(paths: &super::AppPaths, names: &[String]) -> Result<
     save_metadata(paths, &metadata)
 }
 
+/// Drop the node choice and primary group kept for a deleted profile: a
+/// profile created later under the same name is a different file, and
+/// must not start on the deleted one's node. Best effort, like the record
+/// above: the file is already gone.
+fn forget_deleted_profile_choices(app: &AppHandle, names: &[String]) {
+    let kept = {
+        let state = app.state::<SettingsState>();
+        let guard = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        names.iter().any(|n| {
+            guard.last_proxy_selection.contains_key(n)
+                || guard.primary_group_preference.contains_key(n)
+        })
+    };
+    if !kept {
+        return;
+    }
+    if let Err(e) = crate::commit_settings(app, |s| {
+        for name in names {
+            s.last_proxy_selection.remove(name);
+            s.primary_group_preference.remove(name);
+        }
+    }) {
+        crate::emit_warn!(
+            Config,
+            CONFIG_PERSIST_FAILED,
+            "Failed to drop the node choice of a deleted profile: {e}"
+        );
+    }
+}
+
 /// Delete one profile file and its metadata entries as a single
 /// transform-guarded transaction on the blocking pool.
 ///
@@ -798,6 +831,9 @@ async fn delete_profile_file_transaction(
                     "Failed to record deleted profile {deleted_name} as migrated: the next migration may copy it back once"
                 );
             }
+        }
+        if remove_result.is_ok() {
+            forget_deleted_profile_choices(&app, &metadata_names);
         }
         cleanup_dangling_last_config(&app, &paths, &deleted_name);
         remove_result.and(metadata_result)

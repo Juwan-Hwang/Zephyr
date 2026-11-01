@@ -142,6 +142,7 @@ const PAGE_LEAVE_MAP = {
     'logs': 'onLeaveLogs',
     'proxies': 'onLeaveProxies',
     'console': 'onLeaveConsole',
+    'connections': 'onLeaveConnections',
 };
 
 /**
@@ -175,6 +176,7 @@ function normalizePage(page) {
  * @param {Function} [callbacks.onLeaveProxies] - Called when navigating away from proxies page
  * @param {Function} [callbacks.onConsole] - Called when navigating to console page
  * @param {Function} [callbacks.onLeaveConsole] - Called when navigating away from console page
+ * @param {Function} [callbacks.onLeaveConnections] - Called when navigating away from connections page
  */
 export function initNavigation(callbacks = {}) {
     const navItems = document.querySelectorAll('[data-nav]');
