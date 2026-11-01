@@ -2,7 +2,6 @@ use rand::RngExt as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Manager as _, State};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
@@ -34,7 +33,8 @@ use super::tun_manager::{
     kill_managed_root_mihomo_as_root_verified, restart_core_as_root, set_tun_mode,
 };
 use super::{
-    AppPaths, CoreData, CoreStartResult, MihomoState, ProxyEndpoint, ProxyScheme, CORE_STARTING,
+    wait_for_start_lock, AppPaths, CoreData, CoreStartResult, MihomoState, ProxyEndpoint,
+    ProxyScheme, StartLockWait, CORE_ALREADY_STARTING, CORE_START_LOCK, CORE_START_LOCK_TIMEOUT,
 };
 
 #[cfg(target_os = "windows")]
@@ -812,9 +812,12 @@ pub(crate) fn first_available_profile(paths: &AppPaths) -> Option<PathBuf> {
     configs.into_iter().next()
 }
 
+/// The port of the profile's `external-controller`, read the way mihomo
+/// reads the key: also with a local tag (`!custom external-controller`) or
+/// inherited through `<<`. Those variants are replaced by the managed key,
+/// so missing them would move the controller to the default port.
 fn parse_external_controller_port(yaml_val: &serde_yaml::Value) -> u16 {
-    yaml_val
-        .get("external-controller")
+    resolved_entry(yaml_val, "external-controller")
         .and_then(|v| v.as_str())
         .and_then(|ext_ctrl| ext_ctrl.split(':').next_back())
         .and_then(|p| p.parse::<u16>().ok())
@@ -835,22 +838,26 @@ pub fn extract_configured_proxy_endpoint_from_yaml(
             .filter(|&p| p != 0)
     };
 
-    yaml_val
-        .get("mixed-port")
+    resolved_entry(yaml_val, "mixed-port")
         .and_then(parse_u16)
         .map(ProxyEndpoint::http)
         .or_else(|| {
-            yaml_val
-                .get("port")
+            resolved_entry(yaml_val, "port")
                 .and_then(parse_u16)
                 .map(ProxyEndpoint::http)
         })
         .or_else(|| {
-            yaml_val
-                .get("socks-port")
+            resolved_entry(yaml_val, "socks-port")
                 .and_then(parse_u16)
                 .map(ProxyEndpoint::socks5h)
         })
+}
+
+/// The entry of mapping `yaml` named `name` as mihomo reads it: also one
+/// whose key carries a local tag (`!custom mixed-port`), and one inherited
+/// through a `<<` merge key, a direct key winning over an inherited one.
+fn resolved_entry<'a>(yaml: &'a serde_yaml::Value, name: &str) -> Option<&'a serde_yaml::Value> {
+    zephyr_core::config::sanitizer::merged_mapping_get(yaml.as_mapping()?, name, 0)
 }
 
 /// Extract configured proxy endpoint from raw YAML content string.
@@ -945,16 +952,21 @@ fn yaml_number(number: u16) -> serde_yaml::Value {
     serde_yaml::Value::Number(serde_yaml::Number::from(number))
 }
 
+/// Sets `key` as mihomo reads it: a variant of the key with a local tag
+/// (`!custom mixed-port`) goes first, or the file would carry both and the
+/// port the app records could differ from the one the core takes.
 fn insert_yaml(mapping: &mut serde_yaml::Mapping, key: &str, value: serde_yaml::Value) {
+    zephyr_core::config::sanitizer::remove_keys_resolved(mapping, &[key]);
     mapping.insert(yaml_key(key), value);
 }
 
+/// Sets `key` unless the file sets it already, also with a local tag.
 fn insert_default_yaml(
     mapping: &mut serde_yaml::Mapping,
     key: &str,
     value: impl FnOnce() -> serde_yaml::Value,
 ) {
-    if !mapping.keys().any(|k| k.as_str() == Some(key)) {
+    if zephyr_core::config::sanitizer::merged_mapping_get(mapping, key, 0).is_none() {
         mapping.insert(yaml_key(key), value());
     }
 }
@@ -1060,7 +1072,13 @@ pub fn prepare_runtime_config(
                 let mut found_mapping = None;
                 for (k, v) in mapping.iter_mut() {
                     if k.as_str() == Some("tun") {
-                        if let serde_yaml::Value::Mapping(m) = v {
+                        // A tagged mapping (`tun: !conf {...}`) is updated
+                        // in place too, keeping its other fields.
+                        let mut target = v;
+                        while let serde_yaml::Value::Tagged(tagged) = target {
+                            target = &mut tagged.value;
+                        }
+                        if let serde_yaml::Value::Mapping(m) = target {
                             found_mapping = Some(m);
                         }
                         break;
@@ -1069,7 +1087,26 @@ pub fn prepare_runtime_config(
                 if let Some(tun_map) = found_mapping {
                     tun_map.insert(yaml_key("enable"), serde_yaml::Value::Bool(tun));
                 } else {
-                    let mut tun_map = serde_yaml::Mapping::new();
+                    // A `tun` inherited through `<<` is copied whole before
+                    // `enable` is set: the explicit entry hides the inherited
+                    // one, which would otherwise lose its stack, mtu and
+                    // routes.
+                    let inherited = crate::config_manager::merged_entry(
+                        &serde_yaml::Value::Mapping(mapping.clone()),
+                        "tun",
+                        0,
+                    )
+                    .map(|found| {
+                        let mut value = found.clone();
+                        while let serde_yaml::Value::Tagged(tagged) = value {
+                            value = tagged.value;
+                        }
+                        value
+                    });
+                    let mut tun_map = match inherited {
+                        Some(serde_yaml::Value::Mapping(m)) => m,
+                        _ => serde_yaml::Mapping::new(),
+                    };
                     tun_map.insert(yaml_key("enable"), serde_yaml::Value::Bool(tun));
                     mapping.insert(yaml_key("tun"), serde_yaml::Value::Mapping(tun_map));
                 }
@@ -1525,8 +1562,17 @@ async fn version_status(port: u16, token: &str) -> Option<u16> {
         "GET /version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
     );
     stream.write_all(request.as_bytes()).await.ok()?;
+    // One read may return only part of the status line: read on until the
+    // line ends, the buffer is full or the core closes the connection.
     let mut response = [0u8; 256];
-    let n = stream.read(&mut response).await.ok()?;
+    let mut n = 0;
+    while n < response.len() && !response.get(..n).unwrap_or(&[]).contains(&b'\n') {
+        let read = stream.read(response.get_mut(n..)?).await.ok()?;
+        if read == 0 {
+            break;
+        }
+        n += read;
+    }
     let head = String::from_utf8_lossy(response.get(..n).unwrap_or(&[]));
     let rest = head
         .strip_prefix("HTTP/1.1 ")
@@ -1716,13 +1762,122 @@ pub async fn start_core_inner(
 /// was already replaced by another start.
 pub const CORE_START_SUPERSEDED: &str = "core already restarted by another start";
 
+/// The error [`start_core_after_pending`] returns when the user stopped the
+/// core after the caller decided to restart it.
+pub const CORE_STOPPED_MEANWHILE: &str = "core was stopped by the user meanwhile";
+
+/// The error a start returns when the user stopped the core before the new
+/// core ran at all (so nothing checked the binary it would have run).
+pub const CORE_STOPPED_BEFORE_START: &str = "core was stopped by the user before the start ran";
+
+/// Stops the user asked for (the Stop button, quitting from the tray, the
+/// relaunch for elevation), counted so a background restart decided before
+/// one of them can tell it happened.
+static USER_STOPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Count a stop the user asked for; call it before stopping and keep the
+/// returned guard until the stop is done. The count moves again when the
+/// guard drops, so a [`user_stop_count`] read while the stop still runs
+/// (a resume check that probes the core being stopped) also differs from
+/// the count after it, and a restart decided then is skipped.
+pub fn note_user_stop() -> UserStop {
+    // Running first: a start that reads the new begin count then also sees
+    // this stop running, and waits for it rather than passing its checks.
+    USER_STOPS_RUNNING.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    USER_STOP_BEGINS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    USER_STOPS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    UserStop(())
+}
+
+/// Stops the user asked for that still run. A stop begun before a restart
+/// read [`user_stop_count`] moves the count only when it ends, which can be
+/// after that restart's checks; while it runs it counts as a stop.
+static USER_STOPS_RUNNING: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Whether a background restart decided at `expected` (a
+/// [`user_stop_count`] read then) must not run: the user stopped the core
+/// since, or a stop of theirs still runs.
+#[must_use]
+pub fn user_stopped_since(expected: u64) -> bool {
+    // Running first, then the count: a stop that began and ended between
+    // the two reads moved the count by then (it counts at its start and at
+    // its end), so no stop slips between them.
+    let running = USER_STOPS_RUNNING.load(std::sync::atomic::Ordering::SeqCst) > 0;
+    running || expected != user_stop_count()
+}
+
+/// A start given up because a stop of the user's still ran after
+/// [`CORE_START_LOCK_TIMEOUT`].
+pub const CORE_STILL_STOPPING: &str = "core is still stopping; please wait and try again";
+
+/// Waits until no stop of the user's runs, for at most
+/// [`CORE_START_LOCK_TIMEOUT`]. False when one still runs then.
+pub(crate) async fn wait_for_running_stops() -> bool {
+    let deadline = tokio::time::Instant::now() + super::CORE_START_LOCK_TIMEOUT;
+    while USER_STOPS_RUNNING.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    true
+}
+
+/// Stops the user asked for, counted when each begins only: a start the
+/// user asked for while a stop still ran was asked for after that stop, so
+/// only a stop begun after it cancels it (see [`user_stop_begins`]).
+static USER_STOP_BEGINS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The number of stops the user began so far (see [`note_user_stop`]).
+#[must_use]
+pub fn user_stop_begins() -> u64 {
+    USER_STOP_BEGINS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// A stop the user asked for that is still running (see [`note_user_stop`]).
+#[must_use = "hold it until the stop is done"]
+pub struct UserStop(());
+
+impl Drop for UserStop {
+    fn drop(&mut self) {
+        USER_STOPS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        USER_STOPS_RUNNING.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// The number of stops the user asked for so far (see [`note_user_stop`]).
+#[must_use]
+pub fn user_stop_count() -> u64 {
+    USER_STOPS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Whether our core answers its API on `port`: `GET /version` with
+/// `secret` succeeds and a wrong one is refused, so another service or
+/// another client's core on that port does not count (with no secret
+/// nothing can tell, so it does not count either). Gives up
+/// after 6 s in all, so a core that accepts connections but is frozen (common
+/// after a sleep) counts as not answering.
+pub async fn core_api_answers(port: u16, secret: &str) -> bool {
+    // No secret: whatever answers on the port would pass.
+    !secret.is_empty()
+        && authenticated_health_check_once(port, secret, std::time::Duration::from_secs(6)).await
+}
+
 /// Like [`start_core_inner`]. With `expect_started_at`, the start only goes
 /// ahead when, once it holds the start lock, the running core is still the
 /// instance that started at that time; otherwise it returns
 /// [`CORE_START_SUPERSEDED`] and leaves the newer core alone (a restart of the
 /// same profile keeps the port and config, but not the start time). A core
 /// with no start time stopped or exited meanwhile: the start goes ahead.
-#[allow(clippy::cognitive_complexity)]
+///
+/// It waits at most [`CORE_START_LOCK_TIMEOUT`] for a start still running and
+/// then gives up with [`CORE_ALREADY_STARTING`]; a background restart that
+/// has to wait it out uses [`start_core_after_pending`].
+///
+/// A Stop the user begins after this was called wins: before the start it
+/// returns [`CORE_STOPPED_MEANWHILE`]; during it (a Stop does not take the
+/// start lock, so it finds the new core not recorded yet) the core this
+/// start brought up is stopped again, as [`start_core_holding_lock`] does.
 pub async fn start_core_with(
     app: AppHandle,
     state: State<'_, MihomoState>,
@@ -1732,59 +1887,130 @@ pub async fn start_core_with(
     force: Option<bool>,
     expect_started_at: Option<Option<std::time::Instant>>,
 ) -> Result<CoreStartResult, String> {
-    // Wait for any previous core start operation to complete (max 10s)
-    let mut wait_ms = 0;
-    while CORE_STARTING
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        if wait_ms > 10000 {
-            // A guarded restart (resume recovery) only stands in for a core
-            // nobody else is starting: one still starting after 10 s (a
-            // macOS TUN start waiting for authorization) supersedes it, and
-            // taking the lock from it would run two starts at once.
-            if expect_started_at.is_some() {
-                return Err(CORE_START_SUPERSEDED.to_owned());
-            }
-            emit_warn!(
-                Core,
-                CORE_START_FAILED,
-                "Core start lock timeout, forcing reset"
-            );
-            CORE_STARTING.store(false, Ordering::SeqCst);
-            if CORE_STARTING
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok()
-            {
-                break;
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        wait_ms += 200;
+    let stops_before = user_stop_begins();
+    let user_stopped = move || user_stop_begins() != stops_before;
+    // Wait for any earlier start to finish. Only the start holding the
+    // guard releases the lock, so one still running after the timeout (a
+    // macOS TUN start waiting for authorization) keeps it: this start gives
+    // up instead of running alongside it.
+    let Some(_start_guard) = wait_for_start_lock(&CORE_START_LOCK, StartLockWait::Bounded).await
+    else {
+        emit_warn!(
+            Core,
+            CORE_START_FAILED,
+            "Core start lock still held after {}s; another start is in progress",
+            CORE_START_LOCK_TIMEOUT.as_secs()
+        );
+        return Err(CORE_ALREADY_STARTING.to_owned());
+    };
+
+    // A stop still tearing down (a macOS root core waiting for the
+    // administrator prompt) takes whatever process it finds when it gets
+    // there: it would take and end the core this start publishes while
+    // this start reports success. Starts wait for it to finish first.
+    if !wait_for_running_stops().await {
+        return Err(CORE_STILL_STOPPING.to_owned());
+    }
+    if superseded_since(&state, expect_started_at).await {
+        return Err(CORE_START_SUPERSEDED.to_owned());
+    }
+    if user_stopped() {
+        return Err(CORE_STOPPED_MEANWHILE.to_owned());
     }
 
-    // Reset flag on function exit
-    struct ResetGuard;
-    impl Drop for ResetGuard {
-        fn drop(&mut self) {
-            CORE_STARTING.store(false, Ordering::SeqCst);
-        }
-    }
-    let _guard = ResetGuard;
+    let app_for_stop = app.clone();
+    let result = Box::pin(start_core_locked(
+        app,
+        state,
+        config_path,
+        custom_args,
+        secret,
+        force,
+        user_stopped,
+    ))
+    .await;
+    stop_if_stopped_meanwhile(app_for_stop, result, user_stopped).await
+}
 
-    if let Some(expected) = expect_started_at {
-        let current = state
+/// Whether another start replaced the core that started at `expected` (the
+/// outer `None`: the caller expects nothing). Only a different start time of
+/// a core still running is another start; none means the core stopped or
+/// exited meanwhile and still needs restarting. A replacement that already
+/// exited keeps its start time until the uptime poll notices, so it is
+/// checked here and its state cleared the way that poll would: through its
+/// process, or, for one with no process handle (a macOS root TUN core),
+/// through its API. Read while holding [`CORE_START_LOCK`].
+async fn superseded_since(
+    state: &MihomoState,
+    expect_started_at: Option<Option<std::time::Instant>>,
+) -> bool {
+    let Some(expected) = expect_started_at else {
+        return false;
+    };
+    let (current, api, wait_error) = {
+        let mut lock = state
             .0
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .started_at();
-        // Only a different start time is another start; none means the
-        // core stopped or exited meanwhile and still needs this one.
-        if current.is_some() && current != expected {
-            return Err(CORE_START_SUPERSEDED.to_owned());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let wait = lock.process_mut().map(std::process::Child::try_wait);
+        let exited = matches!(wait, Some(Ok(Some(_))));
+        // The process cannot be asked (an OS error): whether it still runs
+        // is told by its API instead, as for a core with no handle.
+        let wait_error = match &wait {
+            Some(Err(e)) => Some(e.to_string()),
+            _ => None,
+        };
+        let wait_failed = wait_error.is_some();
+        if exited {
+            clear_stopped_core_state(&mut lock);
         }
+        let api = if lock.process().is_none() || wait_failed {
+            lock.last_port()
+                .map(|port| (port, lock.last_secret().to_owned()))
+        } else {
+            None
+        };
+        (lock.started_at(), api, wait_error)
+    };
+    if let Some(e) = wait_error {
+        emit_warn!(
+            Core,
+            CORE_HEALTH_CHECK_FAILED,
+            "Could not check the running core's process: {e}"
+        );
     }
+    if current.is_none() || current == expected {
+        return false;
+    }
+    let Some((port, secret)) = api else {
+        return true;
+    };
+    if core_api_answers(port, &secret).await {
+        return true;
+    }
+    let mut lock = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if lock.started_at() == current && lock.process().is_none() {
+        clear_stopped_core_state(&mut lock);
+    }
+    drop(lock);
+    false
+}
 
+/// The start itself. The caller holds [`CORE_START_LOCK`] for as long as this
+/// runs (the guard lives in the caller's frame across the await).
+#[allow(clippy::cognitive_complexity)]
+async fn start_core_locked(
+    app: AppHandle,
+    state: State<'_, MihomoState>,
+    config_path: String,
+    custom_args: Vec<String>,
+    secret: Option<String>,
+    force: Option<bool>,
+    user_stopped: impl Fn() -> bool + Send + Sync,
+) -> Result<CoreStartResult, String> {
     // Reuse checks compare against the profile this start would actually run: a missing
     // request falls back to another profile. With no profile at all the core runs the
     // built-in minimal config (`last_config_path` stays None), and a repeated start must
@@ -1918,7 +2144,7 @@ pub async fn start_core_with(
         }
     }
 
-    // Check if core is already running with the SAME config (under CORE_STARTING protection).
+    // Check if core is already running with the SAME config (under CORE_START_LOCK protection).
     // If the requested config differs from the current one, we must restart to apply it.
     // Also extract port/secret for drain before killing.
     let drain_info: Option<(u16, String)> = {
@@ -2104,7 +2330,11 @@ pub async fn start_core_with(
     // left running until root authorization succeeds: the privileged script
     // terminates it, and the deferred reap below releases it.
 
-    let resolved_secret = secret.unwrap_or_else(generate_secret);
+    // An empty secret would leave the controller open and the core
+    // indistinguishable from anything else on its port.
+    let resolved_secret = secret
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(generate_secret);
 
     // Read global user preferences from settings.json to override YAML profile values
     let global_prefs = {
@@ -2228,6 +2458,13 @@ pub async fn start_core_with(
         })
         .await;
 
+        // A stop of the user's during the check removes the run config it
+        // reads: the start they no longer want ends as stopped, not as a
+        // broken config (which would make the updater roll back a core
+        // that never got a fair check).
+        if user_stopped() && !matches!(&preflight_res, Ok(Ok(out)) if out.status.success()) {
+            return Err(CORE_STOPPED_BEFORE_START.to_owned());
+        }
         let output = match preflight_res {
             Ok(Ok(out)) => out,
             Ok(Err(e)) => {
@@ -2426,8 +2663,8 @@ pub async fn start_core_with(
     #[cfg(target_os = "macos")]
     fn adopted_root_tun_core_error(err: &dyn std::fmt::Display) -> String {
         format!(
-            "{err} (a root TUN core is still running and is now tracked; \
-             stopping the core will clean it up)"
+            "{err} ({}; stopping the core will clean it up)",
+            super::tun_manager::ROOT_CORE_STILL_RUNNING
         )
     }
 
@@ -2505,6 +2742,12 @@ pub async fn start_core_with(
     // Check if TUN mode is active via flag captured at start of startup
     #[cfg(target_os = "macos")]
     if tun_active {
+        // The user stopped the core while this start ran: no authorization
+        // prompt and no root core for a start they no longer want. The run
+        // config guard puts the previous run config back.
+        if user_stopped() {
+            return Err(CORE_STOPPED_BEFORE_START.to_owned());
+        }
         let secret = match restart_core_as_root(&app, true).await {
             Ok(s) => s,
             Err(e) => {
@@ -2746,6 +2989,14 @@ pub async fn start_core_with(
         });
     }
 
+    // The user stopped the core while this start waited (the preflight,
+    // the port, the guard): the start they no longer want spawns nothing,
+    // instead of running a core up to its health check only to stop it.
+    // A stop racing the spawn itself is still caught after the start.
+    if user_stopped() {
+        return Err(CORE_STOPPED_BEFORE_START.to_owned());
+    }
+
     // Spawn mihomo (stdout/stderr redirected to log file internally)
     let mut attempted_log = None;
     let spawn_result = spawn_with_cache_retry(
@@ -2838,6 +3089,26 @@ pub async fn start_core_with(
     })
 }
 
+/// Run a core start, turning a panic inside it into an error instead of
+/// letting it take the whole app down.
+pub(crate) async fn catch_start_panic<F>(start: F) -> Result<CoreStartResult, String>
+where
+    F: std::future::Future<Output = Result<CoreStartResult, String>> + Send,
+{
+    use futures_util::future::FutureExt as _;
+    use std::panic::AssertUnwindSafe;
+
+    AssertUnwindSafe(start)
+        .catch_unwind()
+        .await
+        .map_err(|payload| {
+            let msg = crate::backend_event::panic_to_string(payload);
+            crate::emit_error!(Core, CORE_PANIC_GUARD, "Panic in start_core: {msg}");
+            format!("Internal error in start_core: {msg}")
+        })
+        .and_then(std::convert::identity)
+}
+
 /// Tauri command wrapper for `start_core_inner` with `catch_unwind` guard.
 ///
 /// If the inner function panics, the error is caught and converted to a
@@ -2851,10 +3122,7 @@ pub async fn start_core(
     secret: Option<String>,
     force: Option<bool>,
 ) -> Result<CoreStartResult, String> {
-    use futures_util::future::FutureExt as _;
-    use std::panic::AssertUnwindSafe;
-
-    AssertUnwindSafe(start_core_inner(
+    catch_start_panic(start_core_inner(
         app,
         state,
         config_path,
@@ -2862,14 +3130,261 @@ pub async fn start_core(
         secret,
         force,
     ))
-    .catch_unwind()
     .await
-    .map_err(|payload| {
-        let msg = crate::backend_event::panic_to_string(payload);
-        crate::emit_error!(Core, CORE_PANIC_GUARD, "Panic in start_core: {msg}");
-        format!("Internal error in start_core: {msg}")
+}
+
+/// [`start_core`] for the recovery restart after a resume. It waits for a
+/// start still in progress instead of giving up after
+/// [`CORE_START_LOCK_TIMEOUT`]: that start may fail and leave the
+/// unresponsive core in place.
+///
+/// The profile, arguments and secret are read only once it holds the start
+/// lock, so a start that was in progress (another profile, say) is restarted
+/// as it ended up, not as it was before. With `expect_started_at` it returns
+/// [`CORE_START_SUPERSEDED`] when that start replaced the core, as
+/// [`start_core_with`] does. With `expect_user_stops` (a
+/// [`user_stop_count`] read before the caller decided to restart) it returns
+/// [`CORE_STOPPED_BEFORE_START`] or [`CORE_STOPPED_MEANWHILE`] when the user
+/// stopped the core since (see [`start_core_holding_lock`]).
+pub async fn start_core_after_pending(
+    app: AppHandle,
+    state: State<'_, MihomoState>,
+    force: Option<bool>,
+    expect_started_at: Option<Option<std::time::Instant>>,
+    expect_user_stops: Option<u64>,
+) -> Result<CoreStartResult, String> {
+    let start_guard = wait_for_start_lock(&CORE_START_LOCK, StartLockWait::UntilFree)
+        .await
+        .ok_or_else(|| CORE_ALREADY_STARTING.to_owned())?;
+    // A Stop still running is not counted yet: this start waits for it, as
+    // a plain start and the updater do, so it cannot bring up a core that
+    // Stop then takes down while the start reports success.
+    if !wait_for_running_stops().await {
+        return Err(CORE_STILL_STOPPING.to_owned());
+    }
+    let result = Box::pin(start_core_holding_lock(
+        app,
+        state,
+        force,
+        expect_started_at,
+        expect_user_stops,
+        &start_guard,
+    ))
+    .await;
+    drop(start_guard);
+    result
+}
+
+/// A start by a caller that already holds [`CORE_START_LOCK`] (the guard it
+/// passes in): the
+/// updater takes it before stopping the core and keeps it until the new
+/// binary runs or the old one is back, so no other start runs a missing or
+/// failed binary in between. Reads the profile, arguments and secret now,
+/// like [`start_core_after_pending`].
+///
+/// With `expect_user_stops` (a [`user_stop_count`] read before the caller
+/// decided to restart) it returns [`CORE_STOPPED_BEFORE_START`] when the user
+/// stopped the core before the new one ran, and [`CORE_STOPPED_MEANWHILE`]
+/// when the core it started was stopped again. A Stop does
+/// not take the start lock, so one that lands while the new core is not
+/// recorded yet finds nothing to stop; the core this start brought up is
+/// then stopped here (when that stop fails, the start's result is returned,
+/// since the core runs). A Stop counted after that check finds it recorded.
+pub async fn start_core_holding_lock(
+    app: AppHandle,
+    state: State<'_, MihomoState>,
+    force: Option<bool>,
+    expect_started_at: Option<Option<std::time::Instant>>,
+    expect_user_stops: Option<u64>,
+    _held: &tokio::sync::MutexGuard<'static, ()>,
+) -> Result<CoreStartResult, String> {
+    let user_stopped = || expect_user_stops.is_some_and(user_stopped_since);
+    if user_stopped() {
+        return Err(CORE_STOPPED_BEFORE_START.to_owned());
+    }
+    let app_for_stop = app.clone();
+    let result = Box::pin(start_core_recorded(
+        app,
+        state,
+        force,
+        expect_started_at,
+        expect_user_stops,
+    ))
+    .await;
+    stop_if_stopped_meanwhile(app_for_stop, result, user_stopped).await
+}
+
+/// After a start: when it brought a core up and `user_stopped` says the
+/// user stopped the core while it ran, stop that core again and return
+/// [`CORE_STOPPED_MEANWHILE`]. A failed start that left a root TUN core
+/// running and tracked counts as one that brought a core up. When that stop
+/// fails, the start's result is returned, since the core runs.
+async fn stop_if_stopped_meanwhile(
+    app: AppHandle,
+    result: Result<CoreStartResult, String>,
+    user_stopped: impl Fn() -> bool,
+) -> Result<CoreStartResult, String> {
+    let core_runs = match &result {
+        Ok(_) => true,
+        Err(e) => e.contains(super::tun_manager::ROOT_CORE_STILL_RUNNING),
+    };
+    if !core_runs {
+        // A failed root TUN start that left no core is retried without TUN
+        // by the frontend (it looks for the marker): not once the user
+        // stopped the core meanwhile, as the retry would bring up a core
+        // they stopped. It stays a failed start.
+        return match result {
+            Err(e) if user_stopped() => Err(tun_retry_dropped(&e)),
+            other => other,
+        };
+    }
+    if !user_stopped() {
+        return result;
+    }
+    let stop_res = tokio::task::spawn_blocking(move || {
+        let stop_state = app.state::<MihomoState>();
+        let res = stop_core_inner(&app, &stop_state);
+        // A stop can report a cleanup error after it confirmed the core
+        // gone and cleared its state: what counts is whether one is left.
+        let still_tracked = {
+            let lock = stop_state
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            lock.process().is_some() || lock.started_at().is_some()
+        };
+        (res, still_tracked)
     })
-    .and_then(std::convert::identity)
+    .await
+    .unwrap_or_else(|e| (Err(format!("Failed to stop core: {e}")), true));
+    if let (Err(e), still_tracked) = &stop_res {
+        emit_warn!(
+            Core,
+            CORE_STOP_FAILED,
+            "Failed to stop the core started while the user stopped it: {e}"
+        );
+        if *still_tracked {
+            // The core it brought up still runs: report the start, not a
+            // stop that did not happen (the updater would otherwise drop
+            // its backup and tell the user the core is stopped).
+            return result;
+        }
+    }
+    match result {
+        Ok(_) => Err(CORE_STOPPED_MEANWHILE.to_owned()),
+        // A start that failed stays a failure (the updater rolls back the
+        // binary that failed its checks), now with no core left running.
+        Err(e) => Err(failed_start_stopped(&e)),
+    }
+}
+
+/// A failed start's error once the user stopped the core meanwhile, when
+/// it left no core: without the TUN-failure marker, so the frontend does not
+/// start the core again without TUN. Any other error is kept as it is.
+fn tun_retry_dropped(error: &str) -> String {
+    let marker = super::tun_manager::TUN_START_FAILED_MARKER;
+    error.strip_prefix(marker).map_or_else(
+        || error.to_owned(),
+        |rest| {
+            format!(
+                "{}; not retried without TUN, as the user stopped the core meanwhile",
+                rest.trim_start_matches(':').trim_start()
+            )
+        },
+    )
+}
+
+/// The error of a failed start whose leftover root TUN core was stopped
+/// since: it no longer says a core still runs.
+fn failed_start_stopped(error: &str) -> String {
+    format!(
+        "{}; that core was stopped, as the user stopped the core meanwhile",
+        error.replace(
+            super::tun_manager::ROOT_CORE_STILL_RUNNING,
+            "a root TUN core was left running"
+        )
+    )
+}
+
+/// The start of [`start_core_holding_lock`]: the profile, arguments and
+/// secret recorded for the core (or saved in the settings), read now.
+/// `expect_user_stops` is passed on so a macOS TUN start skips its root
+/// restart once the user stopped the core.
+async fn start_core_recorded(
+    app: AppHandle,
+    state: State<'_, MihomoState>,
+    force: Option<bool>,
+    expect_started_at: Option<Option<std::time::Instant>>,
+    expect_user_stops: Option<u64>,
+) -> Result<CoreStartResult, String> {
+    catch_start_panic(async move {
+        if superseded_since(&state, expect_started_at).await {
+            return Err(CORE_START_SUPERSEDED.to_owned());
+        }
+        let (recorded_config, recorded_args, secret) = {
+            let lock = state
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let secret = if lock.last_secret().is_empty() {
+                None
+            } else {
+                Some(lock.last_secret().to_owned())
+            };
+            (
+                lock.last_config_path().map(String::from),
+                lock.last_custom_args().map(Vec::from),
+                secret,
+            )
+        };
+        // No start recorded (the first one failed before it got that far):
+        // the profile and arguments the user saved, as the page starts with.
+        let saved = if recorded_config.is_none() {
+            app.try_state::<crate::SettingsState>()
+                .map(|settings_state| {
+                    let settings = settings_state
+                        .0
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    (settings.last_config.clone(), settings.custom_args.clone())
+                })
+        } else {
+            None
+        };
+        let (config_path, custom_args) =
+            restart_profile_and_args(recorded_config, recorded_args, saved);
+        Box::pin(start_core_locked(
+            app,
+            state,
+            config_path,
+            custom_args,
+            secret,
+            force,
+            move || expect_user_stops.is_some_and(user_stopped_since),
+        ))
+        .await
+    })
+    .await
+}
+
+/// The profile and arguments a restart runs: those of the start recorded in
+/// the core state; with no profile recorded, the one saved in the settings
+/// (`saved`: profile, arguments), as the page starts the core with, but the
+/// recorded arguments when a start recorded them (one that ran the minimal
+/// config records no profile); with neither, `config.yaml` and no arguments.
+fn restart_profile_and_args(
+    recorded_config: Option<String>,
+    recorded_args: Option<Vec<String>>,
+    saved: Option<(Option<String>, Vec<String>)>,
+) -> (String, Vec<String>) {
+    if let Some(config) = recorded_config {
+        return (config, recorded_args.unwrap_or_default());
+    }
+    let (saved_config, saved_args) = saved.unwrap_or_default();
+    (
+        saved_config.unwrap_or_else(|| "config.yaml".to_owned()),
+        recorded_args.unwrap_or(saved_args),
+    )
 }
 
 /// Clear all state fields that become stale when the core process stops.
@@ -3053,6 +3568,7 @@ fn cleanup_run_config(app: &AppHandle) {
 
 #[tauri::command]
 pub async fn stop_core(app: AppHandle) -> Result<String, String> {
+    let _user_stop = note_user_stop();
     let app_clone = app.clone();
     tokio::task::spawn_blocking(move || {
         let state = app_clone.state::<MihomoState>();
@@ -3131,6 +3647,210 @@ pub(crate) fn get_core_version_with_io<I: ProcessIo>(
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_start_stopped_afterwards_is_still_a_failure_with_no_core_running() {
+        let e = format!(
+            "start checks failed: {}",
+            super::super::tun_manager::ROOT_CORE_STILL_RUNNING
+        );
+        let reported = failed_start_stopped(&e);
+        // Not the cancellation the updater keeps the new binary for, and no
+        // longer a core still running (which it keeps the binary under).
+        assert_ne!(reported, CORE_STOPPED_MEANWHILE);
+        assert!(!reported.contains(super::super::tun_manager::ROOT_CORE_STILL_RUNNING));
+        assert!(reported.starts_with("start checks failed"));
+    }
+
+    #[test]
+    fn a_failed_tun_start_after_a_user_stop_loses_the_retry_marker() {
+        let marker = super::super::tun_manager::TUN_START_FAILED_MARKER;
+        let reported = tun_retry_dropped(&format!("{marker}: helper refused"));
+        // The frontend retries without TUN only on the marker.
+        assert!(!reported.starts_with(marker));
+        assert!(reported.starts_with("helper refused"));
+        assert_ne!(reported, CORE_STOPPED_MEANWHILE);
+        // Any other failure stays as it is.
+        assert_eq!(tun_retry_dropped("port in use"), "port in use");
+    }
+
+    #[tokio::test]
+    async fn a_replacement_that_already_exited_does_not_supersede_the_restart() {
+        let state = MihomoState(std::sync::Mutex::new(CoreData::new()));
+        let expected = Some(std::time::Instant::now());
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        // Another start replaced the core and is still running (no child
+        // handle, as with a root TUN core): that start wins.
+        state
+            .0
+            .lock()
+            .unwrap()
+            .set_started_at(Some(std::time::Instant::now()));
+        assert!(superseded_since(&state, Some(expected)).await);
+        // The replacement's process has exited (this test binary listing its
+        // tests and quitting): the core still needs the restart.
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--list")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        state.0.lock().unwrap().set_process(Some(child));
+        assert!(!superseded_since(&state, Some(expected)).await);
+        let cleared = state
+            .0
+            .lock()
+            .map(|lock| lock.started_at().is_none() && lock.process().is_none())
+            .unwrap();
+        assert!(cleared);
+        // Nothing expected: never superseded.
+        assert!(!superseded_since(&state, None).await);
+    }
+
+    #[tokio::test]
+    async fn a_replacement_without_a_process_handle_is_checked_through_its_api() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let state = MihomoState(std::sync::Mutex::new(CoreData::new()));
+        let expected = Some(std::time::Instant::now());
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        // A root TUN core that answers its API: it replaced the core.
+        let api = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = api.local_addr().unwrap().port();
+        // It enforces our secret: the right one is taken, a wrong one is
+        // refused. The status line arrives in two writes.
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut socket, _) = api.accept().await.unwrap();
+                let mut buf = [0u8; 512];
+                let n = socket.read(&mut buf).await.unwrap();
+                let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let status: &[u8] = if request.contains("Bearer test-secret\r\n") {
+                    b"200 OK\r\n\r\n"
+                } else {
+                    b"401 Unauthorized\r\n\r\n"
+                };
+                socket.write_all(b"HTTP/1.1 ").await.unwrap();
+                socket.flush().await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                socket.write_all(status).await.unwrap();
+            }
+        });
+        {
+            let mut lock = state.0.lock().unwrap();
+            lock.set_started_at(Some(std::time::Instant::now()));
+            lock.set_last_port(Some(port));
+            lock.set_last_secret("test-secret".to_owned());
+        }
+        assert!(superseded_since(&state, Some(expected)).await);
+        server.await.unwrap();
+        // Something else on that port that takes any secret is not our core.
+        let other = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let other_port = other.local_addr().unwrap().port();
+        let other_server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut socket, _) = other.accept().await.unwrap();
+                let mut buf = [0u8; 512];
+                let _ = socket.read(&mut buf).await.unwrap();
+                socket.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await.unwrap();
+            }
+        });
+        assert!(!core_api_answers(other_port, "test-secret").await);
+        other_server.await.unwrap();
+        // With no secret recorded nothing tells our core from anything that
+        // answers on the port.
+        let any = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let any_port = any.local_addr().unwrap().port();
+        let any_server = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = any.accept().await.unwrap();
+                let mut buf = [0u8; 512];
+                let _ = socket.read(&mut buf).await.unwrap();
+                socket.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await.unwrap();
+            }
+        });
+        assert!(!core_api_answers(any_port, "").await);
+        any_server.abort();
+        // Its API is gone (the port closed): the core exited, and still
+        // needs the restart.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let closed_port = closed.local_addr().unwrap().port();
+        drop(closed);
+        state.0.lock().unwrap().set_last_port(Some(closed_port));
+        assert!(!superseded_since(&state, Some(expected)).await);
+        let cleared = state
+            .0
+            .lock()
+            .map(|lock| lock.started_at().is_none() && lock.last_port().is_none())
+            .unwrap();
+        assert!(cleared);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn user_stops_are_counted() {
+        let before = user_stop_count();
+        let begins_before = user_stop_begins();
+        let stop = note_user_stop();
+        assert!(user_stop_count() > before);
+        assert!(user_stop_begins() > begins_before);
+        // A count read while the stop still runs differs from the one after
+        // it: a restart decided during the stop is not taken as decided
+        // after it.
+        let during = user_stop_count();
+        // A restart decided while the stop runs is skipped also when its
+        // checks come before the stop ends.
+        assert!(user_stopped_since(during));
+        // A start waits for the stop to end and gives up when it does not.
+        assert!(!wait_for_running_stops().await);
+        drop(stop);
+        assert!(wait_for_running_stops().await);
+        assert_ne!(user_stop_count(), during);
+        assert!(user_stopped_since(during));
+        assert!(!user_stopped_since(user_stop_count()));
+    }
+
+    #[test]
+    fn restart_uses_saved_profile_and_args_only_without_a_recorded_start() {
+        let args = |list: &[&str]| list.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>();
+        // A recorded start wins, also over saved settings.
+        assert_eq!(
+            restart_profile_and_args(
+                Some("a.yaml".to_owned()),
+                Some(args(&["-m"])),
+                Some((Some("b.yaml".to_owned()), args(&["-x"]))),
+            ),
+            ("a.yaml".to_owned(), args(&["-m"]))
+        );
+        // A recorded start without arguments (macOS root TUN) keeps none.
+        assert_eq!(
+            restart_profile_and_args(Some("a.yaml".to_owned()), None, None),
+            ("a.yaml".to_owned(), Vec::new())
+        );
+        // Nothing recorded: what the settings hold.
+        assert_eq!(
+            restart_profile_and_args(None, None, Some((Some("b.yaml".to_owned()), args(&["-x"])))),
+            ("b.yaml".to_owned(), args(&["-x"]))
+        );
+        // A start that ran the minimal config recorded its arguments only:
+        // the restart keeps those arguments.
+        assert_eq!(
+            restart_profile_and_args(
+                None,
+                Some(args(&["-m"])),
+                Some((Some("b.yaml".to_owned()), args(&["-x"]))),
+            ),
+            ("b.yaml".to_owned(), args(&["-m"]))
+        );
+        // Neither: the default profile.
+        assert_eq!(
+            restart_profile_and_args(None, None, Some((None, Vec::new()))),
+            ("config.yaml".to_owned(), Vec::new())
+        );
+        assert_eq!(
+            restart_profile_and_args(None, None, None),
+            ("config.yaml".to_owned(), Vec::new())
+        );
+    }
 
     #[test]
     fn missing_profile_runs_minimal_config_without_writing_one() {
@@ -3432,6 +4152,47 @@ mod tests {
     }
 
     #[test]
+    fn test_prefs_tun_enabled_updates_a_tagged_tun_mapping() {
+        let content = "tun: !conf\n  enable: false\n  stack: system\n  mtu: 1400\nport: 7890";
+        let prefs = GlobalPreferences {
+            tun_enabled: Some(true),
+            ..Default::default()
+        };
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("enable: true"), "{config}");
+        assert!(config.contains("stack: system"), "{config}");
+        assert!(config.contains("mtu: 1400"), "{config}");
+    }
+
+    #[test]
+    fn test_prefs_tun_enabled_keeps_an_inherited_tun_mapping() {
+        let content =
+            "<<:\n  tun:\n    enable: false\n    stack: system\n    mtu: 1400\nport: 7890";
+        let prefs = GlobalPreferences {
+            tun_enabled: Some(true),
+            ..Default::default()
+        };
+        let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&config).unwrap();
+        let tun = parsed.get("tun").unwrap();
+        assert_eq!(
+            tun.get("enable").and_then(serde_yaml::Value::as_bool),
+            Some(true),
+            "{config}"
+        );
+        assert_eq!(
+            tun.get("stack").and_then(serde_yaml::Value::as_str),
+            Some("system"),
+            "{config}"
+        );
+        assert_eq!(
+            tun.get("mtu").and_then(serde_yaml::Value::as_u64),
+            Some(1400),
+            "{config}"
+        );
+    }
+
+    #[test]
     fn test_prefs_tun_enabled_creates_when_missing() {
         let content = "port: 7890";
         let prefs = GlobalPreferences {
@@ -3440,6 +4201,21 @@ mod tests {
         };
         let (config, _, _) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
         assert!(config.contains("tun:\n  enable: true"));
+    }
+
+    #[test]
+    fn test_prefs_override_replaces_a_tagged_listener_key() {
+        let content = "!custom mixed-port: 7893\n!custom unified-delay: false\n";
+        let prefs = GlobalPreferences {
+            mixed_port: Some(9090),
+            ..Default::default()
+        };
+        let (config, _, endpoint) = prepare_runtime_config(content, "s", Some(&prefs)).unwrap();
+        assert!(config.contains("mixed-port: 9090"), "{config}");
+        assert!(!config.contains("7893"), "{config}");
+        assert_eq!(endpoint, Some(ProxyEndpoint::http(9090)));
+        // A default is not added over a tagged key the file sets.
+        assert!(!config.contains("unified-delay: true"), "{config}");
     }
 
     #[test]
@@ -3583,6 +4359,23 @@ mod tests {
                 &serde_yaml::from_str("external-controller: 0.0.0.0:8080").unwrap()
             ),
             8080
+        );
+    }
+
+    #[test]
+    fn test_parse_port_tagged_or_inherited_key() {
+        assert_eq!(
+            parse_external_controller_port(
+                &serde_yaml::from_str("!custom external-controller: 127.0.0.1:9191").unwrap()
+            ),
+            9191
+        );
+        assert_eq!(
+            parse_external_controller_port(
+                &serde_yaml::from_str("base: &b\n  external-controller: 127.0.0.1:9292\n<<: *b\n")
+                    .unwrap()
+            ),
+            9292
         );
     }
 
@@ -3843,6 +4636,28 @@ mod tests {
             Some(ProxyEndpoint::http(9090))
         );
         assert_eq!(extract_configured_proxy_endpoint("other: 1234"), None);
+        // A key written with a tag is the same listener (a config update
+        // changes it in place rather than adding a plain one).
+        assert_eq!(
+            extract_configured_proxy_endpoint("!custom mixed-port: 7893"),
+            Some(ProxyEndpoint::http(7893))
+        );
+        assert_eq!(
+            extract_configured_proxy_endpoint("mixed-port: 0\n!custom socks-port: 7894"),
+            Some(ProxyEndpoint::socks5h(7894))
+        );
+        // A listener inherited through a `<<` merge key is one mihomo
+        // opens; a direct key still wins over it.
+        assert_eq!(
+            extract_configured_proxy_endpoint(
+                "base: &base\n  socks-port: 7895\n<<: *base\nmixed-port: 0"
+            ),
+            Some(ProxyEndpoint::socks5h(7895))
+        );
+        assert_eq!(
+            extract_configured_proxy_endpoint("<<: {mixed-port: 7000}\nmixed-port: 7001"),
+            Some(ProxyEndpoint::http(7001))
+        );
         assert_eq!(extract_configured_proxy_endpoint("invalid yaml ::::"), None);
         assert_eq!(extract_configured_proxy_endpoint("mixed-port: 0"), None);
         // A disabled `mixed-port` must fall through to the next configured

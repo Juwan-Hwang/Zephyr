@@ -4,7 +4,7 @@
  * Extracted from ui.js for modularity.
  */
 
-import { patchConfig, closeAllConnections, invoke, restartCore, setSecret, getConfig, getCurrentWindow } from '../api.js';
+import { patchConfig, closeAllConnections, invoke, restartCore, setSecret, getConfig, getCurrentWindow, whileCoreReplaced } from '../api.js';
 import { tunLogger } from '../utils/logger.js';
 import { setWsSecret } from '../websocket.js';
 import { showNotification, showConfirmModal } from './notifications.js';
@@ -14,6 +14,14 @@ import { COMMANDS } from '@zephyr/shared';
 import { postRestartRecovery, restartedProfile } from './lifecycle.js';
 import { currentProfile } from './active-profile.js';
 import { renderTunStatus } from './tun-status.js';
+
+/**
+ * The backend's answer when the user stopped the core before a root restart
+ * ran (`core_process::CORE_STOPPED_BEFORE_START`).
+ */
+const CORE_STOPPED_BEFORE_START = 'core was stopped by the user before the start ran';
+/** The backend's answer when the user stopped the core during the root restart (`CORE_STOPPED_MEANWHILE`). */
+const CORE_STOPPED_MEANWHILE = 'core was stopped by the user meanwhile';
 
 // Records the TUN preference only, for callers that
 // have already applied TUN to the running core themselves — `patch_settings`
@@ -235,15 +243,24 @@ export function initTunToggle() {
             if (isMac) {
                 if (enable) {
                     try {
-                        const result = await invoke(COMMANDS.RESTART_AS_ROOT, { enableTun: true });
+                        // The root core replaces the running one: switches
+                        // made for the core before it are not sent to it.
+                        const result = await whileCoreReplaced(
+                            () => invoke(COMMANDS.RESTART_AS_ROOT, { enableTun: true }));
                         if (result) {
                             setSecret(result);
                             setWsSecret(result);
                         }
                     } catch (authErr) {
-                        tunLogger.error('authErr', authErr);
+                        // A stop of the user's during the restart is no failure.
+                        if (authErr !== CORE_STOPPED_BEFORE_START && authErr !== CORE_STOPPED_MEANWHILE) {
+                            tunLogger.error('authErr', authErr);
+                        }
                         if (authErr === 'canceled') {
                             showNotification(t.tunAuthCanceled || 'Authorization canceled', 'error');
+                        } else if (authErr === CORE_STOPPED_BEFORE_START || authErr === CORE_STOPPED_MEANWHILE) {
+                            // The user stopped the core while this restart
+                            // waited: nothing was started, nothing failed.
                         } else if (typeof authErr === 'string' && authErr.startsWith('root_start_failed')) {
                             // The backend prefixes the marker and appends the
                             // detail, so this must be a prefix match: the script
