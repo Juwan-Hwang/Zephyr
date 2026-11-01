@@ -231,29 +231,52 @@ pub fn update_config_core<I: ConfigIo>(
     Ok((current_yaml, port.to_string()))
 }
 
+/// Appends masked URL directly into `out` without intermediate heap allocations.
+///
+/// Optimization:
+/// - Accepts `&str` to avoid allocating `String`s for URL substrings.
+/// - Slices borrowed sub-slices for prefix and suffix instead of collecting into `String`.
+/// - Writes directly into `out` buffer instead of multiple `format!()` intermediate allocations.
+pub fn format_masked_url_to(url_str: &str, out: &mut String) -> bool {
+    if let Ok(parsed) = url::Url::parse(url_str) {
+        let host = parsed.host_str().unwrap_or("???");
+        let char_count = host.chars().count();
+        out.push_str(parsed.scheme());
+        out.push_str("://");
+
+        if char_count > 6 {
+            // Find UTF-8 byte boundary for first 3 chars
+            let prefix_end = host
+                .char_indices()
+                .nth(3)
+                .map_or(host.len(), |(idx, _)| idx);
+            // Find UTF-8 byte boundary for last 3 chars
+            let suffix_start = host
+                .char_indices()
+                .nth(char_count - 3)
+                .map_or(0, |(idx, _)| idx);
+
+            out.push_str(&host[..prefix_end]);
+            out.push_str("***");
+            out.push_str(&host[suffix_start..]);
+        } else {
+            out.push_str("***");
+        }
+        out.push_str("/***");
+        true
+    } else {
+        out.push_str("***");
+        false
+    }
+}
+
 /// Mask URL for safe display in UI (hide sensitive host, path, and query parts)
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 #[must_use]
 pub fn mask_url(url: String) -> String {
-    if let Ok(parsed) = url::Url::parse(&url) {
-        let host = parsed.host_str().unwrap_or("???");
-        // Use char-based iteration to avoid panics on multi-byte UTF-8 hosts (IDN domains).
-        // `take`/`skip` are panic-free (no indexing) and avoid Vec<char> allocation.
-        let masked_host = {
-            let char_count = host.chars().count();
-            if char_count > 6 {
-                let prefix: String = host.chars().take(3).collect();
-                let suffix: String = host.chars().skip(char_count - 3).collect();
-                format!("{prefix}***{suffix}")
-            } else {
-                "***".to_owned()
-            }
-        };
-        // Only show scheme + masked host; hide path and query entirely
-        format!("{}://{masked_host}/***", parsed.scheme())
-    } else {
-        "***".to_owned()
-    }
+    let mut out = String::with_capacity(32);
+    format_masked_url_to(&url, &mut out);
+    out
 }
 
 #[cfg(test)]
