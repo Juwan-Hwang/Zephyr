@@ -3,7 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // The wheel only needs the node list; everything else is a no-op.
 vi.mock('../api.js', () => ({
     getProxies: vi.fn(),
-    switchProxyResult: vi.fn().mockResolvedValue({ ok: true, reason: null }),
+    // Runs the click's `prepare` in its turn, as the real queue does.
+    switchProxyResult: vi.fn(async (_group, _name, options) => ({ ok: true, reason: null, prepared: await options?.prepare?.() })),
+    SWITCH_BUSY: 'busy',
     abortLatencyTests: vi.fn(),
     closeAllConnections: vi.fn().mockResolvedValue(undefined),
 }));
@@ -29,6 +31,7 @@ vi.mock('./cache.js', () => ({
     getSettingsCached: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('./proxy-memory.js', () => ({ saveProxySelection: vi.fn() }));
+vi.mock('./running-profile.js', () => ({ readRunningProfile: vi.fn().mockResolvedValue('config.yaml') }));
 vi.mock('./notifications.js', () => ({ showNotification: vi.fn() }));
 
 const GROUPS = {
@@ -263,7 +266,7 @@ describe('node quick-switch wheel', () => {
         jp.click();
         expect(isShown(dom.dropdown)).toBe(false);
         await vi.advanceTimersByTimeAsync(0);
-        expect(api.switchProxyResult).toHaveBeenCalledWith('Proxy', 'JP 01');
+        expect(api.switchProxyResult).toHaveBeenCalledWith('Proxy', 'JP 01', expect.anything());
     });
 
     it('restores the old node name and reports an error when the switch fails or throws', async () => {
@@ -288,9 +291,9 @@ describe('node quick-switch wheel', () => {
     it('saves an older accepted switch when the newer click fails, and reports only the newer one', async () => {
         const api = await import('../api.js');
         const proxies = await import('./proxies.js');
-        const cache = await import('./cache.js');
         const memory = await import('./proxy-memory.js');
-        /** @type {any} */ (cache.getSettingsCached).mockResolvedValue({ last_config: 'sub' });
+        const running = await import('./running-profile.js');
+        /** @type {any} */ (running.readRunningProfile).mockResolvedValue('sub');
         /** @type {(v: any) => void} */
         let resolveA = () => {};
         /** @type {(e: any) => void} */
@@ -311,7 +314,7 @@ describe('node quick-switch wheel', () => {
         rejectB(boom);
         await vi.advanceTimersByTimeAsync(0);
         const syncsBeforeA = /** @type {any} */ (proxies.syncCoreConfig).mock.calls.length;
-        resolveA({ ok: true, reason: null });
+        resolveA({ ok: true, reason: null, prepared: 'sub' });
         await vi.advanceTimersByTimeAsync(3000);
         // The failed newer click's resync may have read the core before A landed: A redraws.
         expect(/** @type {any} */ (proxies.syncCoreConfig).mock.calls.length).toBeGreaterThan(syncsBeforeA);

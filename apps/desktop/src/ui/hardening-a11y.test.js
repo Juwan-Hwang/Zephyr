@@ -476,9 +476,12 @@ describe('tunnel item delete button accessibility and confirmation', () => {
             addTunnelBtn: null,
             tunnelsList: list,
             tunnelsEmpty: empty,
-            initialTunnels,
+            initialTunnels: [],
+            initialKnown: false,
             saveConfigToCore: saveMock,
         });
+        // Read from the core while a.yaml runs, as the settings page does.
+        api.setTunnels(initialTunnels, undefined, 'a.yaml');
         return { api, list, empty };
     }
 
@@ -574,7 +577,7 @@ describe('tunnel item delete button accessibility and confirmation', () => {
         list.querySelector('.btn-delete-icon')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));
 
-        expect(saveMock).toHaveBeenCalledWith({ tunnels: [] });
+        expect(saveMock).toHaveBeenCalledWith({ tunnels: [] }, 'a.yaml');
         expect(list.querySelector('.btn-delete-icon')).toBeNull();
         expect(empty.style.display).toBe('block');
     });
@@ -591,7 +594,7 @@ describe('tunnel item delete button accessibility and confirmation', () => {
 
         // The list is replaced from outside (e.g. settings reload) while
         // the confirmation is still waiting: tunnel A is gone entirely.
-        api.setTunnels([{ network: ['tcp'], address: '10.0.0.1:9000', target: '3.3.3.3:80' }]);
+        api.setTunnels([{ network: ['tcp'], address: '10.0.0.1:9000', target: '3.3.3.3:80' }], undefined, 'a.yaml');
         resolveConfirm(true);
         await flush();
 
@@ -610,11 +613,11 @@ describe('tunnel item delete button accessibility and confirmation', () => {
         await flush();
 
         // Same tunnels, swapped order: B now sits at index 0.
-        api.setTunnels([tunnelB, tunnelA]);
+        api.setTunnels([tunnelB, tunnelA], undefined, 'a.yaml');
         resolveConfirm(true);
         await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));
 
-        expect(saveMock).toHaveBeenCalledWith({ tunnels: [tunnelA] });
+        expect(saveMock).toHaveBeenCalledWith({ tunnels: [tunnelA] }, 'a.yaml');
     });
 
     it('a tunnel replaced by an identical copy while confirmation waits is still deleted', async () => {
@@ -634,13 +637,13 @@ describe('tunnel item delete button accessibility and confirmation', () => {
         api.setTunnels([
             { network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' },
             { network: ['tcp'], address: '127.0.0.1:9090', target: '2.2.2.2:80' },
-        ]);
+        ], undefined, 'a.yaml');
         resolveConfirm(true);
         await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));
 
         expect(saveMock).toHaveBeenCalledWith({
             tunnels: [{ network: ['tcp'], address: '127.0.0.1:9090', target: '2.2.2.2:80' }],
-        });
+        }, 'a.yaml');
     });
 
     it('a confirmed deletion is abandoned when the value match is ambiguous', async () => {
@@ -654,34 +657,31 @@ describe('tunnel item delete button accessibility and confirmation', () => {
         const resolveConfirm = clickAndHoldConfirm(list.querySelector('.btn-delete-icon'));
         await flush();
 
-        api.setTunnels([{ ...tunnel }, { ...tunnel }]);
+        api.setTunnels([{ ...tunnel }, { ...tunnel }], undefined, 'a.yaml');
         resolveConfirm(true);
         await flush();
 
         expect(saveMock).not.toHaveBeenCalled();
     });
 
-    it('a failed save restores the tunnel at its old place, not its stale index', async () => {
+    it('a failed save that a later save overrules is not put back', async () => {
         // Two deletions overlap: B (middle) is deleted first, then A
         // (before it) while B's save is still pending. Saves run in
-        // action order, so B's save settles first: it fails, and B's
-        // restore must go back before its surviving neighbour C — not
-        // to the stale index, which now points past C. A's save then
-        // sends the list with B back in it, so the displayed list and
-        // the persisted list agree.
-        const { list, saveMock, resolveSaves, tunnelB, tunnelC } = await deleteOverlappingTunnels();
+        // action order, so B's save settles first and fails. A's save
+        // was started later and sends the list without A and B: when the
+        // core takes it, both deletions are what it runs, and the list
+        // shows that.
+        const { list, saveMock, resolveSaves, tunnelC } = await deleteOverlappingTunnels();
 
         resolveSaves[0](false);
         await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(2));
-        // A's save sends the list with B restored in it.
-        expect(saveMock).toHaveBeenNthCalledWith(2, { tunnels: [tunnelB, tunnelC] });
+        expect(saveMock).toHaveBeenNthCalledWith(2, { tunnels: [tunnelC] }, 'a.yaml');
         resolveSaves[1](true);
         await flush();
 
         const remaining = list.querySelectorAll('.btn-delete-icon');
-        expect(remaining).toHaveLength(2);
-        expect(remaining[0]?.getAttribute('aria-label')).toBe('Delete 127.0.0.1:9090');
-        expect(remaining[1]?.getAttribute('aria-label')).toBe('Delete 127.0.0.1:7070');
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0]?.getAttribute('aria-label')).toBe('Delete 127.0.0.1:7070');
     });
 
     it('both overlapping saves failing restores the original order', async () => {
@@ -799,7 +799,7 @@ describe('tunnel item delete button accessibility and confirmation', () => {
         await flush();
         expect(saveMock).toHaveBeenCalledTimes(1);
 
-        api.setTunnels([tunnelB]);
+        api.setTunnels([tunnelB], undefined, 'a.yaml');
         resolveSave(false);
         await flush();
 
