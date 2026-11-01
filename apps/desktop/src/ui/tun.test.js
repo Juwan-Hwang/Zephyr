@@ -9,6 +9,7 @@ vi.mock('../api.js', () => ({
     closeAllConnections: vi.fn().mockResolvedValue(true),
     invoke: vi.fn(),
     restartCore: vi.fn().mockResolvedValue({}),
+    whileCoreReplaced: vi.fn((/** @type {() => Promise<any>} */ replace) => replace()),
     setSecret: vi.fn(),
     getConfig: vi.fn(),
     getCurrentWindow: vi.fn(() => ({

@@ -6,7 +6,8 @@ use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
 
 use super::sanitizer::{
-    remove_control_plane_keys, remove_dangerous_keys_internal_pub, remove_keys_resolved,
+    merged_mapping_get, remove_control_plane_keys, remove_dangerous_keys_internal_pub,
+    remove_keys_resolved, resolved_key_str,
 };
 
 // ── Security settings extraction / restoration (pure functions) ─────────
@@ -20,23 +21,46 @@ pub struct SecuritySettings {
     pub tun_enabled: bool,
 }
 
+/// The value of the entry of mapping `yaml` whose key names `name`, also one
+/// written with a local tag (`!custom tun`), which mihomo reads the same. A
+/// tagged mapping (`tun: !custom {...}`) is searched the same as a plain one.
+#[cfg(test)]
+fn resolved_get<'a>(yaml: &'a YamlValue, name: &str) -> Option<&'a YamlValue> {
+    let mut yaml = yaml;
+    while let YamlValue::Tagged(tagged) = yaml {
+        yaml = &tagged.value;
+    }
+    yaml.as_mapping()?
+        .iter()
+        .find(|(k, _)| resolved_key_str(k) == Some(name))
+        .map(|(_, v)| v)
+}
+
 /// Extract security-critical settings from a YAML value before merge.
 pub fn extract_security_settings(yaml: &YamlValue) -> SecuritySettings {
     SecuritySettings {
-        external_controller: yaml
-            .get("external-controller")
+        // Both count also when inherited through a `<<` merge key, the way
+        // mihomo reads them: a secret only inherited would otherwise read as
+        // absent, and a patch could then set a new one.
+        external_controller: merged_entry(yaml, "external-controller")
             .and_then(|v| v.as_str())
             .map(std::borrow::ToOwned::to_owned),
-        secret: yaml
-            .get("secret")
+        secret: merged_entry(yaml, "secret")
             .and_then(|v| v.as_str())
             .map(std::borrow::ToOwned::to_owned),
-        tun_enabled: yaml
-            .get("tun")
-            .and_then(|tun| tun.get("enable"))
-            .and_then(serde_yaml::Value::as_bool)
-            .unwrap_or(false),
+        tun_enabled: effective_tun_enabled(yaml),
     }
+}
+
+/// Whether TUN is on the way mihomo reads it: `tun.enable` counts also when
+/// it is inherited through a `<<` merge key, at either level.
+fn effective_tun_enabled(yaml: &YamlValue) -> bool {
+    yaml.as_mapping()
+        .and_then(|map| merged_mapping_get(map, "tun", 0))
+        .and_then(YamlValue::as_mapping)
+        .and_then(|tun| merged_mapping_get(tun, "enable", 0))
+        .and_then(YamlValue::as_bool)
+        .unwrap_or(false)
 }
 
 /// Restore security-critical settings into a YAML mapping after merge.
@@ -47,7 +71,10 @@ pub fn extract_security_settings(yaml: &YamlValue) -> SecuritySettings {
 /// `secret` or widen the controller's exposure.
 pub fn restore_security_settings(yaml: &mut YamlValue, settings: &SecuritySettings) {
     remove_control_plane_keys(yaml);
-    let YamlValue::Mapping(ref mut map) = yaml else {
+    // A tagged root (`!cfg {...}`) is still the config: a patch merges into
+    // it, so the pinning below has to reach it too (`as_mapping_mut` looks
+    // through the tag).
+    let Some(map) = yaml.as_mapping_mut() else {
         return;
     };
 
@@ -87,28 +114,175 @@ pub fn restore_security_settings(yaml: &mut YamlValue, settings: &SecuritySettin
         );
     }
 
-    // Protect TUN state - only allow changes through proper UI toggle
+    // Protect TUN state - only allow changes through proper UI toggle. Every
+    // `tun` entry counts, a tagged one (`!custom tun`) too, and so does a
+    // tagged `enable` inside it.
     if !settings.tun_enabled {
-        if let Some(YamlValue::Mapping(ref mut tun_map)) =
-            map.get_mut(YamlValue::String("tun".to_owned()))
-        {
-            tun_map.insert(
-                YamlValue::String("enable".to_owned()),
-                YamlValue::Bool(false),
-            );
+        for (key, value) in map.iter_mut() {
+            if resolved_key_str(key) != Some("tun") {
+                continue;
+            }
+            // `as_mapping_mut` looks through a tag (`!m`) on the value.
+            if let Some(tun_map) = value.as_mapping_mut() {
+                remove_keys_resolved(tun_map, &["enable"]);
+                tun_map.insert(
+                    YamlValue::String("enable".to_owned()),
+                    YamlValue::Bool(false),
+                );
+            }
+        }
+    } else {
+        // TUN on stays on: as with TUN off, only the TUN toggle changes it,
+        // never a saved patch. A patch's `enable: false` is put back, and so
+        // is the `enable: true` a `<<` merge gave: a patch that sets a `tun`
+        // field adds a `tun` mapping of its own, which hides the inherited
+        // one, so the reload would otherwise turn TUN off.
+        for (key, value) in map.iter_mut() {
+            if resolved_key_str(key) != Some("tun") {
+                continue;
+            }
+            if let Some(tun_map) = value.as_mapping_mut() {
+                let mut has_enable = false;
+                for (k, v) in tun_map.iter_mut() {
+                    if resolved_key_str(k) == Some("enable") {
+                        has_enable = true;
+                        *v = YamlValue::Bool(true);
+                    }
+                }
+                if !has_enable {
+                    tun_map.insert(
+                        YamlValue::String("enable".to_owned()),
+                        YamlValue::Bool(true),
+                    );
+                }
+            }
         }
     }
 }
 
-/// Remove the `secret` field from a YAML value to prevent credential leakage.
+/// Remove the `secret` field from a YAML value to prevent credential leakage:
+/// also one written with a tag (`!custom secret`), and also from a tagged
+/// root.
+///
+/// A `secret` inherited through `<<` merge sources (mihomo flattens them into
+/// the root) goes too: the JSON keeps those sources as they are written.
 pub fn strip_secret_from_yaml(yaml: &mut YamlValue) {
-    if let YamlValue::Mapping(ref mut map) = yaml {
-        map.remove(YamlValue::String("secret".to_owned()));
+    strip_secret_within(yaml, 0);
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn strip_secret_within(value: &mut YamlValue, depth: usize) {
+    if depth > MAX_INHERIT_DEPTH {
+        // Too deep to look through: nothing in it is handed out.
+        *value = YamlValue::Null;
+        return;
+    }
+    match value {
+        YamlValue::Mapping(map) => {
+            remove_keys_resolved(map, &["secret"]);
+            for (key, source) in map.iter_mut() {
+                if resolved_key_str(key) == Some("<<") {
+                    strip_secret_within(source, depth + 1);
+                }
+            }
+        }
+        // A list of merge sources (`<<: [*a, *b]`).
+        YamlValue::Sequence(sources) => {
+            for source in sources {
+                strip_secret_within(source, depth + 1);
+            }
+        }
+        YamlValue::Tagged(tagged) => strip_secret_within(&mut tagged.value, depth + 1),
+        _ => {}
+    }
+}
+
+/// Resolve every `<<` merge key in place, innermost first: a source that
+/// itself inherits is resolved before it merges into its parent, keys
+/// written at a level win over inherited ones, and an earlier source in a
+/// `<<` list wins over a later one (YAML merge-key order). A `<<` whose
+/// value is not a mapping or a list of mappings is an error: the caller
+/// then leaves the config as written.
+fn resolve_merge_keys(value: &mut YamlValue) -> Result<(), ()> {
+    match value {
+        YamlValue::Mapping(map) => {
+            for (_, entry) in map.iter_mut() {
+                resolve_merge_keys(entry)?;
+            }
+            let Some(merge_value) = map.remove("<<") else {
+                return Ok(());
+            };
+            let sources = match merge_value {
+                YamlValue::Mapping(source) => vec![source],
+                YamlValue::Sequence(items) => items
+                    .into_iter()
+                    .map(|item| item.as_mapping().cloned().ok_or(()))
+                    .collect::<Result<Vec<_>, ()>>()?,
+                YamlValue::Null
+                | YamlValue::Bool(_)
+                | YamlValue::Number(_)
+                | YamlValue::String(_)
+                | YamlValue::Tagged(_) => return Err(()),
+            };
+            for source in sources {
+                for (key, entry) in source {
+                    if !map.contains_key(&key) {
+                        map.insert(key, entry);
+                    }
+                }
+            }
+            Ok(())
+        }
+        YamlValue::Sequence(items) => items.iter_mut().try_for_each(resolve_merge_keys),
+        YamlValue::Tagged(tagged) => resolve_merge_keys(&mut tagged.value),
+        YamlValue::Null | YamlValue::Bool(_) | YamlValue::Number(_) | YamlValue::String(_) => {
+            Ok(())
+        }
+    }
+}
+
+/// The config without YAML tags, for the JSON the UI reads: mihomo reads
+/// `!custom mode` and a tagged mapping as the plain key and value, while
+/// JSON has no tags (a tagged key fails the conversion, and a tagged value
+/// would read as a `{"!tag": ...}` wrapper the UI does not know).
+#[allow(clippy::wildcard_enum_match_arm)]
+fn untagged_for_json(value: YamlValue) -> YamlValue {
+    match value {
+        YamlValue::Tagged(tagged) => untagged_for_json(tagged.value),
+        YamlValue::Mapping(map) => YamlValue::Mapping(
+            map.into_iter()
+                .map(|(key, entry)| (untagged_for_json(key), untagged_for_json(entry)))
+                .collect(),
+        ),
+        YamlValue::Sequence(items) => {
+            YamlValue::Sequence(items.into_iter().map(untagged_for_json).collect())
+        }
+        other => other,
+    }
+}
+
+/// The key of `map` written with a local tag (`!custom mode`) that names the
+/// same entry as `key`. mihomo reads such a key as the plain name, so a patch
+/// must change that entry rather than add a second one beside it. Only
+/// looked up when the plain key is missing.
+fn tagged_twin(map: &Mapping, key: &YamlValue) -> Option<YamlValue> {
+    let name = resolved_key_str(key)?;
+    map.keys()
+        .find(|k| matches!(k, YamlValue::Tagged(_)) && resolved_key_str(k) == Some(name))
+        .cloned()
+}
+
+/// Remove `key` from `map`, and an entry with a local tag that names it too.
+fn remove_entry(map: &mut Mapping, key: &YamlValue) {
+    map.remove(key);
+    while let Some(twin) = tagged_twin(map, key) {
+        map.remove(&twin);
     }
 }
 
 /// Recursively merge a patch into a base YAML value.
 /// Null values in the patch remove the corresponding key from base.
+/// A key the base writes with a local tag is the same key.
 pub fn merge_yaml(base: &mut YamlValue, patch: &YamlValue, depth: usize) -> Result<(), String> {
     if depth > 50 {
         return Err("YAML nesting depth exceeded limit".to_owned());
@@ -117,13 +291,23 @@ pub fn merge_yaml(base: &mut YamlValue, patch: &YamlValue, depth: usize) -> Resu
         (YamlValue::Mapping(a), YamlValue::Mapping(b)) => {
             for (k, v) in b {
                 if v.is_null() {
-                    a.remove(k);
+                    remove_entry(a, k);
                 } else if let Some(a_v) = a.get_mut(k) {
+                    merge_yaml(a_v, v, depth + 1)?;
+                } else if let Some(a_v) = tagged_twin(a, k).and_then(|twin| a.get_mut(&twin)) {
                     merge_yaml(a_v, v, depth + 1)?;
                 } else {
                     a.insert(k.clone(), v.clone());
                 }
             }
+        }
+        // A tagged mapping (`tun: !custom {...}`) is still that mapping: the
+        // patch goes into it and the tag stays.
+        (YamlValue::Tagged(tagged), b @ YamlValue::Mapping(_))
+            if matches!(tagged.value, YamlValue::Mapping(_)) =>
+        {
+            // Same level: the tag adds no nesting to the depth limit.
+            merge_yaml(&mut tagged.value, b, depth)?;
         }
         (a, b) => {
             *a = b.clone();
@@ -140,19 +324,51 @@ fn merge_yaml_owned(base: &mut YamlValue, patch: YamlValue, depth: usize) -> Res
         (YamlValue::Mapping(a), YamlValue::Mapping(b)) => {
             for (k, v) in b {
                 if v.is_null() {
-                    a.remove(&k);
+                    remove_entry(a, &k);
                 } else if let Some(a_v) = a.get_mut(&k) {
+                    merge_yaml_owned(a_v, v, depth + 1)?;
+                } else if let Some(a_v) = tagged_twin(a, &k).and_then(|twin| a.get_mut(&twin)) {
                     merge_yaml_owned(a_v, v, depth + 1)?;
                 } else {
                     a.insert(k, v);
                 }
             }
         }
+        // As in merge_yaml: the patch goes into a tagged mapping.
+        (YamlValue::Tagged(tagged), b @ YamlValue::Mapping(_))
+            if matches!(tagged.value, YamlValue::Mapping(_)) =>
+        {
+            // Same level: the tag adds no nesting to the depth limit.
+            merge_yaml_owned(&mut tagged.value, b, depth)?;
+        }
         (a, b) => {
             *a = b;
         }
     }
     Ok(())
+}
+
+/// Drop every `<<` merge key from a patch, at any depth. The app's pages
+/// never send one; a merge source would bring in values (`tun.enable`) that
+/// the security restore checks only as plain entries. A patch nested deeper
+/// than the merge allows is refused.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn strip_patch_merge_keys(value: &mut YamlValue, depth: usize) -> Result<(), String> {
+    if depth > 50 {
+        return Err("YAML nesting depth exceeded limit".to_owned());
+    }
+    match value {
+        YamlValue::Mapping(map) => {
+            remove_keys_resolved(map, &["<<"]);
+            map.iter_mut()
+                .try_for_each(|(_, child)| strip_patch_merge_keys(child, depth + 1))
+        }
+        YamlValue::Sequence(seq) => seq
+            .iter_mut()
+            .try_for_each(|item| strip_patch_merge_keys(item, depth + 1)),
+        YamlValue::Tagged(tagged) => strip_patch_merge_keys(&mut tagged.value, depth + 1),
+        _ => Ok(()),
+    }
 }
 
 // ── ConfigIo trait for testable file operations ────────────────────────────
@@ -182,10 +398,122 @@ pub fn read_config_with_io<I: ConfigIo>(
     // Security mitigation: Strip secret and external-controller to prevent credential leakage
     strip_secret_from_yaml(&mut yaml_val);
 
-    let json_val: JsonValue = serde_json::to_value(yaml_val)
-        .map_err(|e| format!("Failed to convert YAML to JSON: {e}"))?;
+    let mut plain = untagged_for_json(yaml_val);
+    // Values inherited through `<<` are what mihomo runs: the reader sees
+    // them in place, so an inherited list (`tunnels`, `rules`) does not read
+    // as missing and get saved over. A merge mihomo itself would refuse
+    // leaves the keys as written.
+    let mut merged = plain.clone();
+    if resolve_merge_keys(&mut merged).is_ok() {
+        plain = merged;
+    }
+    let json_val: JsonValue =
+        serde_json::to_value(plain).map_err(|e| format!("Failed to convert YAML to JSON: {e}"))?;
 
     Ok(json_val)
+}
+
+/// How deep the inheritance helpers below follow a patch.
+const MAX_INHERIT_DEPTH: usize = 64;
+
+/// `name` in mapping `value` once `<<` merge keys are resolved.
+fn merged_entry<'a>(value: &'a YamlValue, name: &str) -> Option<&'a YamlValue> {
+    merged_mapping_get(value.as_mapping()?, name, 0)
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn untagged_mut(value: &mut YamlValue) -> &mut YamlValue {
+    match value {
+        YamlValue::Tagged(tagged) => untagged_mut(&mut tagged.value),
+        other => other,
+    }
+}
+
+/// Before a patch is merged in: each mapping the patch adds to that `base`
+/// only inherits through `<<` becomes an explicit copy of what it inherits,
+/// at every level the patch reaches. An explicit key replaces the inherited
+/// mapping as a whole, so merging into an empty one would drop every
+/// inherited field (`tun.enable` among them).
+#[allow(clippy::wildcard_enum_match_arm)]
+pub fn copy_inherited_mappings(target: &mut YamlValue, patch: &YamlValue, depth: usize) {
+    if depth > MAX_INHERIT_DEPTH {
+        return;
+    }
+    // A tagged mapping (`tun: !custom {...}`) takes the patch inside its tag.
+    let base = untagged_mut(target);
+    let YamlValue::Mapping(patch_map) = patch else {
+        return;
+    };
+    for (key, patch_value) in patch_map {
+        if !matches!(patch_value, YamlValue::Mapping(_)) {
+            continue;
+        }
+        let Some(name) = resolved_key_str(key) else {
+            continue;
+        };
+        let YamlValue::Mapping(map) = &*base else {
+            return;
+        };
+        let explicit = map.iter().any(|(k, _)| resolved_key_str(k) == Some(name));
+        if !explicit {
+            // A tagged mapping (`dns: !custom {...}`) is copied with its tag.
+            let inherited = match merged_entry(base, name) {
+                Some(found) if found.is_mapping() => found.clone(),
+                _ => continue,
+            };
+            if let YamlValue::Mapping(map) = base {
+                map.insert(key.clone(), inherited);
+            }
+        }
+        if let YamlValue::Mapping(map) = base {
+            if let Some((_, child)) = map
+                .iter_mut()
+                .find(|(k, _)| resolved_key_str(k) == Some(name))
+            {
+                copy_inherited_mappings(child, patch_value, depth + 1);
+            }
+        }
+    }
+}
+
+/// After a patch is merged in: each key the patch removes (a null) that
+/// `base` still inherits through `<<` is written as an explicit null, which
+/// overrides the inherited value; removing the key alone would leave it in
+/// effect. At every level the patch reaches.
+#[allow(clippy::wildcard_enum_match_arm)]
+pub fn null_out_inherited(target: &mut YamlValue, patch: &YamlValue, depth: usize) {
+    if depth > MAX_INHERIT_DEPTH {
+        return;
+    }
+    let base = untagged_mut(target);
+    let (YamlValue::Mapping(patch_map), YamlValue::Mapping(_)) = (patch, &*base) else {
+        return;
+    };
+    for (key, patch_value) in patch_map {
+        let Some(name) = resolved_key_str(key) else {
+            continue;
+        };
+        match patch_value {
+            YamlValue::Null => {
+                if merged_entry(base, name).is_some_and(|v| !v.is_null()) {
+                    if let YamlValue::Mapping(map) = base {
+                        map.insert(key.clone(), YamlValue::Null);
+                    }
+                }
+            }
+            YamlValue::Mapping(_) => {
+                if let YamlValue::Mapping(map) = base {
+                    if let Some((_, child)) = map
+                        .iter_mut()
+                        .find(|(k, _)| resolved_key_str(k) == Some(name))
+                    {
+                        null_out_inherited(child, patch_value, depth + 1);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Testable core of `update_config` that handles merge + security settings.
@@ -195,6 +523,12 @@ pub fn update_config_core<I: ConfigIo>(
     run_config_path: &std::path::Path,
     patch: &JsonValue,
 ) -> Result<(YamlValue, String), String> {
+    // A patch sets config keys. Anything but an object would replace the
+    // whole config instead of merging into it.
+    if !patch.is_object() {
+        return Err("Config patch must be an object of config keys".to_owned());
+    }
+
     // 1. Read existing config
     let mut current_yaml: YamlValue = if io.path_exists(run_config_path) {
         let content = io.read_to_string(run_config_path)?;
@@ -205,13 +539,26 @@ pub fn update_config_core<I: ConfigIo>(
     };
 
     // 2. Convert patch to YAML
-    let patch_yaml: YamlValue = serde_yaml::to_value(patch)
+    let mut patch_yaml: YamlValue = serde_yaml::to_value(patch)
         .map_err(|e| format!("Failed to convert JSON patch to YAML: {e}"))?;
+    strip_patch_merge_keys(&mut patch_yaml, 0)?;
 
     // 3. SECURITY: Remove dangerous keys before merging
     remove_dangerous_keys_internal_pub(&mut current_yaml, false);
     let security_settings = extract_security_settings(&current_yaml);
+    // A `tun` that is not a mapping (null, `false`, a string) would replace
+    // or remove the config's own entry: with TUN off, a null can bring an
+    // inherited `enable: true` into effect; with TUN on, any of them turn
+    // TUN off. Either way only the TUN toggle changes TUN.
+    if let Some(map) = patch_yaml.as_mapping_mut() {
+        map.retain(|k, v| resolved_key_str(k) != Some("tun") || v.is_mapping());
+    }
+    // As in a profile: a mapping the config inherits through `<<` keeps its
+    // inherited fields, and a removed key it inherits stays removed.
+    copy_inherited_mappings(&mut current_yaml, &patch_yaml, 0);
+    let removals = patch_yaml.clone();
     merge_yaml_owned(&mut current_yaml, patch_yaml, 0)?;
+    null_out_inherited(&mut current_yaml, &removals, 0);
     remove_dangerous_keys_internal_pub(&mut current_yaml, false);
     restore_security_settings(&mut current_yaml, &security_settings);
 
@@ -313,6 +660,81 @@ mod tests {
     }
 
     #[test]
+    fn merge_changes_an_entry_written_with_a_local_tag() {
+        let mut base: YamlValue =
+            serde_yaml::from_str("!custom mode: rule\n!custom log-level: info\nport: 7890")
+                .unwrap();
+        let patch: YamlValue = serde_yaml::from_str("mode: global\nlog-level: null").unwrap();
+        merge_yaml(&mut base, &patch, 0).unwrap();
+        let map = base.as_mapping().unwrap();
+        let modes: Vec<_> = map
+            .iter()
+            .filter(|(k, _)| resolved_key_str(k) == Some("mode"))
+            .map(|(_, v)| v.as_str().unwrap())
+            .collect();
+        assert_eq!(modes, ["global"]);
+        assert!(map.keys().all(|k| resolved_key_str(k) != Some("log-level")));
+
+        let mut owned: YamlValue = serde_yaml::from_str("!custom mode: rule").unwrap();
+        merge_yaml_owned(&mut owned, serde_yaml::from_str("mode: direct").unwrap(), 0).unwrap();
+        assert_eq!(owned.as_mapping().unwrap().len(), 1);
+        assert_eq!(
+            owned
+                .as_mapping()
+                .unwrap()
+                .values()
+                .next()
+                .unwrap()
+                .as_str(),
+            Some("direct")
+        );
+    }
+
+    #[test]
+    fn merge_goes_into_a_tagged_mapping_and_keeps_its_tag() {
+        let source =
+            "!custom tun: !conf\n  enable: false\n  stack: system\ndns: !conf\n  ipv6: false\n";
+        let patch: YamlValue =
+            serde_yaml::from_str("tun:\n  stack: gvisor\ndns:\n  listen: 0.0.0.0:1053").unwrap();
+        let check = |merged: &YamlValue| {
+            let map = merged.as_mapping().unwrap();
+            for (name, kept, changed, value) in [
+                ("tun", "enable", "stack", "gvisor"),
+                ("dns", "ipv6", "listen", "0.0.0.0:1053"),
+            ] {
+                let entry = map
+                    .iter()
+                    .find(|(k, _)| resolved_key_str(k) == Some(name))
+                    .map(|(_, v)| v)
+                    .unwrap();
+                let tagged_inner = if let YamlValue::Tagged(tagged) = entry {
+                    tagged.value.as_mapping()
+                } else {
+                    None
+                };
+                assert!(tagged_inner.is_some(), "{name} lost its tag: {entry:?}");
+                let inner = tagged_inner.unwrap();
+                assert!(
+                    inner.contains_key(&YamlValue::String(kept.to_owned())),
+                    "{name}.{kept} dropped"
+                );
+                assert_eq!(
+                    inner
+                        .get(&YamlValue::String(changed.to_owned()))
+                        .and_then(YamlValue::as_str),
+                    Some(value)
+                );
+            }
+        };
+        let mut base: YamlValue = serde_yaml::from_str(source).unwrap();
+        merge_yaml(&mut base, &patch, 0).unwrap();
+        check(&base);
+        let mut owned: YamlValue = serde_yaml::from_str(source).unwrap();
+        merge_yaml_owned(&mut owned, patch, 0).unwrap();
+        check(&owned);
+    }
+
+    #[test]
     fn test_merge_yaml_null_removes_key() {
         let mut base: YamlValue =
             serde_yaml::from_str("port: 7890\nmode: rule\nlog-level: info").unwrap();
@@ -338,6 +760,30 @@ mod tests {
         );
         assert_eq!(settings.secret, Some("mysecret".to_owned()));
         assert!(settings.tun_enabled);
+    }
+
+    #[test]
+    fn test_restore_keeps_tun_on_against_a_patch() {
+        for patched in [
+            "tun:\n  enable: false\n  stack: gvisor",
+            "tun:\n  !custom enable: false",
+            "tun:\n  stack: gvisor",
+        ] {
+            let mut yaml: YamlValue = serde_yaml::from_str(patched).unwrap();
+            let settings = SecuritySettings {
+                external_controller: None,
+                secret: None,
+                tun_enabled: true,
+            };
+            restore_security_settings(&mut yaml, &settings);
+            assert!(extract_security_settings(&yaml).tun_enabled, "{patched}");
+            let tun = yaml.get("tun").unwrap().as_mapping().unwrap();
+            let enables = tun
+                .keys()
+                .filter(|k| resolved_key_str(k) == Some("enable"))
+                .count();
+            assert_eq!(enables, 1, "{patched}");
+        }
     }
 
     #[test]
@@ -449,6 +895,72 @@ mod tests {
     ];
 
     #[test]
+    fn read_config_hands_out_no_secret_inherited_through_merge_keys() {
+        let io = MemIo {
+            content: std::cell::RefCell::new(Some(
+                "<<: [{secret: s3cr3t, mixed-port: 7890}, !m {<<: {secret: other}}]\n!custom secret: t4gged\nmode: rule\n"
+                    .to_owned(),
+            )),
+        };
+        let json = read_config_with_io(&io, std::path::Path::new("run_config.yaml")).unwrap();
+        let text = json.to_string();
+        assert!(!text.contains("s3cr3t"), "{text}");
+        assert!(!text.contains("other"), "{text}");
+        assert!(!text.contains("t4gged"), "{text}");
+        assert_eq!(json["mode"], "rule");
+    }
+
+    #[test]
+    fn read_config_reads_tagged_keys_and_values_as_plain_ones() {
+        let io = MemIo {
+            content: std::cell::RefCell::new(Some(
+                "!custom mode: global\ndns: !cfg\n  enable: true\n".to_owned(),
+            )),
+        };
+        let json = read_config_with_io(&io, std::path::Path::new("run_config.yaml")).unwrap();
+        assert_eq!(json["mode"], "global");
+        assert_eq!(json["dns"]["enable"], true);
+    }
+
+    #[test]
+    fn read_config_reads_values_inherited_through_merge_keys_in_place() {
+        let io = MemIo {
+            content: std::cell::RefCell::new(Some(
+                "base: &b\n  tunnels: [{network: [tcp], address: 127.0.0.1:1, target: a:1}]\n  mode: global\n<<: *b\nmode: rule\n"
+                    .to_owned(),
+            )),
+        };
+        let json = read_config_with_io(&io, std::path::Path::new("run_config.yaml")).unwrap();
+        assert_eq!(json["tunnels"][0]["target"], "a:1");
+        // A key written at the level itself wins over the inherited one.
+        assert_eq!(json["mode"], "rule");
+        assert!(json.get("<<").is_none());
+
+        // A source that itself inherits: the chain resolves to the end.
+        let io = MemIo {
+            content: std::cell::RefCell::new(Some(
+                "a: &a\n  allow-lan: true\nb: &b\n  <<: *a\n  ipv6: true\n<<: *b\n".to_owned(),
+            )),
+        };
+        let json = read_config_with_io(&io, std::path::Path::new("run_config.yaml")).unwrap();
+        assert_eq!(json["allow-lan"], true);
+        assert_eq!(json["ipv6"], true);
+        assert!(json.get("<<").is_none());
+        // Nested inside a source and in a list: the earlier source wins, and
+        // a nested mapping (not only the root) resolves its own `<<`.
+        let io = MemIo {
+            content: std::cell::RefCell::new(Some(
+                "<<:\n  - <<: {rules: ['MATCH,REJECT']}\n  - rules: ['MATCH,DIRECT']\ndns:\n  <<: {enable: true}\n  ipv6: false\n".to_owned(),
+            )),
+        };
+        let json = read_config_with_io(&io, std::path::Path::new("run_config.yaml")).unwrap();
+        assert_eq!(json["rules"][0], "MATCH,REJECT");
+        assert_eq!(json["dns"]["enable"], true);
+        assert_eq!(json["dns"]["ipv6"], false);
+        assert!(json["dns"].get("<<").is_none());
+    }
+
+    #[test]
     fn test_control_samples_cover_blacklist() {
         let sample_keys: Vec<&str> = CONTROL_SAMPLES.iter().map(|(k, _)| *k).collect();
         for key in crate::config::sanitizer::CONTROL_PLANE_KEYS {
@@ -488,6 +1000,183 @@ mod tests {
     }
 
     #[test]
+    fn test_update_config_core_drops_merge_keys_from_patch() {
+        let io = MemIo {
+            content: std::cell::RefCell::new(Some(
+                "external-controller: 127.0.0.1:9090\ntun:\n  enable: false\n".to_owned(),
+            )),
+        };
+        let patch = serde_json::json!({
+            "<<": { "tun": { "enable": true } },
+            "dns": { "<<": { "enable": true }, "ipv6": true },
+        });
+        let (yaml, _) =
+            update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).unwrap();
+        assert!(yaml.get("<<").is_none());
+        assert!(yaml["dns"].get("<<").is_none());
+        assert_eq!(yaml["dns"]["ipv6"].as_bool(), Some(true));
+        assert_eq!(yaml["tun"]["enable"].as_bool(), Some(false));
+        assert!(!io.content.borrow().clone().unwrap().contains("<<"));
+    }
+
+    #[test]
+    fn test_update_config_core_keeps_a_disabled_tun_when_a_patch_removes_it() {
+        let io = MemIo {
+            content: std::cell::RefCell::new(Some(
+                "external-controller: 127.0.0.1:9090\n<<: {tun: {enable: true}}\ntun:\n  enable: false\n"
+                    .to_owned(),
+            )),
+        };
+        let patch = serde_json::json!({ "tun": null, "mode": "global" });
+        let (yaml, _) =
+            update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).unwrap();
+        assert_eq!(yaml["tun"]["enable"].as_bool(), Some(false));
+        assert_eq!(yaml["mode"].as_str(), Some("global"));
+    }
+
+    #[test]
+    fn test_update_config_core_keeps_an_enabled_tun_when_a_patch_sets_a_scalar() {
+        for tun in [serde_json::json!(false), serde_json::json!("off")] {
+            let io = MemIo {
+                content: std::cell::RefCell::new(Some(
+                    "external-controller: 127.0.0.1:9090\ntun:\n  enable: true\n".to_owned(),
+                )),
+            };
+            let patch = serde_json::json!({ "tun": tun, "mode": "rule" });
+            let (yaml, _) =
+                update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).unwrap();
+            assert_eq!(yaml["tun"]["enable"].as_bool(), Some(true));
+            assert_eq!(yaml["mode"].as_str(), Some("rule"));
+        }
+    }
+
+    #[test]
+    fn test_update_config_core_keeps_fields_inherited_through_merge_keys() {
+        let io = MemIo {
+            content: std::cell::RefCell::new(Some(
+                "external-controller: 127.0.0.1:9090\n<<: {log-level: debug, dns: {enable: true, nameserver: [192.0.2.1], ipv6: true}}\n"
+                    .to_owned(),
+            )),
+        };
+        let patch = serde_json::json!({
+            "log-level": null,
+            "dns": { "listen": "0.0.0.0:53", "ipv6": null }
+        });
+        let (yaml, _) =
+            update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).unwrap();
+        // The patch adds to the inherited `dns` rather than replacing it;
+        // the key it removes is gone from the `dns` that now hides the
+        // inherited one.
+        assert_eq!(yaml["dns"]["enable"].as_bool(), Some(true));
+        assert_eq!(yaml["dns"]["nameserver"][0].as_str(), Some("192.0.2.1"));
+        assert_eq!(yaml["dns"]["listen"].as_str(), Some("0.0.0.0:53"));
+        assert!(!yaml["dns"].as_mapping().unwrap().contains_key("ipv6"));
+        // A removed key the config inherits is written as a null over it.
+        assert!(yaml.as_mapping().unwrap().contains_key("log-level"));
+        assert!(yaml["log-level"].is_null());
+    }
+
+    #[test]
+    fn test_update_config_core_keeps_fields_of_a_tagged_inherited_mapping() {
+        let io = MemIo {
+            content: std::cell::RefCell::new(Some(
+                "external-controller: 127.0.0.1:9090\n<<: {dns: !custom {enable: true, nameserver: [192.0.2.1]}}\n"
+                    .to_owned(),
+            )),
+        };
+        // `is_mapping` looks through the tag, so the tagged inherited `dns`
+        // is copied before the patch merges into it.
+        let patch = serde_json::json!({ "dns": { "ipv6": true } });
+        let (yaml, _) =
+            update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).unwrap();
+        assert!(matches!(yaml["dns"], YamlValue::Tagged(_)));
+        let dns = YamlValue::Mapping(yaml["dns"].as_mapping().unwrap().clone());
+        assert_eq!(dns["enable"].as_bool(), Some(true));
+        assert_eq!(dns["nameserver"][0].as_str(), Some("192.0.2.1"));
+        assert_eq!(dns["ipv6"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn test_update_config_core_keeps_an_inherited_enabled_tun_on() {
+        let io = MemIo {
+            content: std::cell::RefCell::new(Some(
+                "external-controller: 127.0.0.1:9090\n<<: {tun: {enable: true}}\n".to_owned(),
+            )),
+        };
+        let patch = serde_json::json!({ "tun": { "stack": "mixed" } });
+        let (yaml, _) =
+            update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).unwrap();
+        // The patch's own `tun` hides the inherited one: TUN stays on.
+        assert_eq!(yaml["tun"]["enable"].as_bool(), Some(true));
+        assert_eq!(yaml["tun"]["stack"].as_str(), Some("mixed"));
+    }
+
+    #[test]
+    fn test_update_config_core_keeps_an_enabled_tun_on_against_a_patch() {
+        for patch in [
+            serde_json::json!({ "tun": { "enable": false } }),
+            serde_json::json!({ "tun": null, "mode": "global" }),
+        ] {
+            let io = MemIo {
+                content: std::cell::RefCell::new(Some(
+                    "external-controller: 127.0.0.1:9090\ntun:\n  enable: true\n  stack: gvisor\n"
+                        .to_owned(),
+                )),
+            };
+            let (yaml, _) =
+                update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).unwrap();
+            assert_eq!(yaml["tun"]["enable"].as_bool(), Some(true), "{patch}");
+            assert_eq!(yaml["tun"]["stack"].as_str(), Some("gvisor"), "{patch}");
+        }
+    }
+
+    #[test]
+    fn test_update_config_core_keeps_a_tagged_disabled_tun_off() {
+        for original in [
+            "external-controller: 127.0.0.1:9090\n!custom tun:\n  enable: false\n",
+            "external-controller: 127.0.0.1:9090\ntun:\n  !!str enable: false\n",
+            "external-controller: 127.0.0.1:9090\n!custom tun: !m\n  enable: false\n",
+        ] {
+            let io = MemIo {
+                content: std::cell::RefCell::new(Some(original.to_owned())),
+            };
+            let patch = serde_json::json!({ "tun": { "enable": true, "stack": "mixed" } });
+            let (yaml, _) =
+                update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).unwrap();
+            let enables: Vec<_> = resolved_get(&yaml, "tun")
+                .unwrap()
+                .as_mapping()
+                .unwrap()
+                .iter()
+                .filter(|(k, _)| resolved_key_str(k) == Some("enable"))
+                .map(|(_, v)| v.as_bool())
+                .collect();
+            assert_eq!(enables, vec![Some(false)], "{original}");
+            assert!(!extract_security_settings(&yaml).tun_enabled, "{original}");
+        }
+    }
+
+    #[test]
+    fn test_update_config_core_refuses_a_patch_that_is_not_an_object() {
+        let original = "mode: rule\nmixed-port: 7890\n";
+        for patch in [
+            serde_json::json!(["mode", "global"]),
+            serde_json::json!("mode: global"),
+            serde_json::json!(7),
+            serde_json::json!(null),
+        ] {
+            let io = MemIo {
+                content: std::cell::RefCell::new(Some(original.to_owned())),
+            };
+            assert!(
+                update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).is_err(),
+                "{patch} must be refused"
+            );
+            assert_eq!(io.content.borrow().as_deref(), Some(original));
+        }
+    }
+
+    #[test]
     fn test_update_config_core_strips_control_plane_keys_from_existing_file() {
         for (key, json_value) in CONTROL_SAMPLES {
             let io = MemIo {
@@ -509,6 +1198,63 @@ mod tests {
                 "{key} was written back to disk: {written}"
             );
         }
+    }
+
+    #[test]
+    fn test_update_config_core_pins_the_controller_of_a_tagged_root() {
+        let io = MemIo {
+            content: std::cell::RefCell::new(Some(
+                "!cfg\nexternal-controller: 127.0.0.1:9090\nsecret: s3cret\nmode: rule\n"
+                    .to_owned(),
+            )),
+        };
+        let patch = serde_json::json!({
+            "external-controller": "0.0.0.0:9999",
+            "secret": "",
+            "mode": "global",
+        });
+        let (yaml, port) =
+            update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).unwrap();
+        assert!(matches!(yaml, YamlValue::Tagged(_)), "{yaml:?}");
+        assert_eq!(yaml["external-controller"].as_str(), Some("127.0.0.1:9090"));
+        assert_eq!(yaml["secret"].as_str(), Some("s3cret"));
+        assert_eq!(yaml["mode"].as_str(), Some("global"));
+        assert_eq!(port, "9090");
+        let written = io.content.borrow().clone().unwrap();
+        assert!(!written.contains("0.0.0.0"), "{written}");
+    }
+
+    #[test]
+    fn test_strip_secret_reaches_a_tagged_root_and_a_tagged_key() {
+        for original in [
+            "!cfg\nsecret: s3cret\nmode: rule\n",
+            "!custom secret: s3cret\nmode: rule\n",
+        ] {
+            let mut yaml: YamlValue = serde_yaml::from_str(original).unwrap();
+            strip_secret_from_yaml(&mut yaml);
+            let text = serde_yaml::to_string(&yaml).unwrap();
+            assert!(!text.contains("s3cret"), "{original} -> {text}");
+            assert_eq!(yaml["mode"].as_str(), Some("rule"), "{original}");
+        }
+    }
+
+    #[test]
+    fn test_inherited_secret_survives_a_patch() {
+        let mut yaml: YamlValue = serde_yaml::from_str(
+            "<<: {secret: mysecret, external-controller: 127.0.0.1:9191}\nport: 7890\n",
+        )
+        .unwrap();
+        let settings = extract_security_settings(&yaml);
+        assert_eq!(settings.secret.as_deref(), Some("mysecret"));
+        assert_eq!(
+            settings.external_controller.as_deref(),
+            Some("127.0.0.1:9191")
+        );
+        let patch: YamlValue = serde_yaml::from_str("secret: attacker\n").unwrap();
+        merge_yaml(&mut yaml, &patch, 0).unwrap();
+        restore_security_settings(&mut yaml, &settings);
+        assert_eq!(yaml["secret"].as_str(), Some("mysecret"));
+        assert_eq!(yaml["external-controller"].as_str(), Some("127.0.0.1:9191"));
     }
 
     #[test]
