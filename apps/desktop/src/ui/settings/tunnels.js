@@ -15,6 +15,7 @@ import { pasteWithFeedback, renderPasteButtonHtml } from '../../utils/clipboard.
 import { translations } from '../../i18n.js';
 import { escapeHtml } from '../../utils/sanitize.js';
 import { Bus, Events } from '../events.js';
+import { settingsLogger } from '../../utils/logger.js';
 
 /**
  * Two tunnel rows are the same rule when address, target and network
@@ -74,36 +75,176 @@ function isValidAddress(addr) {
  * @param {HTMLElement|null} opts.tunnelsList - The tunnel list container.
  * @param {HTMLElement|null} opts.tunnelsEmpty - The empty state element.
  * @param {any[]} opts.initialTunnels - The initial tunnel list from core config.
- * @param {(patch: Record<string, any>) => Promise<boolean|'restart'>} opts.saveConfigToCore - Callback to save config patch to core.
+ * @param {boolean} [opts.initialKnown=true] - Whether initialTunnels is the list the
+ *   core runs; when not, nothing is saved until setTunnels() brings that list.
+ * @param {(patch: Record<string, any>, expectProfile?: string|null) => Promise<boolean|'restart'|'partial'>} opts.saveConfigToCore - Callback to save config patch to core;
+ *   with `expectProfile`, the backend refuses it once the core runs another profile.
  */
 export function initTunnelSettings({
     addTunnelBtn,
     tunnelsList,
     tunnelsEmpty,
     initialTunnels,
+    initialKnown = true,
     saveConfigToCore,
 }) {
     /** @type {any[]} */
     let currentTunnels = initialTunnels;
-
-    // Tunnel-list saves run one at a time, in action order: two
-    // overlapping saves can otherwise land out of order, and the stale
-    // one overwrites the newer list the backend already holds. Each
-    // save sends the list as it stands when its turn comes, so a
-    // failed earlier save's restore is already in the next payload.
-    let saveChain = Promise.resolve();
     /**
-     * Save the current tunnel list after all earlier tunnel saves
-     * have settled, in action order.
-     * @returns {Promise<boolean|'restart'>}
+     * The list the core runs as far as this page knows: the one read from
+     * it, or the last one a save sent that it took (a 'restart' result too:
+     * the files hold it and the core runs it after the restart its notice
+     * asks for). A save that fails when no newer one was started puts this
+     * list back, so a tunnel whose removal never reached the core shows again.
+     * @type {any[]}
      */
-    function saveTunnels() {
-        const run = saveChain.then(() => saveConfigToCore({ tunnels: currentTunnels }));
-        saveChain = run.then(
-            () => undefined,
-            () => undefined,
-        );
+    let confirmed = initialTunnels.slice();
+    /**
+     * Whether the core's list was read at all: saving a list built on top of
+     * an unread one would drop the tunnels the core runs.
+     */
+    let known = initialKnown;
+    /**
+     * The profile the core ran when the list was read ('' for the minimal
+     * config); null when not known, and then nothing is checked. A save of
+     * this list into another profile would overwrite that profile's tunnels.
+     * @type {string|null}
+     */
+    let listProfile = null;
+    /**
+     * The core runs the list shown, but the active profile did not take it
+     * (a 'partial' save): it is lost when that profile is loaded again.
+     */
+    let profileUnsaved = false;
+    /** Saves started so far, numbered in start order. */
+    let saveSeq = 0;
+    /** The newest save the core took: a newer one that failed does not overrule it. */
+    let appliedSeq = 0;
+    /**
+     * The numbers of the resets whose own save was started and not yet
+     * followed by resetAfterSave, oldest first: resets run (and end) in the
+     * order they start, so each takes its own number back.
+     * @type {number[]}
+     */
+    const resetSeqs = [];
+    /** Saves (and resets) not finished yet. */
+    let pending = 0;
+    /**
+     * Tunnel saves and the reset run one at a time, in the order they were
+     * started: the backend lock keeps them apart but not in order, so an
+     * older list could otherwise land after a newer one.
+     * @type {Promise<unknown>}
+     */
+    let queue = Promise.resolve();
+
+    /**
+     * Run `task` after every save started before it.
+     * @template T
+     * @param {() => Promise<T>} task
+     * @returns {Promise<T | false>}
+     */
+    function enqueue(task) {
+        pending += 1;
+        // A save that throws took nothing: it reads as a failed one, so the
+        // list goes back to what the core runs and no reset number is left.
+        const run = queue.then(task).catch((err) => {
+            settingsLogger.warn('Tunnel save failed', err);
+            return /** @type {const} */ (false);
+        }).finally(() => { pending -= 1; });
+        queue = run.catch(() => {});
         return run;
+    }
+
+    /**
+     * Whether a save or reset started after the save numbered `seq`.
+     * @param {number} seq
+     */
+    const supersededSince = (seq) => saveSeq !== seq;
+
+    /**
+     * Save the list as it is now. A partial save keeps the list (the core
+     * already runs it) but marks it unsaved, so the list offers a retry. A
+     * newer save that failed took nothing, so it does not hide an older
+     * partial save.
+     * @returns {Promise<boolean|'restart'|'partial'>}
+     */
+    /**
+     * Whether the list cannot be changed now, saying why: its profile is not
+     * known (a save of it could land in any profile), or a reset is still
+     * running (a list built before it lands after it and brings back the
+     * tunnels it removes).
+     * @returns {boolean}
+     */
+    function editBlocked() {
+        /** @type {any} */
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')] || {};
+        if (!known || listProfile === null) {
+            showNotification(t.tunnelsNotLoaded || 'The port forwarding list could not be read from the core. Reopen Settings to try again.', 'error');
+            return true;
+        }
+        if (resetSeqs.length > 0) {
+            showNotification(t.tunnelsResetRunning || 'Restoring the defaults is still running. Try again when it is done.', 'warning');
+            return true;
+        }
+        return false;
+    }
+
+    async function saveTunnels() {
+        const seq = ++saveSeq;
+        const list = currentTunnels.slice();
+        // The profile the list belongs to now: a reset finishing before this
+        // save runs files another list under another profile.
+        const profile = listProfile;
+        const ok = await enqueue(async () => {
+            const result = await saveConfigToCore({ tunnels: list }, profile);
+            // Saves run in start order: the latest one the core took sets the list it runs.
+            if (result) confirmed = list;
+            return result;
+        });
+        if (ok && seq > appliedSeq) {
+            appliedSeq = seq;
+            profileUnsaved = ok === 'partial';
+        }
+        if (!ok && !supersededSince(seq)) {
+            // The newest save failed: show what the core runs, which also
+            // brings back what an earlier failed save tried to change.
+            currentTunnels = confirmed.slice();
+        }
+        return ok;
+    }
+
+    /** @param {object} tunnel */
+    function removeTunnel(tunnel) {
+        const at = currentTunnels.indexOf(tunnel);
+        if (at >= 0) currentTunnels.splice(at, 1);
+    }
+
+    /** A row saying the list is not saved to the profile, with a retry button. */
+    function renderUnsavedRow() {
+        /** @type {any} */
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')] || {};
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-2 rounded-lg p-2 text-xs text-[var(--warning-color,#d97706)]';
+        row.dataset.tunnelsUnsaved = '';
+        const label = document.createElement('span');
+        label.textContent = t.unsavedChanges || 'Unsaved changes';
+        const retryBtn = document.createElement('button');
+        retryBtn.type = 'button';
+        retryBtn.className = 'btn-secondary text-xs px-2 py-1';
+        retryBtn.textContent = t.retry || 'Retry';
+        retryBtn.onclick = async () => {
+            if (editBlocked()) return;
+            retryBtn.disabled = true;
+            try {
+                await saveTunnels();
+            } finally {
+                retryBtn.disabled = false;
+            }
+            renderTunnels();
+        };
+        row.appendChild(label);
+        row.appendChild(retryBtn);
+        return row;
     }
 
     function renderTunnels() {
@@ -111,6 +252,7 @@ export function initTunnelSettings({
 
         if (!currentTunnels || currentTunnels.length === 0) {
             tunnelsList.replaceChildren();
+            if (profileUnsaved) tunnelsList.appendChild(renderUnsavedRow());
             if (tunnelsEmpty) tunnelsList.appendChild(tunnelsEmpty);
             if (tunnelsEmpty) tunnelsEmpty.style.display = 'block';
             return;
@@ -118,6 +260,7 @@ export function initTunnelSettings({
 
         if (tunnelsEmpty) tunnelsEmpty.style.display = 'none';
         tunnelsList.replaceChildren();
+        if (profileUnsaved) tunnelsList.appendChild(renderUnsavedRow());
 
         currentTunnels.forEach((tunnel) => {
             const item = document.createElement('div');
@@ -160,12 +303,12 @@ export function initTunnelSettings({
             // eslint-disable-next-line no-unsanitized/property -- static SVG constant
             delBtn.innerHTML = SVG_ICONS.trash; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             delBtn.onclick = async () => {
-                const confirmed = await showConfirmModal(
+                const accepted = await showConfirmModal(
                     `${t.delete || 'Delete'} ${tunnel.address}?`,
                     tunnel.target ? `${tunnel.address} → ${tunnel.target}` : tunnel.address,
                     { danger: true, confirmText: t.delete || 'Delete' }
                 );
-                if (!confirmed) return;
+                if (!accepted || editBlocked()) return;
                 // The list may have changed while the confirmation waited
                 // (another deletion, or setTunnels/resetTunnels replacing
                 // the array): find this tunnel again instead of trusting
@@ -185,49 +328,12 @@ export function initTunnelSettings({
                     if (matches.length !== 1) return;
                     currentIndex = matches[0];
                 }
-                const deleted = currentTunnels[currentIndex];
-                // Remember which list this deletion came from:
-                // setTunnels/resetTunnels replace the array wholesale,
-                // so a restore after a failed save must only touch
-                // this list. And remember the neighbours: another
-                // deletion can shift this same array while the save is
-                // in flight, so the captured index may no longer be the
-                // deleted row's place — the restore goes back before the
-                // next row (or after the previous one) to keep the order.
-                const listAtDelete = currentTunnels;
-                const nextTunnel = currentTunnels[currentIndex + 1] ?? null;
-                const prevTunnel = currentTunnels[currentIndex - 1] ?? null;
                 currentTunnels.splice(currentIndex, 1);
-                const ok = await saveTunnels();
-                if (!ok) {
-                    // Only restore into the list this deletion came from:
-                    // if the array was replaced while the save was in
-                    // flight, that list is authoritative — splicing the
-                    // deleted tunnel back into it at the old index would
-                    // corrupt it.
-                    if (currentTunnels === listAtDelete) {
-                        const nextIndex = nextTunnel ? currentTunnels.indexOf(nextTunnel) : -1;
-                        let target;
-                        if (nextIndex !== -1) target = nextIndex;
-                        else {
-                            const prevIndex = prevTunnel ? currentTunnels.indexOf(prevTunnel) : -1;
-                            if (prevIndex !== -1) target = prevIndex + 1;
-                            else target = Math.min(currentIndex, currentTunnels.length);
-                        }
-                        // Never restore past the row's own place: when
-                        // several deletions fail together, the neighbour
-                        // anchor is shared, and restoring at the anchor
-                        // alone would stack the rows in failure order
-                        // instead of their original order.
-                        target = Math.min(target, currentIndex);
-                        currentTunnels.splice(target, 0, deleted);
-                    }
-                    // The list changed under the save: re-render, or a
-                    // language apply that ran while the save was pending
-                    // leaves the restored row missing onscreen.
-                    renderTunnels();
-                    return;
-                }
+                renderTunnels();
+                // A failed save that was the newest puts back the list the
+                // core runs (the deleted row included); a later save
+                // decides otherwise.
+                await saveTunnels();
                 renderTunnels();
             };
 
@@ -240,6 +346,7 @@ export function initTunnelSettings({
     addTunnelBtn?.addEventListener('click', async () => {
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
+        if (editBlocked()) return;
         const cancelText = t.cancel || 'Cancel';
         const confirmText = t.add || 'Add';
         const esc = (/** @type {string} */ v) => escapeHtml(String(v ?? ''));
@@ -369,16 +476,28 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
                         return;
                     }
 
+                    if (editBlocked()) {
+                        confirmBtn.disabled = false;
+                        return;
+                    }
                     const network = protocols;
                     const newTunnel = { network, address, target };
                     currentTunnels.push(newTunnel);
                     try {
+                        // 'partial' keeps the tunnel (the core runs it); the list
+                        // then offers to retry saving it to the profile.
+                        // A failed save that was the newest puts back the
+                        // list the core runs, without this tunnel.
                         const ok = await saveTunnels();
-                        if (!ok) { currentTunnels.pop(); confirmBtn.disabled = false; return; }
+                        if (!ok) {
+                            renderTunnels();
+                            confirmBtn.disabled = false;
+                            return;
+                        }
                         closeModal(null);
                         renderTunnels();
                     } catch (_err) {
-                        currentTunnels.pop();
+                        removeTunnel(newTunnel);
                         confirmBtn.disabled = false;
                         showNotification(t.saveFailed || 'Failed to save configuration', 'error');
                     }
@@ -406,12 +525,99 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
         /** Reset tunnels to empty and re-render */
         resetTunnels() {
             currentTunnels = [];
+            profileUnsaved = false;
+            appliedSeq = ++saveSeq; // a save still in flight no longer sets the flag
             renderTunnels();
         },
-        /** Update tunnels from external source and re-render */
-        setTunnels(/** @type {Array<object>} */ tunnels) {
-            currentTunnels = tunnels;
+        /**
+         * Run the reset's own save after the tunnel saves already started,
+         * with saves started meanwhile waiting until it is done: an older
+         * list can neither land after the empty one nor change its flag.
+         * @template T
+         * @param {() => Promise<T>} save
+         * @param {string|null} [profile] the profile the save was checked
+         *   against ('' for the minimal config, null when not known)
+         * @returns {Promise<T | false>}
+         */
+        saveAfterPending(save, profile = null) {
+            resetSeqs.push(++saveSeq);
+            return enqueue(async () => {
+                const result = await save();
+                // The reset sends an empty list: the core runs none now, and
+                // that list is known even when the first read failed. It is
+                // the list of the profile the save was checked against; with
+                // none known, a save of it could reach any profile, so it is
+                // read again first.
+                if (result) {
+                    confirmed = [];
+                    listProfile = profile;
+                    known = profile !== null;
+                }
+                return result;
+            });
+        },
+        /**
+         * After restoring the defaults sent an empty list: empty the list
+         * only when the core took it, with the retry row when the active
+         * profile did not ('partial'). A failed reset that no newer save
+         * follows shows the list the core still runs, which also brings back
+         * what a save that failed while the reset waited tried to change.
+         * @param {boolean|'restart'|'partial'} result
+         * @returns {boolean} whether the list was emptied
+         */
+        resetAfterSave(result) {
+            const seq = resetSeqs.shift() ?? ++saveSeq;
+            if (!result) {
+                if (!supersededSince(seq)) {
+                    currentTunnels = confirmed.slice();
+                    renderTunnels();
+                }
+                return false;
+            }
+            // A newer save already took over the list and its flag.
+            if (seq < appliedSeq) return false;
+            // The core took the empty list; whether the profile did is the
+            // flag until a newer save lands. One still to come decides it
+            // then: when it fails, the profile still holds the old list.
+            appliedSeq = seq;
+            profileUnsaved = result === 'partial';
             renderTunnels();
+            if (supersededSince(seq)) return false;
+            currentTunnels = [];
+            renderTunnels();
+            return true;
+        },
+        /**
+         * Where a read of the core's list starts: pass it back to setTunnels.
+         * @returns {number}
+         */
+        readMark() {
+            return pending > 0 ? -1 : saveSeq;
+        },
+        /**
+         * Update tunnels from external source and re-render. A read that
+         * started while a save was running, or before one started, may hold
+         * the list from before that save: it is ignored.
+         * @param {Array<object>} tunnels
+         * @param {number} [mark] readMark() taken when the read started
+         * @param {string|null} [profile] the profile the core ran when the
+         *   list was read ('' for the minimal config): saves of this list are
+         *   refused once the core runs another one
+         * @returns {boolean} whether the list was taken
+         */
+        setTunnels(tunnels, mark, profile) {
+            if (mark !== undefined && (mark !== saveSeq || pending > 0)) return false;
+            // The same list read back from the same profile is still the one
+            // the profile did not take; another list, or one of another
+            // profile (also an identical one), has nothing left to retry.
+            const sameProfile = profile != null && profile === listProfile;
+            if (!sameProfile || JSON.stringify(tunnels) !== JSON.stringify(currentTunnels)) profileUnsaved = false;
+            listProfile = profile ?? null;
+            currentTunnels = tunnels;
+            confirmed = tunnels.slice();
+            known = true;
+            renderTunnels();
+            return true;
         },
     };
 }

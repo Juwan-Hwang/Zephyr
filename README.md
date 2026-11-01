@@ -242,7 +242,7 @@ pnpm run check:i18n
 pnpm --filter @zephyr/desktop typecheck
 pnpm --filter @zephyr/desktop test
 pnpm --filter @zephyr/desktop lint
-pnpm --filter @zephyr/desktop build:css
+pnpm --filter @zephyr/desktop build:frontend   # 生成 CSS 与 CodeMirror 打包（src/cm6.bundle.js 需随代码提交）
 ```
 
 Rust 侧验证：
