@@ -42,6 +42,7 @@ vi.mock('../api.js', () => ({
     resetLatencyTestController: vi.fn(),
     switchProxy: vi.fn(),
     switchProxyResult: vi.fn(),
+    isLatestSwitch: vi.fn(() => true),
     testProxy: vi.fn(),
     getProxyProviders: vi.fn(),
     clearProviderCache: vi.fn(),

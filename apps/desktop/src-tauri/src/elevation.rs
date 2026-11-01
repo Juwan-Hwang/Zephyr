@@ -613,6 +613,9 @@ pub fn restart_as_admin_cmd(app: tauri::AppHandle, enable_tun: bool) -> Result<(
     if let Some(flag) = app.try_state::<crate::ExplicitExitFlag>() {
         flag.0.store(true, std::sync::atomic::Ordering::SeqCst);
     }
+    // The stop is recorded before anything else of the shutdown runs, so a
+    // resume recovery that begins meanwhile sees it and starts no core.
+    let _user_stop = crate::core_manager::core::core_process::note_user_stop();
     if let Err(e) = crate::sys_proxy::suspend_sys_proxy(&app) {
         emit_warn!(
             System,
