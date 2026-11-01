@@ -24,6 +24,7 @@ import { smartScore, smartNextInterval, smartRank, smartConfig, failoverReport }
 import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType, isGroup as hasGroupMembers, isNonProxyExit, isRealOutboundNode, providerMembersPending, providerPageState } from './proxy-groups.js';
 import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
+import { noteKnownSelection } from './known-selection.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
 import { queueSmartConfigWrite, syncSmartShown, readAutoTestEnabled } from './settings/auto-switch.js';
 import { postRestartRecovery, restartedProfile, withPageBusy } from './lifecycle.js';
@@ -1117,11 +1118,86 @@ async function reportFailover(name, success) {
 let _isFailovering = false;
 
 /**
+ * The running profile, read uncached (a cached name can lag just after a
+ * profile change); '' when unknown or while the minimal config runs.
+ * @returns {Promise<string>}
+ */
+async function readRunningProfile() {
+    try {
+        return activeProfile(await invoke(COMMANDS.GET_SETTINGS), 'config.yaml');
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * The nodes failover may switch the group to: not the failed node, nor one
+ * that leads to it, nor a reject/compatible/pass entry.
+ * @param {{ all: string[] }} group
+ * @param {Record<string, any>} proxyMap
+ * @param {string} failedNode
+ * @returns {string[]}
+ */
+function failoverCandidates(group, proxyMap, failedNode) {
+    return group.all.filter((n) => {
+        if (n === failedNode) return false;
+        const entry = proxyMap[n];
+        if (!entry) return false;
+        const nodeType = entry.type?.toLowerCase() || '';
+        if (nodeType === 'reject' || nodeType === 'compatible' || nodeType === 'pass') return false;
+        return resolveLeafNode(n, proxyMap) !== failedNode;
+    });
+}
+
+/**
+ * The last measured delay of a candidate (of the node it leads to), or
+ * Infinity when it has none usable.
+ * @param {string} name
+ * @param {Record<string, any>} proxyMap
+ * @returns {number}
+ */
+function lastDelayOf(name, proxyMap) {
+    const leaf = resolveLeafNode(name, proxyMap);
+    const history = (leaf ? proxyMap[leaf] : proxyMap[name])?.history;
+    const lastDelay = history?.length ? history[history.length - 1]?.delay : undefined;
+    return isInvalidDelay(lastDelay) ? Infinity : lastDelay;
+}
+
+/**
+ * The node to switch to: the engine's own target when it is a candidate,
+ * otherwise the candidate with the lowest last delay (the first when none
+ * has one).
+ * @param {string[]} candidates non-empty
+ * @param {Record<string, any>} proxyMap
+ * @param {string} target
+ * @returns {string}
+ */
+function pickFailoverTarget(candidates, proxyMap, target) {
+    if (target !== 'next' && candidates.includes(target)) return target;
+    let bestNode = null;
+    let bestDelay = Infinity;
+    for (const name of candidates) {
+        const delay = lastDelayOf(name, proxyMap);
+        if (delay < bestDelay) {
+            bestDelay = delay;
+            bestNode = name;
+        }
+    }
+    return bestNode || candidates[0];
+}
+
+/**
  * Handle a failover action returned by the failover engine.
- * Switches to the best available node (lowest latency) in the current group.
+ * Switches to the best available node (lowest latency) in the current group,
+ * and records it as the profile's known choice: a profile switch whose read
+ * of the live selection times out then saves this node, not the failed one.
+ * The choice is recorded only when the same profile runs before and after
+ * the switch: a profile switch that finished meanwhile would otherwise file
+ * the new profile's node under the old one.
+ * Exported for tests.
  * @param {{failedNode: string, failureCount: number, target: string}} action
  */
-async function handleFailoverAction(action) {
+export async function handleFailoverAction(action) {
     if (_isFailovering) return;
     _isFailovering = true;
     try {
@@ -1129,51 +1205,24 @@ async function handleFailoverAction(action) {
         if (!uiGroupName) return;
 
         const proxyMap = /** @type {Record<string, any>} */ (await getProxiesCached().then(getProxiesMerged).then(d => d?.proxies).catch(() => null));
-        if (!proxyMap) return;
-
-        const group = proxyMap[uiGroupName];
+        const group = proxyMap?.[uiGroupName];
         if (!group?.all?.length) return;
 
-        const currentNode = group.now;
-        const activeLeaf = resolveLeafNode(currentNode, proxyMap);
-        if (action.failedNode !== currentNode && action.failedNode !== activeLeaf) return;
+        const activeLeaf = resolveLeafNode(group.now, proxyMap);
+        if (action.failedNode !== group.now && action.failedNode !== activeLeaf) return;
 
-        const candidates = group.all.filter(/** @param {string} n */ n => {
-            if (n === action.failedNode) return false;
-            const entry = proxyMap[n];
-            if (!entry) return false;
-            const nodeType = entry.type?.toLowerCase() || '';
-            if (nodeType === 'reject' || nodeType === 'compatible' || nodeType === 'pass') return false;
-            const leaf = resolveLeafNode(n, proxyMap);
-            if (leaf === action.failedNode) return false;
-            return true;
-        });
-
+        const candidates = failoverCandidates(group, proxyMap, action.failedNode);
         if (candidates.length === 0) return;
+        const targetNode = pickFailoverTarget(candidates, proxyMap, action.target);
 
-        let targetNode;
-        if (action.target !== 'next' && candidates.includes(action.target)) {
-            targetNode = action.target;
-        } else {
-            let bestNode = null;
-            let bestDelay = Infinity;
-            for (const name of candidates) {
-                const leaf = resolveLeafNode(name, proxyMap);
-                const lookupEntry = leaf ? proxyMap[leaf] : proxyMap[name];
-                const history = lookupEntry?.history;
-                if (history && history.length > 0) {
-                    const lastDelay = history[history.length - 1]?.delay;
-                    if (!isInvalidDelay(lastDelay) && lastDelay < bestDelay) {
-                        bestDelay = lastDelay;
-                        bestNode = name;
-                    }
-                }
-            }
-            targetNode = bestNode || candidates[0];
-        }
-
+        // The profile the switch applies to, read before and after it.
+        const runningProfile = await readRunningProfile();
         const success = await switchProxy(uiGroupName, targetNode);
         if (success) {
+            // The minimal config runs: no profile to record the choice under.
+            if (runningProfile && await readRunningProfile() === runningProfile) {
+                noteKnownSelection(runningProfile, { group: uiGroupName, node: targetNode });
+            }
             showNotification(
                 t('failoverSwitched', { failed: action.failedNode, target: targetNode }),
                 'success'

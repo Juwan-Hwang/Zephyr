@@ -392,4 +392,48 @@ describe('connections page list rendering', () => {
         expect(rows().map(hostOf)).toEqual(['b.example', 'a.example']);
         for (const r of rows()) expect(r).toBe(byHost.get(hostOf(r)));
     });
+
+    it('old request returns after new page init', async () => {
+        /** @type {(value: any) => void} */
+        let resolveOld = () => {};
+        mockedGetConnections.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+        initConnectionsPage();
+        await flush();
+        expect(mockedGetConnections).toHaveBeenCalledTimes(1);
+
+        // Leave the page while the first request is still in flight, then come back.
+        destroyConnectionsPage();
+        mockedGetConnections.mockResolvedValue({ connections: [conn('2', 'new.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        // The stale request does not hold back the new page's first fetch.
+        expect(mockedGetConnections).toHaveBeenCalledTimes(2);
+        expect(rows().map(hostOf)).toEqual(['new.example']);
+
+        // The old response arrives late: it is dropped, not rendered or archived.
+        resolveOld({ connections: [conn('1', 'old.example', 0)] });
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['new.example']);
+        const closedTab = /** @type {HTMLElement|null} */ (document.getElementById('conn-tab-closed'));
+        expect(closedTab).not.toBeNull();
+        closedTab?.click();
+        await flush();
+        expect(rows().map(hostOf)).not.toContain('old.example');
+    });
+
+    it('a request in flight when the page is destroyed does not render', async () => {
+        /** @type {(value: any) => void} */
+        let resolveOld = () => {};
+        mockedGetConnections.mockResolvedValueOnce({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['a.example']);
+
+        mockedGetConnections.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+        await vi.advanceTimersByTimeAsync(2000);
+        destroyConnectionsPage();
+        resolveOld({ connections: [conn('9', 'late.example', 0)] });
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['a.example']);
+    });
 });

@@ -1493,24 +1493,6 @@ async fn update_core_inner(
         ));
     }
 
-    let (last_config, last_args, last_secret) = {
-        let lock = state
-            .0
-            .lock()
-            .map_err(|e| format!("Failed to lock state: {e}"))?;
-        let config = lock
-            .last_config_path()
-            .map(String::from)
-            .unwrap_or_else(|| "config.yaml".to_owned());
-        let args = lock.last_custom_args().map(Vec::from).unwrap_or_default();
-        let secret = if lock.last_secret().is_empty() {
-            None
-        } else {
-            Some(lock.last_secret().to_owned())
-        };
-        (config, args, secret)
-    };
-
     emit_download_status_ext(
         &window,
         Some(UpdateComponent::Core),
@@ -1518,47 +1500,63 @@ async fn update_core_inner(
         98,
     );
 
-    let result = core_manager::start_core(
+    // Waits for a start still in progress rather than giving up: a give-up
+    // here would roll back the binary that start may already be running. The
+    // profile, arguments and secret are read once that start has ended. A
+    // failed start is rolled back before the start lock is released, so no
+    // other start can launch the failed binary while it is being replaced.
+    let rollback_exe = exe_path.clone();
+    let rollback_backup = backup_path.clone();
+    let result = core_manager::core::core_process::start_core_after_pending_then(
         app.clone(),
         state,
-        last_config,
-        last_args,
-        last_secret,
         Some(true),
+        None,
+        move |result| async move {
+            match result {
+                Ok(r) => Ok(r),
+                Err(e) => Err(roll_back_core_binary(&rollback_exe, &rollback_backup, &e).await),
+            }
+        },
     )
     .await;
-    match result {
-        Ok(r) => {
-            // Step 3: New core started — delete backup
-            let _ = std::fs::remove_file(&backup_path);
-            emit_download_status_ext(&window, Some(UpdateComponent::Core), "Core ready", 100);
-            Ok(r)
-        }
-        Err(e) => {
-            // Step 4: Rollback — atomic rename swap
-            emit_error!(
-                Updater,
-                UPDATE_DOWNLOAD_FAILED,
-                "New core failed to start: {e}, attempting rollback..."
-            );
-            let rollback_ok = if backup_path.exists() {
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                // Remove the failed new binary, then rename backup back
-                let _ = std::fs::remove_file(&exe_path);
-                std::fs::rename(&backup_path, &exe_path).is_ok()
-            } else {
-                false
-            };
-            if rollback_ok {
-                Err(format!(
-                    "New core failed to start: {e}. Rolled back to previous version. Please restart the application."
-                ))
-            } else {
-                Err(format!(
-                    "New core failed to start: {e}. Rollback not available — manual repair may be needed."
-                ))
-            }
-        }
+    if let Ok(r) = result {
+        // Step 3: New core started — delete backup
+        let _ = std::fs::remove_file(&backup_path);
+        emit_download_status_ext(&window, Some(UpdateComponent::Core), "Core ready", 100);
+        return Ok(r);
+    }
+    result
+}
+
+/// Step 4 of a core update: the new binary at `exe_path` failed to start
+/// (`error`), so put the backup back. Called with the start lock held.
+/// Returns the error to report.
+async fn roll_back_core_binary(
+    exe_path: &std::path::Path,
+    backup_path: &std::path::Path,
+    error: &str,
+) -> String {
+    // Rollback — atomic rename swap
+    emit_error!(
+        Updater,
+        UPDATE_DOWNLOAD_FAILED,
+        "New core failed to start: {error}, attempting rollback..."
+    );
+    let rollback_ok = if backup_path.exists() {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        // Remove the failed new binary, then rename backup back
+        let _ = std::fs::remove_file(exe_path);
+        std::fs::rename(backup_path, exe_path).is_ok()
+    } else {
+        false
+    };
+    if rollback_ok {
+        format!(
+            "New core failed to start: {error}. Rolled back to previous version. Please restart the application."
+        )
+    } else {
+        format!("New core failed to start: {error}. Rollback not available — manual repair may be needed.")
     }
 }
 
