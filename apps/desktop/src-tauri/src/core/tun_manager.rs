@@ -244,6 +244,11 @@ pub const ROOT_START_FAILED_MARKER: &str = "root_start_failed";
 /// unrelated start failure never changes the saved TUN preference.
 pub const TUN_START_FAILED_MARKER: &str = "tun_start_failed";
 
+/// Part of a failed start's error when the root TUN core that start launched
+/// is still running: its cleanup failed, so it was adopted and is tracked. A
+/// core update does not put the old binary back under that running core.
+pub const ROOT_CORE_STILL_RUNNING: &str = "a root TUN core is still running and is now tracked";
+
 /// Typed error representing failure modes during root TUN core startup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RootStartError {
