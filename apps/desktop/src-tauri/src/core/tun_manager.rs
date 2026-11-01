@@ -244,6 +244,11 @@ pub const ROOT_START_FAILED_MARKER: &str = "root_start_failed";
 /// unrelated start failure never changes the saved TUN preference.
 pub const TUN_START_FAILED_MARKER: &str = "tun_start_failed";
 
+/// Part of a failed start's error when the root TUN core that start launched
+/// is still running: its cleanup failed, so it was adopted and is tracked. A
+/// core update does not put the old binary back under that running core.
+pub const ROOT_CORE_STILL_RUNNING: &str = "a root TUN core is still running and is now tracked";
+
 /// Typed error representing failure modes during root TUN core startup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RootStartError {
@@ -336,6 +341,91 @@ fn root_script_failure(
         RootStartError::ExecutionFailed("osascript failed".to_owned())
     } else {
         RootStartError::ExecutionFailed(format!("osascript failed: {err}"))
+    }
+}
+
+/// The authorization scripts of root starts that may still wait for the
+/// administrator password, and whether the app is quitting: the quit ends
+/// them, so a password entered after it cannot start a root core nothing
+/// manages, and a start that would spawn one after the quit spawns none.
+#[cfg(target_os = "macos")]
+static PENDING_ROOT_SCRIPTS: std::sync::Mutex<(Vec<u32>, bool)> =
+    std::sync::Mutex::new((Vec::new(), false));
+
+/// Records one pending authorization script; dropping it forgets that one.
+#[cfg(target_os = "macos")]
+struct PendingRootScript(u32);
+
+#[cfg(target_os = "macos")]
+impl PendingRootScript {
+    /// `child.try_wait()` under the record's lock: a script seen finished
+    /// (reaped, so its pid may be reused) is forgotten before a quit can
+    /// signal it.
+    fn try_wait(
+        &self,
+        child: &mut std::process::Child,
+    ) -> std::io::Result<Option<std::process::ExitStatus>> {
+        let mut pending = PENDING_ROOT_SCRIPTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let status = child.try_wait();
+        if matches!(status, Ok(Some(_))) {
+            pending.0.retain(|pid| *pid != self.0);
+        }
+        drop(pending);
+        status
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for PendingRootScript {
+    fn drop(&mut self) {
+        PENDING_ROOT_SCRIPTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .0
+            .retain(|pid| *pid != self.0);
+    }
+}
+
+/// Spawns the authorization script and records it in one step, so a quit
+/// either comes first (and nothing is spawned) or finds it and ends it.
+#[cfg(target_os = "macos")]
+fn spawn_recorded_root_script(
+    command: &mut std::process::Command,
+) -> std::io::Result<Option<(std::process::Child, PendingRootScript)>> {
+    let mut pending = PENDING_ROOT_SCRIPTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if pending.1 {
+        return Ok(None);
+    }
+    let child = command.spawn()?;
+    let pid = child.id();
+    pending.0.push(pid);
+    drop(pending);
+    Ok(Some((child, PendingRootScript(pid))))
+}
+
+/// At quit: ends the root starts' authorization scripts that still wait, so
+/// none starts a root core after the app is gone, and no later start spawns
+/// one. Called before the exit cleanup of root cores, which then stops one a
+/// script already started.
+#[cfg(target_os = "macos")]
+pub fn cancel_pending_root_start() {
+    let mut pending = PENDING_ROOT_SCRIPTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    pending.1 = true;
+    for pid in pending.0.drain(..) {
+        if let Ok(pid) = i32::try_from(pid) {
+            // SAFETY: kill(2) takes plain integers and touches no memory. The
+            // pid is the app's own script child, recorded only until it is
+            // reaped (each reap forgets it first, under this same lock).
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
     }
 }
 
@@ -460,15 +550,24 @@ pub async fn restart_core_as_root(
     // starts count as "new" (an unrelated root mihomo service must not make the
     // app's core look started).
     let initial_root_pids: Vec<i32> = get_managed_root_pids_async(core_path.clone()).await;
-    let spawned = std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn();
-    let mut child = match spawned {
-        Ok(child) => child,
+    let spawned = spawn_recorded_root_script(
+        std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped()),
+    );
+    // Until the script is seen finished, a quit ends it.
+    let (mut child, pending_script) = match spawned {
+        Ok(Some(spawned)) => spawned,
+        Ok(None) => {
+            // The app is quitting: no authorization is asked for.
+            restore_run_config(&config_file, &content);
+            return Err(RootStartError::ExecutionFailed(
+                "The app is quitting; the root core was not started".to_owned(),
+            ));
+        }
         Err(e) => {
             restore_run_config(&config_file, &content);
             return Err(RootStartError::ExecutionFailed(format!(
@@ -481,7 +580,7 @@ pub async fn restart_core_as_root(
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
 
     // Check if osascript exited quickly with an error (e.g., user canceled)
-    match child.try_wait() {
+    match pending_script.try_wait(&mut child) {
         Ok(Some(status)) => {
             if !status.success() {
                 return Err(root_script_failure(&mut child, &config_file, &content));
@@ -514,7 +613,7 @@ pub async fn restart_core_as_root(
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         if !script_finished {
-            match child.try_wait() {
+            match pending_script.try_wait(&mut child) {
                 Ok(Some(status)) => {
                     if !status.success() {
                         return Err(root_script_failure(&mut child, &config_file, &content));
@@ -586,12 +685,17 @@ pub async fn restart_core_as_root(
         // already re-verified every legacy candidate as root even when the core
         // answered before `osascript` exited.
         remember_privileged_legacy_checked(&legacy_pids);
+        // Forgotten before the reap below: a quit then no longer signals it.
+        drop(pending_script);
         if !script_finished {
             tokio::task::spawn_blocking(move || {
                 let _ = child.wait();
             });
         }
     } else {
+        // Forgotten before the reap below, which kills it anyway: a quit then
+        // never signals a pid the reap freed.
+        drop(pending_script);
         // Kill osascript if still running and reap child on a blocking thread
         let exited_ok = tokio::task::spawn_blocking(move || {
             if let Ok(Some(status)) = child.try_wait() {
@@ -2068,6 +2172,19 @@ pub async fn restart_core_as_root_cmd(
     app: tauri::AppHandle,
     enable_tun: bool,
 ) -> Result<String, String> {
+    // A stop the user begins while this restart waits for the lock below
+    // cancels it: the restart asked for before that stop no longer runs.
+    let stops_before = super::core_process::user_stop_begins();
+    // One privileged start at a time: a core start runs its own root start
+    // under this lock, and two authorization scripts at once would each
+    // kill the other's core.
+    let _start_guard =
+        super::wait_for_start_lock(&super::CORE_START_LOCK, super::StartLockWait::Bounded)
+            .await
+            .ok_or_else(|| super::CORE_ALREADY_STARTING.to_owned())?;
+    if super::core_process::user_stop_begins() != stops_before {
+        return Err(super::core_process::CORE_STOPPED_BEFORE_START.to_owned());
+    }
     let secret = restart_core_as_root(&app, enable_tun).await.map_err(|e| {
         // Preserve the "script ran" classification across the string boundary.
         // `root_start_failed` is what makes the frontend run its recovery: for
