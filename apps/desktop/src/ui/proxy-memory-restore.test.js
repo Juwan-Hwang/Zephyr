@@ -167,4 +167,44 @@ describe('restoreProxySelectionResult', () => {
         await expect(restoreProxySelectionResult('a.yaml')).resolves.toBe('restored');
         expect(api.switchProxy.mock.calls).toEqual([['Main', 'HK']]);
     });
+
+    it('records a restored node as the known selection of its profile and group', async () => {
+        api.switchProxy.mockResolvedValue(true);
+        store.get.mockImplementation((key) => (key === 'uiGroupName' ? 'Main' : null));
+        await expect(restoreProxySelectionResult('a.yaml')).resolves.toBe('restored');
+        expect(store.set).toHaveBeenCalledWith('knownSelections', [{ profile: 'a.yaml', group: 'Main', node: 'HK' }]);
+        store.get.mockImplementation(() => null);
+    });
+
+    it('keeps a choice the user made while the restore switch ran', async () => {
+        /** @type {any[]} */
+        let known = [];
+        store.get.mockImplementation((key) => (key === 'uiGroupName' ? 'Main' : key === 'knownSelections' ? known : null));
+        store.set.mockImplementation((key, value) => { if (key === 'knownSelections') known = value; });
+        const { noteKnownSelection } = await import('./known-selection.js');
+        api.switchProxy.mockImplementation(async () => {
+            noteKnownSelection('a.yaml', { group: 'Main', node: 'picked.example.com' });
+            return true;
+        });
+        await expect(restoreProxySelectionResult('a.yaml')).resolves.toBe('restored');
+        expect(known).toEqual([{ profile: 'a.yaml', group: 'Main', node: 'picked.example.com' }]);
+        store.get.mockImplementation(() => null);
+        store.set.mockImplementation(() => {});
+    });
+    it('keeps a choice the user made while the saved settings were read', async () => {
+        /** @type {any[]} */
+        let known = [];
+        store.get.mockImplementation((key) => (key === 'uiGroupName' ? 'Main' : key === 'knownSelections' ? known : null));
+        store.set.mockImplementation((key, value) => { if (key === 'knownSelections') known = value; });
+        const { noteKnownSelection } = await import('./known-selection.js');
+        api.invoke.mockImplementation(async () => {
+            noteKnownSelection('a.yaml', { group: 'Main', node: 'picked.example.com' });
+            return { last_proxy_selection: { 'a.yaml': JSON.stringify({ group: 'Main', node: 'HK' }) } };
+        });
+        api.switchProxy.mockResolvedValue(true);
+        await expect(restoreProxySelectionResult('a.yaml')).resolves.toBe('restored');
+        expect(known).toEqual([{ profile: 'a.yaml', group: 'Main', node: 'picked.example.com' }]);
+        store.get.mockImplementation(() => null);
+        store.set.mockImplementation(() => {});
+    });
 });

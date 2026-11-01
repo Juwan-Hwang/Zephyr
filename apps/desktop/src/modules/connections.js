@@ -67,8 +67,13 @@ let _connPaused = false;
 /** Bumped on each Pause, so a request already in flight does not move the frozen rows. */
 let _pauseGen = 0;
 
-/** Debounce flag to prevent overlapping fetches */
-let isFetching = false;
+/**
+ * The fetch in flight and its page generation (null when none): a second
+ * fetch of the same page joins it instead of starting another, while a fetch
+ * left over from a destroyed page does not hold back the new page's first one.
+ * @type {{ generation: number, done: Promise<void> }|null}
+ */
+let fetchInFlight = null;
 
 /** Grand totals (kept for future use) */
 let _totalDownloaded = 0;
@@ -78,7 +83,10 @@ let _totalUploaded = 0;
 let _unsubI18n = null;
 /** @type {Function|null} */
 let _unsubTheme = null;
-/** Generation counter to invalidate stale poll callbacks on re-init */
+/**
+ * Page lifecycle generation, bumped on every init and destroy: poll callbacks
+ * and fetch responses from an earlier generation are dropped.
+ */
 let _pollGeneration = 0;
 /** @type {(() => void) | null} Visibility change handler, cleaned up on destroy. */
 let _visibilityHandler = null;
@@ -254,6 +262,8 @@ export function initConnectionsPage() {
  * Clean up resources when navigating away.
  */
 export function destroyConnectionsPage() {
+    // Invalidate poll callbacks and requests still in flight for this page.
+    _pollGeneration++;
     if (connectionsPollTimer != null) {
         clearTimeout(connectionsPollTimer);
         connectionsPollTimer = null;
@@ -404,13 +414,30 @@ function archiveConnectionOnce(conn, at) {
     }
 }
 
-async function fetchAndRenderConnections() {
-    if (isFetching) return;
-    isFetching = true;
+/**
+ * Fetch and render the list, or wait for the fetch of this page already in
+ * flight, so a caller that awaits it sees the list that fetch renders.
+ * @returns {Promise<void>}
+ */
+function fetchAndRenderConnections() {
+    const generation = _pollGeneration;
+    if (fetchInFlight && fetchInFlight.generation === generation) return fetchInFlight.done;
+    const done = fetchAndRenderOnce(generation).finally(() => {
+        // A newer page's fetch may have started meanwhile; leave its mark.
+        if (fetchInFlight?.done === done) fetchInFlight = null;
+    });
+    fetchInFlight = { generation, done };
+    return done;
+}
 
+/** @param {number} generation `_pollGeneration` when the fetch started */
+async function fetchAndRenderOnce(generation) {
     try {
         const pauseGen = _pauseGen;
         const data = await getConnections();
+        // The page was destroyed or re-initialized while this request was in
+        // flight: its response belongs to a page that no longer exists.
+        if (generation !== _pollGeneration) return;
         // Paused while this request was in flight: leave the frozen list as it is.
         if (_connPaused && pauseGen !== _pauseGen) return;
         const rawConns = (/** @type {any} */ (data)).connections || [];
@@ -496,6 +523,7 @@ async function fetchAndRenderConnections() {
         }
 
     } catch (err) {
+        if (generation !== _pollGeneration) return;
         const metaEl = document.getElementById('connections-meta');
         const t = /** @type {any} */ (translations)[currentLang] ?? {};
         if (metaEl) {
@@ -505,8 +533,6 @@ async function fetchAndRenderConnections() {
         if (!_err.message?.includes('Failed to fetch') && !_err.message?.includes('NetworkError')) {
             connectionsLogger.warn('Fetch error', err);
         }
-    } finally {
-        isFetching = false;
     }
 }
 
@@ -1141,6 +1167,7 @@ function closeOneLabel() {
  */
 async function closeSingleConnection(id, btn) {
     if (!id) return;
+    const generation = _pollGeneration;
     const t = /** @type {any} */ (translations)[currentLang] ?? {};
     btn.setAttribute('disabled', '');
     try {
@@ -1148,11 +1175,23 @@ async function closeSingleConnection(id, btn) {
         // A poll already in flight may still list it: keep it out of the active list.
         userClosedIds.add(id);
         showNotification(t.connClosedOne || 'Connection closed', 'success');
-        await fetchAndRenderConnections();
+        await refreshAfterClose(generation);
     } catch {
         btn.removeAttribute('disabled');
         showNotification(t.closeConnFailed || 'Failed to close connection', 'error');
     }
+}
+
+/**
+ * Refresh the list after a close, unless the page the close started on was
+ * left (or opened again) meanwhile: that page is gone, so is its refresh.
+ * @param {number} generation `_pollGeneration` when the close started
+ * @returns {Promise<boolean>} whether it refreshed
+ */
+async function refreshAfterClose(generation) {
+    if (generation !== _pollGeneration) return false;
+    await fetchAndRenderConnections();
+    return true;
 }
 
 /** @param {HTMLElement} row */
@@ -1442,6 +1481,7 @@ function showConnDetail(conn, mode, openerRow = null) {
     const closeBtn = document.getElementById('detail-close-btn');
     if (closeBtn && mode === 'active') {
         closeBtn.addEventListener('click', async () => {
+            const generation = _pollGeneration;
             setButtonLoading(closeBtn, t, 'closing');
 
             try {
@@ -1453,8 +1493,10 @@ function showConnDetail(conn, mode, openerRow = null) {
                 userClosedIds.add(conn.id);
                 cachedConnections = cachedConnections.filter((/** @type {any} */ c) => c.id !== conn.id);
                 showNotification(t.connClosed || 'Connection closed', 'success');
-                dismiss();
-                await fetchAndRenderConnections();
+                // The page may have been left and opened again meanwhile, with
+                // another dialog open now: close only the one this was for.
+                if (activeDetailConnId === conn.id) dismiss();
+                if (!await refreshAfterClose(generation)) return;
                 // The refresh removes the closed row that just took focus back; land on the tab instead.
                 const active = document.activeElement;
                 if (!active || active === document.body || !active.isConnected) restoreDetailFocus(null, conn.id);
@@ -1572,6 +1614,7 @@ async function handleCloseAllConnections() {
     if (!btn) return;
 
     if (_bulkCloseInFlight) return;
+    const generation = _pollGeneration;
     const t = /** @type {any} */ (translations)[currentLang] ?? {};
     _bulkCloseInFlight = true;
     setButtonLoading(btn, t, 'closing');
@@ -1614,22 +1657,28 @@ async function handleCloseAllConnections() {
             const liveIds = new Set(live.map((/** @type {any} */ c) => c.id));
             const ended = cachedConnections.filter((/** @type {any} */ c) => !liveIds.has(c.id) && !userClosedIds.has(c.id));
             await closeAllConnections();
+            /** @type {Set<string>} */
+            const handled = new Set();
             for (const conn of [...ended, ...live]) {
+                handled.add(conn.id);
                 userClosedIds.add(conn.id);
                 archiveOnce(conn);
+                delete connAccumulators[conn.id];
             }
-            connAccumulators = {};
-            cachedConnections = [];
+            // Only what this close handled: when the page was opened again
+            // meanwhile, its own fetch has filled the list with newer ones.
+            cachedConnections = cachedConnections.filter((/** @type {any} */ c) => !handled.has(c.id));
         }
         if (closedConnections.length > MAX_CLOSED_CONNS) closedConnections.length = MAX_CLOSED_CONNS;
         if (failed > 0) showNotification(t.closeConnsFailed || 'Failed to close connections', 'error');
         else if (connectionsSearchQuery) showNotification(tFmt('matchingConnsClosed', { count: closedMatching }), 'success');
         else showNotification(t.connsClosed || 'All connections closed', 'success');
-        await fetchAndRenderConnections();
+        await refreshAfterClose(generation);
     } catch {
         showNotification(t.closeConnsFailed || 'Failed to close connections', 'error');
     } finally {
         _bulkCloseInFlight = false;
+        // Also resets the Close All button, which the page keeps across visits.
         switchConnTab(currentConnTab);
     }
 }
