@@ -51,7 +51,7 @@ import {
   applyTranslations,
 } from './i18n.js';
 import { initChart, updateTrafficData, cleanupChart } from './modules/traffic-chart.js';
-import { initConnectionsPage } from './modules/connections.js';
+import { initConnectionsPage, destroyConnectionsPage } from './modules/connections.js';
 import { initBackendEventListeners, cleanupBackendEventListeners } from './modules/backend-events.js';
 import { apiLogger } from './utils/logger.js';
 import { forwardToBackend } from './utils/frontend-log.js';
@@ -538,6 +538,8 @@ async function initApp() {
     onLeaveConsole: () => { deactivateConsole(); },
     onRuleLibrary: () => { import('./ui/rule-library.js').then(m => m.initRuleLibraryPage()).catch(() => {}); },
     onConnections: () => { initConnectionsPage(); },
+    // Drops polls and responses still in flight for the page being left.
+    onLeaveConnections: () => { destroyConnectionsPage(); },
     onLogs: () => { import('./ui/logs.js').then(m => m.initLogsPage()).catch(() => {}); },
     onLeaveLogs: () => { import('./ui/logs.js').then(m => m.destroyLogsPage()).catch(() => {}); },
     onLeaveProxies: () => {

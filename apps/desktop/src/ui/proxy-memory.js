@@ -12,6 +12,7 @@ import { fetchProxyGroups, isWritableGroupType } from './proxy-groups.js';
 import { invalidateSettingsCache } from './cache.js';
 import { proxyMemoryLogger } from '../utils/logger.js';
 import { appStore } from './state.js';
+import { noteKnownSelection, knownSelectionRevision } from './known-selection.js';
 
 /** Maximum retries for waiting mihomo to be ready. */
 const MAX_READY_RETRIES = 50;
@@ -45,9 +46,11 @@ const PROVIDER_STAGGER_RETRIES = 3;
  * Uses atomic backend command to avoid Read-Modify-Write race conditions.
  * Invalidates settings cache to ensure subsequent reads get fresh data.
  * @param {string} profileName - Profile filename (e.g., "my-sub.yaml")
- * @param {{ node?: string, group?: string }} [selection]
+ * @param {{ node?: string, group?: string|null }} [selection]
  */
 export async function saveProxySelection(profileName, { node, group } = {}) {
+    // Known even if the write below fails, so a later profile switch can retry it.
+    noteKnownSelection(profileName, { group, node });
     try {
         await invoke(COMMANDS.UPDATE_PROXY_SELECTION, {
             profileName,
@@ -330,9 +333,17 @@ export async function restoreProxySelectionResult(profileName) {
         const primaryGroup = settings.primary_group_preference?.[profileName] || null;
         const preferredGroupName = primaryGroup || saved.group || appStore.get('uiGroupName') || null;
 
+        // A choice recorded after this (the user picking a node while the
+        // restore runs) is newer than the restored one and stays.
+        const revisionBefore = knownSelectionRevision();
         const proxyGroupsResult = await loadGroupsForRestore(preferredGroupName, saved.node);
         if (!proxyGroupsResult) return 'failed';
-        return await switchToSaved(proxyGroupsResult, saved.node);
+        const outcome = await switchToSaved(proxyGroupsResult, saved.node);
+        // switchToSaved leaves the group it switched in as the UI group.
+        if (outcome === 'restored' && knownSelectionRevision() === revisionBefore) {
+            noteKnownSelection(profileName, { group: appStore.get('uiGroupName'), node: saved.node });
+        }
+        return outcome;
     } catch (e) {
         proxyMemoryLogger.warn('Failed to restore proxy selection:', e);
         return 'failed';

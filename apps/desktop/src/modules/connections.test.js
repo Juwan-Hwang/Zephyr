@@ -17,7 +17,7 @@ vi.mock('../utils/logger.js', () => ({
     connectionsLogger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { getConnections } from '../api.js';
+import { getConnections, closeConnection } from '../api.js';
 
 const mockedGetConnections = /** @type {import('vitest').Mock} */ (/** @type {unknown} */ (getConnections));
 
@@ -391,5 +391,70 @@ describe('connections page list rendering', () => {
         hostHeader.click(); // descending
         expect(rows().map(hostOf)).toEqual(['b.example', 'a.example']);
         for (const r of rows()) expect(r).toBe(byHost.get(hostOf(r)));
+    });
+
+    it('old request returns after new page init', async () => {
+        /** @type {(value: any) => void} */
+        let resolveOld = () => {};
+        mockedGetConnections.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+        initConnectionsPage();
+        await flush();
+        expect(mockedGetConnections).toHaveBeenCalledTimes(1);
+
+        // Leave the page while the first request is still in flight, then come back.
+        destroyConnectionsPage();
+        mockedGetConnections.mockResolvedValue({ connections: [conn('2', 'new.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        // The stale request does not hold back the new page's first fetch.
+        expect(mockedGetConnections).toHaveBeenCalledTimes(2);
+        expect(rows().map(hostOf)).toEqual(['new.example']);
+
+        // The old response arrives late: it is dropped, not rendered or archived.
+        resolveOld({ connections: [conn('1', 'old.example', 0)] });
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['new.example']);
+        const closedTab = /** @type {HTMLElement|null} */ (document.getElementById('conn-tab-closed'));
+        expect(closedTab).not.toBeNull();
+        closedTab?.click();
+        await flush();
+        expect(rows().map(hostOf)).not.toContain('old.example');
+    });
+
+    it('a request in flight when the page is destroyed does not render', async () => {
+        /** @type {(value: any) => void} */
+        let resolveOld = () => {};
+        mockedGetConnections.mockResolvedValueOnce({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['a.example']);
+
+        mockedGetConnections.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+        await vi.advanceTimersByTimeAsync(2000);
+        destroyConnectionsPage();
+        resolveOld({ connections: [conn('9', 'late.example', 0)] });
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['a.example']);
+    });
+    it('a close that finishes after the page was left does not refresh it', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const row = rows()[0];
+        row.focus();
+        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        /** @type {(value: any) => void} */
+        let finishClose = () => {};
+        vi.mocked(closeConnection).mockImplementationOnce(() => new Promise((resolve) => { finishClose = resolve; }));
+        /** @type {HTMLElement} */ (document.getElementById('detail-close-btn')).click();
+        await flush();
+        const fetchesBefore = mockedGetConnections.mock.calls.length;
+        destroyConnectionsPage();
+        mockedGetConnections.mockResolvedValue({ connections: [conn('9', 'late.example', 0)] });
+        finishClose(undefined);
+        await flush();
+        await flush();
+        expect(mockedGetConnections.mock.calls.length).toBe(fetchesBefore);
+        expect(rows().map(hostOf)).not.toContain('late.example');
     });
 });

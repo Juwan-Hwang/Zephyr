@@ -14,6 +14,8 @@ import { modesLogger } from '../utils/logger.js';
 import { toError } from '../types/guards.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
+import { readRunningProfile } from './running-profile.js';
+import { noteKnownSelection, knownSelectionRevision } from './known-selection.js';
 
 export function initModeSelector() {
     const buttons = document.querySelectorAll('[data-mode]');
@@ -127,6 +129,10 @@ async function carryNodeOver(nodeToInherit, mode) {
     if (!nodeToInherit || mode === 'direct'
         || SPECIAL_PROXY_NAMES.has(String(nodeToInherit).toUpperCase())) return true;
     try {
+        // A choice recorded after this (the user picking a node while the
+        // groups are read or the switch runs) is newer than the carried node
+        // and stays.
+        const revisionBefore = knownSelectionRevision();
         const preferredGroupName = appStore.get('uiGroupName') || null;
         const resultAfter = await fetchProxyGroups({ preferredGroupName });
         // No group could be read, so the node was not carried over.
@@ -138,9 +144,20 @@ async function carryNodeOver(nodeToInherit, mode) {
             // Both shapes mean "not applied": a `false` result is the
             // reserved GLOBAL selection being rejected by the backend,
             // while a plain (non-reserved) group PUT raises ApiError.
+            const profile = await readRunningProfile();
+            const groupBefore = appStore.get('uiGroupName');
             const applied = await switchProxy(targetGroup, nodeToInherit);
-            if (applied) appStore.set('uiGroupName', targetGroup);
-            else modesLogger.warn('Node inheritance switch was not applied');
+            if (applied) {
+                // A group the user opened while the switch ran stays open.
+                if (appStore.get('uiGroupName') === groupBefore) appStore.set('uiGroupName', targetGroup);
+                // Known like any other choice, so a profile switch whose read
+                // of the live selection times out saves this node. Only when
+                // the same profile still runs and no newer choice came in.
+                if (profile && await readRunningProfile() === profile
+                    && knownSelectionRevision() === revisionBefore) {
+                    noteKnownSelection(profile, { group: targetGroup, node: nodeToInherit });
+                }
+            } else modesLogger.warn('Node inheritance switch was not applied');
             return applied;
         }
         // The previous node is not present in the target group, so it cannot
