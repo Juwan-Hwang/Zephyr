@@ -57,7 +57,7 @@ function isValidAddress(addr) {
  * @param {HTMLElement|null} opts.tunnelsList - The tunnel list container.
  * @param {HTMLElement|null} opts.tunnelsEmpty - The empty state element.
  * @param {any[]} opts.initialTunnels - The initial tunnel list from core config.
- * @param {(patch: Record<string, any>) => Promise<boolean|'restart'>} opts.saveConfigToCore - Callback to save config patch to core.
+ * @param {(patch: Record<string, any>) => Promise<boolean|'restart'|'partial'>} opts.saveConfigToCore - Callback to save config patch to core.
  */
 export function initTunnelSettings({
     addTunnelBtn,
@@ -68,12 +68,56 @@ export function initTunnelSettings({
 }) {
     /** @type {any[]} */
     let currentTunnels = initialTunnels;
+    /**
+     * The core runs the list shown, but the active profile did not take it
+     * (a 'partial' save): it is lost when that profile is loaded again.
+     */
+    let profileUnsaved = false;
+
+    /**
+     * Save the whole list. A partial save keeps the list (the core already
+     * runs it) but marks it unsaved, so the list offers a retry.
+     * @returns {Promise<boolean|'restart'|'partial'>}
+     */
+    async function saveTunnels() {
+        const ok = await saveConfigToCore({ tunnels: currentTunnels });
+        if (ok) profileUnsaved = ok === 'partial';
+        return ok;
+    }
+
+    /** A row saying the list is not saved to the profile, with a retry button. */
+    function renderUnsavedRow() {
+        /** @type {any} */
+        const t = /** @type {any} */ (translations)[appStore.get('currentLang')] || {};
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-2 rounded-lg p-2 text-xs text-[var(--warning-color,#d97706)]';
+        row.dataset.tunnelsUnsaved = '';
+        const label = document.createElement('span');
+        label.textContent = t.unsavedChanges || 'Unsaved changes';
+        const retryBtn = document.createElement('button');
+        retryBtn.type = 'button';
+        retryBtn.className = 'btn-secondary text-xs px-2 py-1';
+        retryBtn.textContent = t.retry || 'Retry';
+        retryBtn.onclick = async () => {
+            retryBtn.disabled = true;
+            try {
+                await saveTunnels();
+            } finally {
+                retryBtn.disabled = false;
+            }
+            renderTunnels();
+        };
+        row.appendChild(label);
+        row.appendChild(retryBtn);
+        return row;
+    }
 
     function renderTunnels() {
         if (!tunnelsList) return;
 
         if (!currentTunnels || currentTunnels.length === 0) {
             tunnelsList.replaceChildren();
+            if (profileUnsaved) tunnelsList.appendChild(renderUnsavedRow());
             if (tunnelsEmpty) tunnelsList.appendChild(tunnelsEmpty);
             if (tunnelsEmpty) tunnelsEmpty.style.display = 'block';
             return;
@@ -81,6 +125,7 @@ export function initTunnelSettings({
 
         if (tunnelsEmpty) tunnelsEmpty.style.display = 'none';
         tunnelsList.replaceChildren();
+        if (profileUnsaved) tunnelsList.appendChild(renderUnsavedRow());
 
         currentTunnels.forEach((tunnel, index) => {
             const item = document.createElement('div');
@@ -121,7 +166,7 @@ export function initTunnelSettings({
             delBtn.onclick = async () => {
                 const deleted = currentTunnels[index];
                 currentTunnels.splice(index, 1);
-                const ok = await saveConfigToCore({ tunnels: currentTunnels });
+                const ok = await saveTunnels();
                 if (!ok) { currentTunnels.splice(index, 0, deleted); return; }
                 renderTunnels();
             };
@@ -268,7 +313,9 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
                     const newTunnel = { network, address, target };
                     currentTunnels.push(newTunnel);
                     try {
-                        const ok = await saveConfigToCore({ tunnels: currentTunnels });
+                        // 'partial' keeps the tunnel (the core runs it); the list
+                        // then offers to retry saving it to the profile.
+                        const ok = await saveTunnels();
                         if (!ok) { currentTunnels.pop(); confirmBtn.disabled = false; return; }
                         closeModal(null);
                         renderTunnels();
@@ -290,10 +337,24 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
         /** Reset tunnels to empty and re-render */
         resetTunnels() {
             currentTunnels = [];
+            profileUnsaved = false;
+            renderTunnels();
+        },
+        /**
+         * Mark the list shown as live but not saved to the active profile (a
+         * 'partial' save made elsewhere, such as restoring the defaults), so
+         * it offers a retry.
+         */
+        markProfileUnsaved() {
+            profileUnsaved = true;
             renderTunnels();
         },
         /** Update tunnels from external source and re-render */
         setTunnels(/** @type {Array<object>} */ tunnels) {
+            // The same list read back from the core is still the one the
+            // profile did not take; a different one (another profile now
+            // runs) has nothing left to retry.
+            if (JSON.stringify(tunnels) !== JSON.stringify(currentTunnels)) profileUnsaved = false;
             currentTunnels = tunnels;
             renderTunnels();
         },

@@ -2,7 +2,6 @@ use rand::RngExt as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Manager as _, State};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
@@ -34,7 +33,8 @@ use super::tun_manager::{
     kill_managed_root_mihomo_as_root_verified, restart_core_as_root, set_tun_mode,
 };
 use super::{
-    AppPaths, CoreData, CoreStartResult, MihomoState, ProxyEndpoint, ProxyScheme, CORE_STARTING,
+    wait_for_start_lock, AppPaths, CoreData, CoreStartResult, MihomoState, ProxyEndpoint,
+    ProxyScheme, StartLockWait, CORE_ALREADY_STARTING, CORE_START_LOCK, CORE_START_LOCK_TIMEOUT,
 };
 
 #[cfg(target_os = "windows")]
@@ -1570,7 +1570,10 @@ pub const CORE_START_SUPERSEDED: &str = "core already restarted by another start
 /// [`CORE_START_SUPERSEDED`] and leaves the newer core alone (a restart of the
 /// same profile keeps the port and config, but not the start time). A core
 /// with no start time stopped or exited meanwhile: the start goes ahead.
-#[allow(clippy::cognitive_complexity)]
+///
+/// It waits at most [`CORE_START_LOCK_TIMEOUT`] for a start still running and
+/// then gives up with [`CORE_ALREADY_STARTING`]; a background restart that
+/// has to wait it out uses [`start_core_after_pending`].
 pub async fn start_core_with(
     app: AppHandle,
     state: State<'_, MihomoState>,
@@ -1580,59 +1583,66 @@ pub async fn start_core_with(
     force: Option<bool>,
     expect_started_at: Option<Option<std::time::Instant>>,
 ) -> Result<CoreStartResult, String> {
-    // Wait for any previous core start operation to complete (max 10s)
-    let mut wait_ms = 0;
-    while CORE_STARTING
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        if wait_ms > 10000 {
-            // A guarded restart (resume recovery) only stands in for a core
-            // nobody else is starting: one still starting after 10 s (a
-            // macOS TUN start waiting for authorization) supersedes it, and
-            // taking the lock from it would run two starts at once.
-            if expect_started_at.is_some() {
-                return Err(CORE_START_SUPERSEDED.to_owned());
-            }
-            emit_warn!(
-                Core,
-                CORE_START_FAILED,
-                "Core start lock timeout, forcing reset"
-            );
-            CORE_STARTING.store(false, Ordering::SeqCst);
-            if CORE_STARTING
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok()
-            {
-                break;
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        wait_ms += 200;
+    // Wait for any earlier start to finish. Only the start holding the
+    // guard releases the lock, so one still running after the timeout (a
+    // macOS TUN start waiting for authorization) keeps it: this start gives
+    // up instead of running alongside it.
+    let Some(_start_guard) = wait_for_start_lock(&CORE_START_LOCK, StartLockWait::Bounded).await
+    else {
+        emit_warn!(
+            Core,
+            CORE_START_FAILED,
+            "Core start lock still held after {}s; another start is in progress",
+            CORE_START_LOCK_TIMEOUT.as_secs()
+        );
+        return Err(CORE_ALREADY_STARTING.to_owned());
+    };
+
+    if superseded_since(&state, expect_started_at) {
+        return Err(CORE_START_SUPERSEDED.to_owned());
     }
 
-    // Reset flag on function exit
-    struct ResetGuard;
-    impl Drop for ResetGuard {
-        fn drop(&mut self) {
-            CORE_STARTING.store(false, Ordering::SeqCst);
-        }
-    }
-    let _guard = ResetGuard;
+    Box::pin(start_core_locked(
+        app,
+        state,
+        config_path,
+        custom_args,
+        secret,
+        force,
+    ))
+    .await
+}
 
-    if let Some(expected) = expect_started_at {
-        let current = state
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .started_at();
-        // Only a different start time is another start; none means the
-        // core stopped or exited meanwhile and still needs this one.
-        if current.is_some() && current != expected {
-            return Err(CORE_START_SUPERSEDED.to_owned());
-        }
-    }
+/// Whether another start replaced the core that started at `expected` (the
+/// outer `None`: the caller expects nothing). Only a different start time is
+/// another start; none means the core stopped or exited meanwhile and still
+/// needs restarting. Read while holding [`CORE_START_LOCK`].
+fn superseded_since(
+    state: &MihomoState,
+    expect_started_at: Option<Option<std::time::Instant>>,
+) -> bool {
+    let Some(expected) = expect_started_at else {
+        return false;
+    };
+    let current = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .started_at();
+    current.is_some() && current != expected
+}
 
+/// The start itself. The caller holds [`CORE_START_LOCK`] for as long as this
+/// runs (the guard lives in the caller's frame across the await).
+#[allow(clippy::cognitive_complexity)]
+async fn start_core_locked(
+    app: AppHandle,
+    state: State<'_, MihomoState>,
+    config_path: String,
+    custom_args: Vec<String>,
+    secret: Option<String>,
+    force: Option<bool>,
+) -> Result<CoreStartResult, String> {
     // Reuse checks compare against the profile this start would actually run: a missing
     // request falls back to another profile. With no profile at all the core runs the
     // built-in minimal config (`last_config_path` stays None), and a repeated start must
@@ -1766,7 +1776,7 @@ pub async fn start_core_with(
         }
     }
 
-    // Check if core is already running with the SAME config (under CORE_STARTING protection).
+    // Check if core is already running with the SAME config (under CORE_START_LOCK protection).
     // If the requested config differs from the current one, we must restart to apply it.
     // Also extract port/secret for drain before killing.
     let drain_info: Option<(u16, String)> = {
@@ -2621,6 +2631,26 @@ pub async fn start_core_with(
     })
 }
 
+/// Run a core start, turning a panic inside it into an error instead of
+/// letting it take the whole app down.
+async fn catch_start_panic<F>(start: F) -> Result<CoreStartResult, String>
+where
+    F: std::future::Future<Output = Result<CoreStartResult, String>> + Send,
+{
+    use futures_util::future::FutureExt as _;
+    use std::panic::AssertUnwindSafe;
+
+    AssertUnwindSafe(start)
+        .catch_unwind()
+        .await
+        .map_err(|payload| {
+            let msg = crate::backend_event::panic_to_string(payload);
+            crate::emit_error!(Core, CORE_PANIC_GUARD, "Panic in start_core: {msg}");
+            format!("Internal error in start_core: {msg}")
+        })
+        .and_then(std::convert::identity)
+}
+
 /// Tauri command wrapper for `start_core_inner` with `catch_unwind` guard.
 ///
 /// If the inner function panics, the error is caught and converted to a
@@ -2634,10 +2664,7 @@ pub async fn start_core(
     secret: Option<String>,
     force: Option<bool>,
 ) -> Result<CoreStartResult, String> {
-    use futures_util::future::FutureExt as _;
-    use std::panic::AssertUnwindSafe;
-
-    AssertUnwindSafe(start_core_inner(
+    catch_start_panic(start_core_inner(
         app,
         state,
         config_path,
@@ -2645,14 +2672,62 @@ pub async fn start_core(
         secret,
         force,
     ))
-    .catch_unwind()
     .await
-    .map_err(|payload| {
-        let msg = crate::backend_event::panic_to_string(payload);
-        crate::emit_error!(Core, CORE_PANIC_GUARD, "Panic in start_core: {msg}");
-        format!("Internal error in start_core: {msg}")
+}
+
+/// [`start_core`] for the restart onto a core binary the updater just
+/// installed. It waits for a start still in progress instead of giving up
+/// after [`CORE_START_LOCK_TIMEOUT`]: giving up would make the updater roll
+/// the binary back while that other start may already be running it.
+///
+/// The recovery restart after a resume uses it too: a start still running
+/// may fail and leave the unresponsive core in place.
+///
+/// The profile, arguments and secret are read only once it holds the start
+/// lock, so a start that was in progress (another profile, say) is restarted
+/// as it ended up, not as it was before. With `expect_started_at` it returns
+/// [`CORE_START_SUPERSEDED`] when that start replaced the core, as
+/// [`start_core_with`] does.
+pub async fn start_core_after_pending(
+    app: AppHandle,
+    state: State<'_, MihomoState>,
+    force: Option<bool>,
+    expect_started_at: Option<Option<std::time::Instant>>,
+) -> Result<CoreStartResult, String> {
+    catch_start_panic(async move {
+        let _start_guard = wait_for_start_lock(&CORE_START_LOCK, StartLockWait::UntilFree)
+            .await
+            .ok_or_else(|| CORE_ALREADY_STARTING.to_owned())?;
+        if superseded_since(&state, expect_started_at) {
+            return Err(CORE_START_SUPERSEDED.to_owned());
+        }
+        let (config_path, custom_args, secret) = {
+            let lock = state
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let config = lock
+                .last_config_path()
+                .map_or_else(|| "config.yaml".to_owned(), String::from);
+            let args = lock.last_custom_args().map(Vec::from).unwrap_or_default();
+            let secret = if lock.last_secret().is_empty() {
+                None
+            } else {
+                Some(lock.last_secret().to_owned())
+            };
+            (config, args, secret)
+        };
+        Box::pin(start_core_locked(
+            app,
+            state,
+            config_path,
+            custom_args,
+            secret,
+            force,
+        ))
+        .await
     })
-    .and_then(std::convert::identity)
+    .await
 }
 
 /// Clear all state fields that become stale when the core process stops.

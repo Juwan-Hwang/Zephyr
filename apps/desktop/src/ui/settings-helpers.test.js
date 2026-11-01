@@ -15,7 +15,7 @@ vi.mock('../utils/logger.js', () => ({
 import { invoke } from '../api.js';
 import { invalidateSettingsCache } from './cache.js';
 import { settingsLogger } from '../utils/logger.js';
-import { saveSetting, saveSettings, getSetting } from './settings-helpers.js';
+import { saveSetting, saveSettings, getSetting, portPatchError } from './settings-helpers.js';
 
 const invokeMock = /** @type {import('vitest').Mock} */ (invoke);
 
@@ -112,5 +112,19 @@ describe('getSetting', () => {
     it('propagates backend errors to the caller', async () => {
         invokeMock.mockRejectedValue(new Error('ipc failed'));
         await expect(getSetting('mode', 'rule')).rejects.toThrow('ipc failed');
+    });
+});
+
+describe('portPatchError', () => {
+    it('accepts distinct ports with one proxy port on', () => {
+        expect(portPatchError([7890, 0], 7890, 0, [0, Number.NaN])).toBeNull();
+    });
+    it('refuses, in order: out of range, no proxy port, a shared port', () => {
+        expect(portPatchError([70000, 0], 70000, 0, [])?.key).toBe('portRangeError');
+        expect(portPatchError([Number.NaN, 1080], Number.NaN, 1080, [])?.key).toBe('portRangeError');
+        expect(portPatchError([0, 0], 0, 0, [])?.key).toBe('portAllDisabledError');
+        expect(portPatchError([7890, 7890], 7890, 7890, [])?.key).toBe('portDuplicateError');
+        // A hidden port that is still live counts too.
+        expect(portPatchError([7890, 0], 7890, 0, [7890])?.key).toBe('portDuplicateError');
     });
 });

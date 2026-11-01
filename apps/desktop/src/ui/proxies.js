@@ -24,6 +24,7 @@ import { smartScore, smartNextInterval, smartRank, smartConfig, failoverReport }
 import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType, isGroup as hasGroupMembers, isNonProxyExit, isRealOutboundNode, providerMembersPending, providerPageState } from './proxy-groups.js';
 import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
+import { noteKnownSelection } from './known-selection.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
 import { queueSmartConfigWrite, syncSmartShown, readAutoTestEnabled } from './settings/auto-switch.js';
 import { postRestartRecovery, restartedProfile, withPageBusy } from './lifecycle.js';
@@ -1117,11 +1118,27 @@ async function reportFailover(name, success) {
 let _isFailovering = false;
 
 /**
+ * The running profile, read uncached (a cached name can lag just after a
+ * profile change); '' when unknown or while the minimal config runs.
+ * @returns {Promise<string>}
+ */
+async function readRunningProfile() {
+    try {
+        return activeProfile(await invoke(COMMANDS.GET_SETTINGS), 'config.yaml');
+    } catch {
+        return '';
+    }
+}
+
+/**
  * Handle a failover action returned by the failover engine.
- * Switches to the best available node (lowest latency) in the current group.
+ * Switches to the best available node (lowest latency) in the current group,
+ * and records it as the profile's known choice: a profile switch whose read
+ * of the live selection times out then saves this node, not the failed one.
+ * Exported for tests.
  * @param {{failedNode: string, failureCount: number, target: string}} action
  */
-async function handleFailoverAction(action) {
+export async function handleFailoverAction(action) {
     if (_isFailovering) return;
     _isFailovering = true;
     try {
@@ -1172,8 +1189,12 @@ async function handleFailoverAction(action) {
             targetNode = bestNode || candidates[0];
         }
 
+        // The profile the switch applies to, read before it.
+        const runningProfile = await readRunningProfile();
         const success = await switchProxy(uiGroupName, targetNode);
         if (success) {
+            // The minimal config runs: no profile to record the choice under.
+            if (runningProfile) noteKnownSelection(runningProfile, { group: uiGroupName, node: targetNode });
             showNotification(
                 t('failoverSwitched', { failed: action.failedNode, target: targetNode }),
                 'success'

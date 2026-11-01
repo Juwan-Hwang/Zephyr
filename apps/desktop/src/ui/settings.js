@@ -42,7 +42,7 @@ import { checkConsoleWidthNotification } from './console-width.js';
 import { invalidateSettingsCache } from './cache.js';
 import { postRestartRecovery, restartedProfile, withPageBusy } from './lifecycle.js';
 import { currentProfile } from './active-profile.js';
-import { saveSetting, saveSettingChecked, saveSettings } from './settings-helpers.js';
+import { portPatchError, saveSetting, saveSettingChecked, saveSettings } from './settings-helpers.js';
 import { initNetworkOptim } from './network-optim.js';
 import {
     DEFAULT_DNS_CONFIG,
@@ -93,6 +93,7 @@ import { withResetChanges } from './settings/reset-merge.js';
 import { selectSegment } from './seg-control.js';
 import { openUpdateDialog, showPendingUpdateNote } from './update-dialog.js';
 import { createClientVersionFetcher, isValidClientVersions } from './settings/client-version-fetch.js';
+import { configUpdateOutcome } from './config-update.js';
 
 let __langDropdown = null;
 /** @type {(() => Promise<void>) | null} */
@@ -735,7 +736,7 @@ function initLogSettingsModal() {
             void (async () => {
                 try {
                     showNotification(t.logExporting || 'Exporting logs...');
-                    const path = await invoke('export_logs', {
+                    const path = await invoke(COMMANDS.EXPORT_LOGS, {
                         logType,
                         fromDate: from,
                         toDate: to,
@@ -765,7 +766,7 @@ function initLogSettingsModal() {
 
         modal.querySelector('#log-open-folder')?.addEventListener('click', async () => {
             try {
-                await invoke('open_log_folder');
+                await invoke(COMMANDS.OPEN_LOG_FOLDER);
             } catch (err) {
                 settingsLogger.error('[log-settings] Failed to open folder:', err);
             }
@@ -1665,7 +1666,10 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                         'allow-lan': false,
                         tunnels: [],
                     });
-                    if (!result) {
+                    // 'partial': live, but the active profile still has the old values.
+                    // The empty tunnel list runs now: offer its retry row.
+                    if (result === 'partial') tunnelApi.markProfileUnsaved();
+                    if (!result || result === 'partial') {
                         throw new Error(t.failedSaveSettings || 'Failed to save core settings');
                     }
                 });
@@ -2081,8 +2085,11 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
     // ---- Save config to core ----
     /**
      * @param {Record<string, any>} patch
-     * @returns {Promise<boolean|'restart'>} true when hot-reloaded, 'restart' when saved
-     *   but the core must restart (already announced), false when it failed
+     * @returns {Promise<boolean|'restart'|'partial'>} true when hot-reloaded and saved
+     *   everywhere; 'restart' when every file was saved and the core applies it after the
+     *   restart notice already shown; 'partial' when the run config took the change but the
+     *   active profile did not (warning already shown): the change is not kept in the
+     *   profile, so callers must not treat it as saved; false when it failed
      */
     async function saveConfigToCore(patch) {
         try {
@@ -2090,10 +2097,20 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             const result = await invoke(COMMANDS.UPDATE_CONFIG, { patch });
             await syncCoreConfig();
 
-            if (result && !result.hot_reload_success) {
+            // No result object (an old backend): treat as applied, as before.
+            const outcome = result ? configUpdateOutcome(result) : 'applied';
+            if (outcome === 'partial') {
+                // The run config took the change but the profile did not: it
+                // works now and is lost when the profile is loaded again.
                 /** @type {any} */
                 const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
-                showNotification(result.message || t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
+                showNotification(result?.message || t2.failedSaveSettings || 'Failed to save settings to core', 'warning');
+                return 'partial';
+            }
+            if (outcome === 'restart') {
+                /** @type {any} */
+                const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
+                showNotification(result?.message || t2.requireRestart || "Changes saved. Restart the core to take effect.", "info");
                 return 'restart';
             }
             return true;
@@ -2112,39 +2129,45 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         if (!unifiedDelayToggle) return;
         // Hot-reload via core API, then persist to settings.json
         const ok = await saveConfigToCore({ 'unified-delay': unifiedDelayToggle.checked });
+        // settings.json overrides every profile when the core starts, so it keeps the
+        // choice even when the active profile did not take it ('partial').
         if (ok) await saveSetting('unified_delay', unifiedDelayToggle.checked);
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         // Hot reload already applied it; saveConfigToCore warns itself when a restart is needed.
         if (ok === true) showNotification(t.settingApplied || "Applied", "success");
-        // "restart": saved, takes effect after the restart notice saveConfigToCore already showed.
-        else if (ok !== 'restart') { unifiedDelayToggle.checked = !unifiedDelayToggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
+        // "restart" / "partial": kept, with the notice saveConfigToCore already showed.
+        else if (!ok) { unifiedDelayToggle.checked = !unifiedDelayToggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
     });
 
     ipv6Toggle?.addEventListener('change', async () => {
         if (!ipv6Toggle) return;
         // Hot-reload via core API, then persist to settings.json
         const ok = await saveConfigToCore({ ipv6: ipv6Toggle.checked });
+        // settings.json overrides every profile when the core starts, so it keeps the
+        // choice even when the active profile did not take it ('partial').
         if (ok) await saveSetting('ipv6', ipv6Toggle.checked);
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         // Hot reload already applied it; saveConfigToCore warns itself when a restart is needed.
         if (ok === true) showNotification(t.settingApplied || "Applied", "success");
-        // "restart": saved, takes effect after the restart notice saveConfigToCore already showed.
-        else if (ok !== 'restart') { ipv6Toggle.checked = !ipv6Toggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
+        // "restart" / "partial": kept, with the notice saveConfigToCore already showed.
+        else if (!ok) { ipv6Toggle.checked = !ipv6Toggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
     });
 
     allowLanToggle?.addEventListener('change', async () => {
         if (!allowLanToggle) return;
         // Hot-reload via core API, then persist to settings.json
         const ok = await saveConfigToCore({ 'allow-lan': allowLanToggle.checked });
+        // settings.json overrides every profile when the core starts, so it keeps the
+        // choice even when the active profile did not take it ('partial').
         if (ok) await saveSetting('allow_lan', allowLanToggle.checked);
         /** @type {any} */
         const t = /** @type {any} */ (translations)[appStore.get('currentLang')];
         // Hot reload already applied it; saveConfigToCore warns itself when a restart is needed.
         if (ok === true) showNotification(t.settingApplied || "Applied", "success");
-        // "restart": saved, takes effect after the restart notice saveConfigToCore already showed.
-        else if (ok !== 'restart') { allowLanToggle.checked = !allowLanToggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
+        // "restart" / "partial": kept, with the notice saveConfigToCore already showed.
+        else if (!ok) { allowLanToggle.checked = !allowLanToggle.checked; showNotification(t.saveFailed || "Failed to save", "error"); }
     });
 
     // ---- Port configuration modal ----
@@ -2280,28 +2303,15 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 // Hidden Redir/TProxy fields are left out of range checks and writes.
                 if (portRedirShown) ports.push({ val: redirVal, key: 'redir-port', settingsKey: null });
                 if (portIsLinux) ports.push({ val: tproxyVal, key: 'tproxy-port', settingsKey: null });
-                for (const { val } of ports) {
-                    if (!Number.isInteger(val) || val < 0 || val > 65535) {
-                        showNotification(t.portRangeError || 'Port must be between 0 and 65535', 'error');
-                        return;
-                    }
-                }
-
-                // Require at least one active proxy port (mixed or socks)
-                if (mixedVal === 0 && socksVal === 0) {
-                    showNotification(t.portAllDisabledError || 'At least one proxy port (Mixed or SOCKS5) must be enabled', 'error');
-                    return;
-                }
-
                 // Two listeners cannot share a port (0 = disabled, ignored). Hidden Redir/TProxy
                 // ports may still be live in the core config, so they count here too.
                 const hiddenLive = [
                     ...(portRedirShown ? [] : [redirVal]),
                     ...(portIsLinux ? [] : [tproxyVal]),
-                ].filter(v => Number.isInteger(v));
-                const used = [...ports.map(p => p.val), ...hiddenLive].filter(v => v > 0);
-                if (new Set(used).size !== used.length) {
-                    showNotification(t.portDuplicateError || 'Each port can only be used once', 'error');
+                ];
+                const invalid = portPatchError(ports.map(p => p.val), mixedVal, socksVal, hiddenLive);
+                if (invalid) {
+                    showNotification(t[invalid.key] || invalid.fallback, 'error');
                     return;
                 }
 
@@ -2319,10 +2329,13 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
 
                 const ok = await saveConfigToCore(patch);
                 if (ok) {
-                    // Persist port values to settings.json
+                    // Persist port values to settings.json (it overrides every profile
+                    // at core start, so the mixed and SOCKS ports are kept either way)
                     await saveSettings(settingsPatch);
                     await loadSettingsFromCore();
-                    closePortModal();
+                    // 'partial': the active profile did not take the ports (redir and
+                    // TProxy live only there). Keep the dialog open so Save can retry.
+                    if (ok !== 'partial') closePortModal();
                 }
             } finally {
                 portSaveBtn.classList.remove('opacity-50', 'pointer-events-none');
