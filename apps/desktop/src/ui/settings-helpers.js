@@ -78,6 +78,24 @@ export function saveSettings(patch) {
 }
 
 /**
+ * Like saveSettings(), but the returned promise rejects when the write fails,
+ * for callers that must report it (a change the core already runs that
+ * settings.json, which overrides every profile at core start, did not take).
+ * @param {Record<string, *>} patch
+ * @returns {Promise<void>}
+ */
+export function saveSettingsChecked(patch) {
+    const run = saveQueue.then(async () => {
+        await invoke(COMMANDS.PATCH_SETTINGS, { patch });
+        invalidateSettingsCache();
+    });
+    saveQueue = run.catch((e) => {
+        settingsLogger.warn('Failed to save settings:', e);
+    });
+    return run;
+}
+
+/**
  * Read a single field from settings.json.
  *
  * @template T
@@ -89,4 +107,44 @@ export async function getSetting(key, fallback) {
     const settings = await invoke(COMMANDS.GET_SETTINGS);
     const value = settings[key];
     return (value === null || value === undefined) ? fallback : value;
+}
+
+/**
+ * Why a port dialog save is refused, or null when it can go ahead: a port out
+ * of range (0 disables it), no proxy port left (mixed and SOCKS both 0), or two
+ * listeners on one port. Hidden Redir/TProxy fields are left out: they are
+ * hidden where the core does not start those listeners, so a value kept in
+ * the profile holds no port.
+ * @param {number[]} shown the ports the save writes
+ * @param {number} mixedVal
+ * @param {number} socksVal
+ * @returns {{ key: string, fallback: string } | null}
+ */
+export function portPatchError(shown, mixedVal, socksVal) {
+    if (shown.some((val) => !Number.isInteger(val) || val < 0 || val > 65535)) {
+        return { key: 'portRangeError', fallback: 'Port must be between 0 and 65535' };
+    }
+    if (mixedVal === 0 && socksVal === 0) {
+        return { key: 'portAllDisabledError', fallback: 'At least one proxy port (Mixed or SOCKS5) must be enabled' };
+    }
+    const used = shown.filter((v) => v > 0);
+    if (new Set(used).size !== used.length) {
+        return { key: 'portDuplicateError', fallback: 'Each port can only be used once' };
+    }
+    return null;
+}
+
+/**
+ * The state a core switch shows after the settings are loaded: the saved
+ * preference when set; otherwise what the core config says, when it was
+ * read; otherwise null (keep what it shows: the config's defaults may not
+ * be what the core runs).
+ * @param {unknown} saved the settings.json value (null/undefined: unset)
+ * @param {boolean} configRead whether the core config was read
+ * @param {() => boolean} fromConfig the value the config gives
+ * @returns {boolean | null}
+ */
+export function loadedToggleState(saved, configRead, fromConfig) {
+    if (saved != null) return !!saved;
+    return configRead ? fromConfig() : null;
 }

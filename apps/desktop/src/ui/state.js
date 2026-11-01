@@ -146,8 +146,22 @@ export function createStore(storeName, initialState, { persist = true, transient
         }
     }
 
+    /**
+     * Watchers called at once, inside set(), with each value the key takes:
+     * subscribers are batched and see only the last value of a burst, so a
+     * value set and set back before they run would pass them by.
+     * @type {Map<string, Set<Function>>}
+     */
+    const syncWatchers = new Map();
+
     /** @param {string} key */
     function scheduleNotify(key) {
+        const watchers = syncWatchers.get(key);
+        if (watchers) {
+            for (const cb of watchers) {
+                try { cb(state[key]); } catch { /* swallow */ }
+            }
+        }
         pendingKeys.add(key);
         if (!microtaskScheduled) {
             microtaskScheduled = true;
@@ -255,6 +269,24 @@ export function createStore(storeName, initialState, { persist = true, transient
                 subs.delete(callback);
                 if (subs.size === 0) keySubs.delete(key);
             };
+        },
+
+        /**
+         * Call `callback` with each value `key` takes, at once inside set()
+         * (not batched like subscribe), so none is missed.
+         * @param {string} key
+         * @param {(value: any) => void} callback
+         * @returns {() => void} stop watching
+         */
+        watchEach(key, callback) {
+            let watchers = syncWatchers.get(key);
+            if (!watchers) {
+                watchers = new Set();
+                syncWatchers.set(key, watchers);
+            }
+            watchers.add(callback);
+            const own = watchers;
+            return () => { own.delete(callback); };
         },
 
         /**
@@ -405,6 +437,8 @@ export const appStore = createStore('zephyr.app', {
     effectiveGroupName: null,
     observedGroupName: null,
     observedNodeName: null,
+    /** Last node choice known per profile ([{ profile, group, node }], oldest first, bounded), see known-selection.js. */
+    knownSelections: [],
 
     // System state
     isSysProxyEnabled: false,
@@ -432,6 +466,7 @@ export const appStore = createStore('zephyr.app', {
     transientKeys: [
         // Proxy group resolver state — re-resolved each session.
         'uiGroupName', 'uiPrimaryGroupName', 'effectiveGroupName', 'observedGroupName', 'observedNodeName',
+        'knownSelections',
         // Locks — must never survive a page reload. If the WebView is
         // refreshed while one of these is true (e.g. during a config switch
         // or latency test), the flag would be persisted to localStorage

@@ -312,16 +312,43 @@ async fn get_mihomo_active_node_and_global_now(
 /// 通过 mihomo REST API 设置策略组的选中项。
 /// 返回 Ok(()) 表示成功；Err(true) 表示永久性客户端错误（4xx，如目标节点或策略组不存在）；Err(false) 表示暂态错误。
 async fn set_mihomo_proxy_group(app: &AppHandle, group: &str, name: &str) -> Result<(), bool> {
+    set_mihomo_proxy_group_outcome(app, group, name)
+        .await
+        .map_err(|failure| failure == GroupSwitchFailure::Missing)
+}
+
+/// Why a proxy group switch did not go through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GroupSwitchFailure {
+    /// 404 / 400: the group is gone or the node is not one of its members.
+    Missing,
+    /// Never reached the core (none runs, or the connection failed) or the
+    /// core answered with an error: nothing changed.
+    NotApplied,
+    /// Sent, but no answer came back (a timeout, a lost reply): the core may
+    /// have switched.
+    Unconfirmed,
+}
+
+async fn set_mihomo_proxy_group_outcome(
+    app: &AppHandle,
+    group: &str,
+    name: &str,
+) -> Result<(), GroupSwitchFailure> {
     let Some((client, base, secret)) = mihomo_base_api(app) else {
-        return Err(false);
+        return Err(GroupSwitchFailure::NotApplied);
     };
     let url = format!("{base}/proxies/{group}");
     let mut req = client.put(&url).json(&serde_json::json!({ "name": name }));
     if !secret.is_empty() {
         req = req.bearer_auth(&secret);
     }
-    let Ok(resp) = req.send().await else {
-        return Err(false);
+    let resp = match req.send().await {
+        Ok(resp) => resp,
+        Err(err) if err.is_connect() || err.is_builder() => {
+            return Err(GroupSwitchFailure::NotApplied);
+        }
+        Err(_) => return Err(GroupSwitchFailure::Unconfirmed),
     };
     if resp.status().is_success() {
         Ok(())
@@ -330,9 +357,9 @@ async fn set_mihomo_proxy_group(app: &AppHandle, group: &str, name: &str) -> Res
         reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::BAD_REQUEST
     ) {
         // 404: group missing; 400: selector rejected the node (not a member)
-        Err(true)
+        Err(GroupSwitchFailure::Missing)
     } else {
-        Err(false)
+        Err(GroupSwitchFailure::NotApplied)
     }
 }
 
@@ -624,16 +651,22 @@ pub async fn user_switch_global_node(app: &AppHandle, name: &str) -> Result<(), 
     // The lock is held across the PUT and the bump, so a concurrent restore
     // cannot interleave; a failed request bumps nothing and persists nothing,
     // leaving any pending fallback restore intact.
-    let outcome = match set_mihomo_proxy_group(app, "GLOBAL", name).await {
+    // The frontend tells the messages apart: only the unconfirmed one may
+    // have changed the core's node.
+    let outcome = match set_mihomo_proxy_group_outcome(app, "GLOBAL", name).await {
         Ok(()) => {
             notify_user_node_changed();
             Ok(())
         }
-        Err(missing) => Err(if missing {
-            format!("GLOBAL proxy group no longer contains node '{name}'")
-        } else {
-            "Failed to switch GLOBAL proxy group".to_owned()
-        }),
+        Err(GroupSwitchFailure::Missing) => Err(format!(
+            "GLOBAL proxy group no longer contains node '{name}'"
+        )),
+        Err(GroupSwitchFailure::NotApplied) => {
+            Err("The core did not switch the GLOBAL proxy group".to_owned())
+        }
+        Err(GroupSwitchFailure::Unconfirmed) => {
+            Err("Failed to switch GLOBAL proxy group (no answer from the core)".to_owned())
+        }
     };
     drop(lock_guard);
     outcome
