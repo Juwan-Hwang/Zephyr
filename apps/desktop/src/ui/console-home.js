@@ -37,7 +37,8 @@ import { t, applyTranslations } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
 import { syncCoreConfig, resolveLeafNode, notifySwitchFailed } from './proxies.js';
 import { switchToConfig } from './lifecycle.js';
-import { activeProfile, currentProfile } from './active-profile.js';
+import { currentProfile } from './active-profile.js';
+import { readRunningProfile } from './running-profile.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { saveProxySelection } from './proxy-memory.js';
 import { invalidateProxiesCache, invalidateSettingsCache, invalidateConfigsCache, getSettingsCached } from './cache.js';
@@ -48,6 +49,17 @@ import { setSysProxyEnabled, refreshSysProxyStatus } from './sysproxy.js';
 import { syncNoSubscriptionState } from './no-subscription.js';
 import { createProcessIcon } from './process-icon.js';
 import { mirrorTunToggle } from './tun.js';
+
+/**
+ * The profile a node switch is filed under, read when it is clicked: a
+ * failed read is no profile, and then nothing is saved.
+ * @returns {Promise<string>}
+ */
+async function profileForSwitch() {
+    // Live: a cached read could still name the profile a switch replaced.
+    return (await readRunningProfile()) ?? '';
+}
+
 
 /** Map app language code to BCP-47 locale tag for Intl APIs. */
 const LOCALE_TAGS = { en: 'en', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', ru: 'ru-RU', es: 'es-ES', fa: 'fa-IR', tk: 'tk-TM', my: 'my-MM', ar: 'ar-SA', ur: 'ur-PK', sw: 'sw-KE', tr: 'tr-TR', vi: 'vi-VN' };
@@ -1256,6 +1268,15 @@ async function selectPickerNode(i) {
             showNotification(t('notifSwitchFailed'), 'error');
             return;
         }
+        // The profile the click was made under: a profile switch while the
+        // request runs must not file this node under the one that replaced it.
+        const profileAtClick = await profileForSwitch();
+        // A change that began during that read could carry its own node
+        // over this switch, or take it to the core that replaces this one.
+        if (appStore.get('isNetworkUpdating')) {
+            showNotification(t('consoleSubUpdateBusy'), 'info');
+            return;
+        }
         const { ok: success, reason } = await switchProxyResult(targetGroup, n.name);
         if (!success) {
             notifySwitchFailed(reason);
@@ -1270,9 +1291,8 @@ async function selectPickerNode(i) {
             consoleLogger.warn('Failed to close connections after node switch', e);
         }
         try {
-            const settings = await getSettingsCached();
-            const profileName = activeProfile(settings, 'config.yaml');
-            if (profileName) {
+            const profileName = await profileForSwitch();
+            if (profileName && profileName === profileAtClick) {
                 await saveProxySelection(profileName, { node: n.name, group: targetGroup });
             }
         } catch (e) { consoleLogger.warn('Failed to save proxy selection', e); }

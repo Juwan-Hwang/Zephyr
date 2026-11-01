@@ -29,6 +29,7 @@ vi.mock('./cache.js', () => ({
     getSettingsCached: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('./proxy-memory.js', () => ({ saveProxySelection: vi.fn() }));
+vi.mock('./running-profile.js', () => ({ readRunningProfile: vi.fn().mockResolvedValue('config.yaml') }));
 vi.mock('./notifications.js', () => ({ showNotification: vi.fn() }));
 
 const GROUPS = {
@@ -288,9 +289,9 @@ describe('node quick-switch wheel', () => {
     it('saves an older accepted switch when the newer click fails, and reports only the newer one', async () => {
         const api = await import('../api.js');
         const proxies = await import('./proxies.js');
-        const cache = await import('./cache.js');
         const memory = await import('./proxy-memory.js');
-        /** @type {any} */ (cache.getSettingsCached).mockResolvedValue({ last_config: 'sub' });
+        const running = await import('./running-profile.js');
+        /** @type {any} */ (running.readRunningProfile).mockResolvedValue('sub');
         /** @type {(v: any) => void} */
         let resolveA = () => {};
         /** @type {(e: any) => void} */

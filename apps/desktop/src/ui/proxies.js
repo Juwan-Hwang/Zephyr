@@ -7,7 +7,7 @@
  */
 
 import { decideGroupMismatch } from './group-mismatch.js';
-import { switchProxy, switchProxyResult, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies, getProxiesMerged, SPECIAL_PROXY_NAMES } from '../api.js';
+import { switchProxy, switchProxyResult, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies, getProxiesMerged, SPECIAL_PROXY_NAMES, proxySwitchMark, proxySwitchedSince } from '../api.js';
 import { proxyLogger } from '../utils/logger.js';
 import { getDelayColorClass } from '../utils/format.js';
 import { buildLatencyPriorityQueue } from '../utils/array.js';
@@ -24,13 +24,26 @@ import { smartScore, smartNextInterval, smartRank, smartConfig, failoverReport }
 import { fetchProxyGroups as fetchProxyGroupsShared, isWritableGroupType, isGroup as hasGroupMembers, isNonProxyExit, isRealOutboundNode, providerMembersPending, providerPageState } from './proxy-groups.js';
 import { Bus, Events } from './events.js';
 import { saveProxySelection, savePrimaryGroupPreference } from './proxy-memory.js';
+import { knownSelectionRevision, knownSelectionChangedSince } from './known-selection.js';
 import { invalidateRunConfigCache } from './run-config-cache.js';
 import { queueSmartConfigWrite, syncSmartShown, readAutoTestEnabled } from './settings/auto-switch.js';
 import { postRestartRecovery, restartedProfile, withPageBusy } from './lifecycle.js';
 import { activeProfile, currentProfile } from './active-profile.js';
+import { readRunningProfile } from './running-profile.js';
 import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
 import { renderTunStatus } from './tun-status.js';
 import { updateModeUI } from './modes.js';
+
+/**
+ * The profile a node switch is filed under, read live when it is clicked
+ * and when it is answered (a cached read could still name the profile a
+ * switch replaced): a failed read is no profile, and then nothing is saved.
+ * @returns {Promise<string>}
+ */
+async function profileForSwitch() {
+    return (await readRunningProfile()) ?? '';
+}
+
 
 // Re-export switchPage for external consumers that import from this module
 
@@ -866,6 +879,7 @@ export function initProxyControls() {
                 const testProxyAndUpdate = async (/** @type {string} */ name) => {
                     // testProxy already handles abort internally and returns -1 on cancellation
                     const gen = beginNodeTest(name);
+                    const testSignal = getLatencyTestSignal();
                     const delay = await testProxy(name);
                     // Cut short by Stop: no result, so neither a timeout on the card nor a
                     // failure for the smart score (the cleanup redraws pending cards).
@@ -897,7 +911,7 @@ export function initProxyControls() {
                     // Report to failover engine if enabled
                     if (isLatest && appStore.get('failoverEnabled') && !getLatencyTestSignal().aborted) {
                         const failoverSuccess = delay > 0 && delay < 999999;
-                        void reportFailover(name, failoverSuccess);
+                        void reportFailover(name, failoverSuccess, testSignal);
                     }
                 };
 
@@ -1088,13 +1102,24 @@ function rememberMismatchDismissed(key) {
 }
 
 /**
+ * Whether a test run under `signal` no longer counts: aborted, or replaced
+ * by a newer run (a new controller is made when one starts).
+ * @param {AbortSignal|undefined} signal
+ * @returns {boolean}
+ */
+function latencyRunStale(signal) {
+    return !!signal && (signal.aborted || signal !== getLatencyTestSignal());
+}
+
+/**
  * Report a proxy test result to the failover engine if the tested node
  * is the currently active node (or its resolved leaf).
  * Only active-node results are reported to avoid stale failure counts.
  * @param {string} name - Tested proxy name
  * @param {boolean} success - Whether the test succeeded
+ * @param {AbortSignal} [testSignal] the latency-test signal the test ran under
  */
-async function reportFailover(name, success) {
+async function reportFailover(name, success, testSignal = getLatencyTestSignal()) {
     if (!appStore.get('failoverEnabled')) return;
     const uiGroupName = appStore.get('uiGroupName');
     const proxyMap = await getProxiesCached().then(getProxiesMerged).then(d => d?.proxies).catch(() => null);
@@ -1102,11 +1127,18 @@ async function reportFailover(name, success) {
     const activeLeaf = currentNode ? resolveLeafNode(currentNode, proxyMap) : null;
     const activeNode = activeLeaf || currentNode;
     if (!activeNode || (name !== activeNode && name !== currentNode)) return;
+    // The profile the result belongs to: an action for it does nothing once
+    // another profile runs (its same-named group is another group).
+    const testedProfile = await readRunningProfile();
+    // A profile switch since the test started aborts tests, and a profile,
+    // mode or TUN change under way sets the flag: the result may belong to
+    // the core before it, so it is not reported.
+    if (latencyRunStale(testSignal) || appStore.get('isNetworkUpdating')) return;
     try {
         const action = await failoverReport(name, success);
         if (action) {
             void (async () => {
-                try { await handleFailoverAction(action); }
+                try { await handleFailoverAction(action, testedProfile, testSignal); }
                 catch { /* ignore failover action errors */ }
             })();
         }
@@ -1117,75 +1149,201 @@ async function reportFailover(name, success) {
 let _isFailovering = false;
 
 /**
- * Handle a failover action returned by the failover engine.
- * Switches to the best available node (lowest latency) in the current group.
- * @param {{failedNode: string, failureCount: number, target: string}} action
+ * Outbound types failover never switches to: none of them is a proxy. DIRECT
+ * would send the traffic out unproxied, the others drop it or hand it back to
+ * the rules (PASS, PASS-RULE, Rematch). Compared lowercased without
+ * separators (`Reject-Drop` = `rejectdrop`, `PassRule` = `passrule`).
  */
-async function handleFailoverAction(action) {
+const NOT_FAILOVER_TARGETS = new Set(['direct', 'reject', 'rejectdrop', 'compatible', 'pass', 'passrule', 'rematch', 'dns']);
+
+/**
+ * Whether the proxy entry is one of the outbounds failover never picks.
+ * @param {any} entry
+ * @returns {boolean}
+ */
+function isNotFailoverTarget(entry) {
+    const type = String(entry?.type ?? '').toLowerCase().replace(/[^a-z]/g, '');
+    return NOT_FAILOVER_TARGETS.has(type);
+}
+
+/**
+ * Whether traffic sent to `name` may end at an outbound that `isBad` names:
+ * a group with a selection follows it (a selector sitting on DIRECT); one
+ * without (a load balancer) uses every member, so any such member counts.
+ * @param {string} name
+ * @param {Record<string, any>} proxyMap
+ * @param {(name: string, entry: any) => boolean} isBad
+ * @param {Set<string>} [visited]
+ * @returns {boolean}
+ */
+function mayReach(name, proxyMap, isBad, visited = new Set()) {
+    if (visited.has(name)) return false;
+    visited.add(name);
+    const entry = proxyMap[name];
+    if (isBad(name, entry)) return true;
+    if (!entry || !Array.isArray(entry.all) || entry.all.length === 0) return false;
+    if (entry.now) return mayReach(entry.now, proxyMap, isBad, visited);
+    return entry.all.some((/** @type {string} */ member) => mayReach(member, proxyMap, isBad, visited));
+}
+
+/**
+ * Whether the outbound is not a proxy. A built-in one the core does not
+ * list (DIRECT missing from `/proxies`) is read by its name.
+ * @param {string} name
+ * @param {any} entry
+ * @returns {boolean}
+ */
+function isNonProxy(name, entry) {
+    return isNotFailoverTarget(entry ?? { type: name });
+}
+
+/**
+ * The nodes failover may switch the group to: not the failed node, nor one
+ * that leads to it or may use it (a load balancer listing it), nor an
+ * outbound that is not a proxy, nor a nested group that may send traffic
+ * to one (a selector sitting on DIRECT, a load balancer with DIRECT among
+ * its members).
+ * @param {{ all: string[] }} group
+ * @param {Record<string, any>} proxyMap
+ * @param {string} failedNode
+ * @returns {string[]}
+ */
+function failoverCandidates(group, proxyMap, failedNode) {
+    // The failed node may be a nested group: what failed is the node it
+    // leads to, and a member leading there too fails the same way.
+    const failedLeaf = resolveLeafNode(failedNode, proxyMap) || failedNode;
+    const isFailed = (/** @type {string | null} */ name) => name === failedNode || name === failedLeaf;
+    return group.all.filter((n) => {
+        if (isFailed(n)) return false;
+        const entry = proxyMap[n];
+        if (!entry || isNotFailoverTarget(entry)) return false;
+        const leaf = resolveLeafNode(n, proxyMap);
+        if (leaf && leaf !== n && isNonProxy(leaf, proxyMap[leaf])) return false;
+        if (mayReach(n, proxyMap, isNonProxy)) return false;
+        if (mayReach(n, proxyMap, isFailed)) return false;
+        return !isFailed(leaf);
+    });
+}
+
+/**
+ * The last measured delay of a candidate (of the node it leads to), or
+ * Infinity when it has none usable.
+ * @param {string} name
+ * @param {Record<string, any>} proxyMap
+ * @returns {number}
+ */
+function lastDelayOf(name, proxyMap) {
+    const leaf = resolveLeafNode(name, proxyMap);
+    const history = (leaf ? proxyMap[leaf] : proxyMap[name])?.history;
+    const lastDelay = history?.length ? history[history.length - 1]?.delay : undefined;
+    return isInvalidDelay(lastDelay) ? Infinity : lastDelay;
+}
+
+/**
+ * The node to switch to: the engine's own target when it is a candidate,
+ * otherwise the candidate with the lowest last delay (the first when none
+ * has one).
+ * @param {string[]} candidates non-empty
+ * @param {Record<string, any>} proxyMap
+ * @param {string} target
+ * @returns {string}
+ */
+function pickFailoverTarget(candidates, proxyMap, target) {
+    if (target !== 'next' && candidates.includes(target)) return target;
+    let bestNode = null;
+    let bestDelay = Infinity;
+    for (const name of candidates) {
+        const delay = lastDelayOf(name, proxyMap);
+        if (delay < bestDelay) {
+            bestDelay = delay;
+            bestNode = name;
+        }
+    }
+    return bestNode || candidates[0];
+}
+
+/**
+ * Whether the switch still makes sense by the core's live state: the group
+ * still sits on the failed node (or on a group leading to it), and the
+ * target is still one failover may pick (a nested group the core has moved
+ * to DIRECT since the cached read is not).
+ * @param {string} groupName
+ * @param {string} failedNode
+ * @param {string} targetNode
+ * @returns {Promise<boolean>}
+ */
+async function liveStillCallsForSwitch(groupName, failedNode, targetNode) {
+    const live = /** @type {Record<string, any>|null} */ (await getProxies()
+        .then(getProxiesMerged)
+        .then((/** @type {any} */ d) => d?.proxies)
+        .catch(() => null));
+    if (!live) return false;
+    const group = live[groupName];
+    const now = group?.now;
+    if (!now || !Array.isArray(group.all)) return false;
+    if (now !== failedNode && resolveLeafNode(now, live) !== failedNode) return false;
+    return failoverCandidates(group, live, failedNode).includes(targetNode);
+}
+
+/**
+ * Handle a failover action returned by the failover engine.
+ * Switches to the best available node (lowest latency) in the current group,
+ * and saves it as the profile's choice: a restart then restores it rather
+ * than the failed node, and a profile switch whose read of the live
+ * selection times out saves it too. Saved only when the same profile runs
+ * before and after the switch (a profile switch that finished meanwhile
+ * would otherwise file the new profile's node under the old one) and no
+ * other choice was recorded meanwhile (a node the user picked during the
+ * switch is newer). Nothing is switched when the running profile cannot be
+ * read or changed, or when a node switch was sent meanwhile or is still on
+ * its way (the user's pick could land after this one), nor when the test
+ * that called for it ran under another profile.
+ * Exported for tests.
+ * @param {{failedNode: string, failureCount: number, target: string}} action
+ * @param {string|null} [testedProfile] the running profile when the failed
+ *   test was reported (null: unreadable then); omitted: not checked
+ * @param {AbortSignal} [testSignal] the latency-test signal the failed test
+ *   ran under: once Stop or a profile switch aborts it (also while the
+ *   engine was asked), nothing is switched
+ */
+export async function handleFailoverAction(action, testedProfile, testSignal) {
     if (_isFailovering) return;
     _isFailovering = true;
     try {
         const uiGroupName = appStore.get('uiGroupName');
         if (!uiGroupName) return;
 
-        const proxyMap = /** @type {Record<string, any>} */ (await getProxiesCached().then(getProxiesMerged).then(d => d?.proxies).catch(() => null));
-        if (!proxyMap) return;
-
-        const group = proxyMap[uiGroupName];
-        if (!group?.all?.length) return;
-
-        const currentNode = group.now;
-        const activeLeaf = resolveLeafNode(currentNode, proxyMap);
-        if (action.failedNode !== currentNode && action.failedNode !== activeLeaf) return;
-
-        const candidates = group.all.filter(/** @param {string} n */ n => {
-            if (n === action.failedNode) return false;
-            const entry = proxyMap[n];
-            if (!entry) return false;
-            const nodeType = entry.type?.toLowerCase() || '';
-            if (nodeType === 'reject' || nodeType === 'compatible' || nodeType === 'pass') return false;
-            const leaf = resolveLeafNode(n, proxyMap);
-            if (leaf === action.failedNode) return false;
-            return true;
-        });
-
-        if (candidates.length === 0) return;
-
-        let targetNode;
-        if (action.target !== 'next' && candidates.includes(action.target)) {
-            targetNode = action.target;
-        } else {
-            let bestNode = null;
-            let bestDelay = Infinity;
-            for (const name of candidates) {
-                const leaf = resolveLeafNode(name, proxyMap);
-                const lookupEntry = leaf ? proxyMap[leaf] : proxyMap[name];
-                const history = lookupEntry?.history;
-                if (history && history.length > 0) {
-                    const lastDelay = history[history.length - 1]?.delay;
-                    if (!isInvalidDelay(lastDelay) && lastDelay < bestDelay) {
-                        bestDelay = lastDelay;
-                        bestNode = name;
-                    }
-                }
-            }
-            targetNode = bestNode || candidates[0];
+        // The profile the switch applies to, read before the groups and
+        // again after the switch. A choice recorded after this (the user
+        // picking a node meanwhile) is newer than the failover's and stays.
+        const revisionBefore = knownSelectionRevision();
+        const switchMark = proxySwitchMark();
+        // A switch already on its way is not counted after the mark: it
+        // could land during the reads below and still be replaced.
+        if (proxySwitchedSince(switchMark)) return;
+        const runningProfile = await readRunningProfile();
+        if (runningProfile === null) return;
+        if (testedProfile !== undefined && testedProfile !== runningProfile) {
+            proxyLogger.info('Failover skipped: the failed test ran under another profile');
+            return;
         }
 
-        const success = await switchProxy(uiGroupName, targetNode);
+        const targetNode = await failoverTargetFor(action, uiGroupName);
+        if (!targetNode) return;
+        if (latencyRunStale(testSignal)) return;
+        if (!await stillCallsForFailover(uiGroupName, action.failedNode, targetNode, runningProfile, switchMark)) return;
+        if (latencyRunStale(testSignal)) return;
+
+        /** @type {boolean} */
+        let success;
+        try {
+            success = await switchProxy(uiGroupName, targetNode);
+        } catch (e) {
+            proxyLogger.warn(`Failover switch to '${targetNode}' was refused:`, e);
+            return;
+        }
         if (success) {
-            showNotification(
-                t('failoverSwitched', { failed: action.failedNode, target: targetNode }),
-                'success'
-            );
-            void (async () => {
-                try {
-                    await closeAllConnections();
-                    invalidateProxiesCache();
-                    await syncCoreConfig();
-                    await renderProxies();
-                } catch { /* ignore post-failover errors */ }
-            })();
+            await afterFailoverSwitch(action, uiGroupName, targetNode, runningProfile, revisionBefore);
         } else {
             // Automatic failover: log the rejected switch rather than raising a
             // notification, so a failing failover does not spam the user.
@@ -1194,6 +1352,89 @@ async function handleFailoverAction(action) {
     } finally {
         _isFailovering = false;
     }
+}
+
+/**
+ * The node failover switches `uiGroupName` to, read from the current groups:
+ * null when the failed node is no longer the group's selection or nothing
+ * qualifies.
+ * @param {{failedNode: string, target: string}} action
+ * @param {string} uiGroupName
+ * @returns {Promise<string|null>}
+ */
+async function failoverTargetFor(action, uiGroupName) {
+    const proxyMap = /** @type {Record<string, any>} */ (await getProxiesCached().then(getProxiesMerged).then(d => d?.proxies).catch(() => null));
+    const group = proxyMap?.[uiGroupName];
+    if (!group?.all?.length) return null;
+
+    const activeLeaf = resolveLeafNode(group.now, proxyMap);
+    if (action.failedNode !== group.now && action.failedNode !== activeLeaf) return null;
+
+    const candidates = failoverCandidates(group, proxyMap, action.failedNode);
+    if (candidates.length === 0) return null;
+    return pickFailoverTarget(candidates, proxyMap, action.target);
+}
+
+/**
+ * The checks right before the failover switch. A profile, mode or TUN change
+ * under way would have the switch land on a core that is changing (and
+ * replace the node it carries over). The selection is read live: a node the
+ * user picked while this ran is not replaced, and a target that no longer
+ * qualifies is not taken. The node was picked from this profile's groups:
+ * when another profile came up while they loaded (or which one runs cannot be
+ * read), its same-named group may not be the one that failed. A user pick
+ * still on its way could land after a check of the live selection; one made
+ * from here on is sent after this switch (the switches of a group go out in
+ * order), so the core ends on it.
+ * @param {string} uiGroupName
+ * @param {string} failedNode
+ * @param {string} targetNode
+ * @param {string} runningProfile
+ * @param {number} switchMark
+ * @returns {Promise<boolean>}
+ */
+async function stillCallsForFailover(uiGroupName, failedNode, targetNode, runningProfile, switchMark) {
+    if (appStore.get('isNetworkUpdating')) return false;
+    if (!await liveStillCallsForSwitch(uiGroupName, failedNode, targetNode)) return false;
+    if (await readRunningProfile() !== runningProfile) return false;
+    // Turned off while the checks above ran: no automatic switch any more.
+    if (appStore.get('isNetworkUpdating') || !appStore.get('failoverEnabled')) return false;
+    return !proxySwitchedSince(switchMark);
+}
+
+/**
+ * After a failover switch the core took: save it as the profile's choice
+ * when the same profile still runs and no newer choice was recorded, tell
+ * the user, and refresh.
+ * @param {{failedNode: string}} action
+ * @param {string} uiGroupName
+ * @param {string} targetNode
+ * @param {string} runningProfile
+ * @param {number} revisionBefore
+ */
+async function afterFailoverSwitch(action, uiGroupName, targetNode, runningProfile, revisionBefore) {
+    // Another profile runs now: the switch landed on the core it replaced,
+    // so there is nothing to save, tell, or close in the one running now.
+    if (await readRunningProfile() !== runningProfile) return;
+    // The minimal config runs: no profile to save the choice under.
+    if (runningProfile && !knownSelectionChangedSince(revisionBefore, runningProfile)) {
+        await saveProxySelection(runningProfile, { group: uiGroupName, node: targetNode });
+        // Changed while the choice was saved: the connections now are the
+        // new profile's.
+        if (await readRunningProfile() !== runningProfile) return;
+    }
+    showNotification(
+        t('failoverSwitched', { failed: action.failedNode, target: targetNode }),
+        'success'
+    );
+    void (async () => {
+        try {
+            await closeAllConnections();
+            invalidateProxiesCache();
+            await syncCoreConfig();
+            await renderProxies();
+        } catch { /* ignore post-failover errors */ }
+    })();
 }
 
 /**
@@ -2759,6 +3000,10 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             };
 
             try {
+                // The profile the click was made under: a profile switch while
+                // the request runs must not file this node under the one that
+                // replaced it.
+                const profileAtClick = await profileForSwitch();
                 const { ok: success, reason: switchRejection } = await switchProxyResult(mainGroup, name);
                 invalidateProxiesCache();
 
@@ -2770,9 +3015,10 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
 
                     // Save proxy selection for current profile (use cached settings)
                     try {
-                        const settings = await getSettingsCached();
-                        const currentProfile = activeProfile(settings, 'config.yaml');
-                        if (currentProfile) await saveProxySelection(currentProfile, { node: name, group: mainGroup });
+                        const currentProfile = await profileForSwitch();
+                        if (currentProfile && currentProfile === profileAtClick) {
+                            await saveProxySelection(currentProfile, { node: name, group: mainGroup });
+                        }
                     } catch (_e) { /* ignore */ }
 
                     if (appStore.get('currentSortMode') === 'smart') {
@@ -3405,7 +3651,7 @@ async function autoTestProbe(name, stopped, passSignal) {
         }
         // Report to failover engine if enabled
         if (appStore.get('failoverEnabled')) {
-            void reportFailover(name, success);
+            void reportFailover(name, success, passSignal);
         }
     } catch { /* skip individual failures */ }
     return true;
