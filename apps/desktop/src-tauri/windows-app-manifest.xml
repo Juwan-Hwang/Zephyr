@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Windows application manifest, embedded by build.rs through the MSVC linker
+  into every linked target (the app and the test binaries). It is the same as
+  tauri-build's default: a dependency on Common Controls v6, without which the
+  loader binds comctl32 v5 and a binary importing TaskDialogIndirect aborts at
+  load time with STATUS_ENTRYPOINT_NOT_FOUND.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+</assembly>

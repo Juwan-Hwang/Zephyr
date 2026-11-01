@@ -53,7 +53,7 @@ pub(crate) fn resolved_key_str(key: &serde_yaml::Value) -> Option<&str> {
 }
 
 /// Remove every entry whose (tag-resolved) key is one of `names`.
-pub(crate) fn remove_keys_resolved(map: &mut serde_yaml::Mapping, names: &[&str]) {
+pub fn remove_keys_resolved(map: &mut serde_yaml::Mapping, names: &[&str]) {
     map.retain(|k, _| resolved_key_str(k).is_none_or(|s| !names.contains(&s)));
 }
 
