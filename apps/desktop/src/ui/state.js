@@ -51,6 +51,7 @@ const PERSIST_DEBOUNCE_MS = 100;
  * @property {(keyOrPartial: string|Object, value?: *) => void} set - Set one or more keys
  * @property {(key: string, callback: Function) => Function} subscribe - Subscribe to changes
  * @property {(key: string, callback: Function) => void} unsubscribe - Unsubscribe a callback
+ * @property {(key: string, callback: (value: any) => void) => () => void} watchEach - Call back with each value a key takes, inside set(); returns a stop function
  * @property {() => void} freeze - Freeze the store
  * @property {() => void} unfreeze - Unfreeze the store
  * @property {boolean} isFrozen - Whether the store is frozen
@@ -146,8 +147,22 @@ export function createStore(storeName, initialState, { persist = true, transient
         }
     }
 
+    /**
+     * Watchers called at once, inside set(), with each value the key takes:
+     * subscribers are batched and see only the last value of a burst, so a
+     * value set and set back before they run would pass them by.
+     * @type {Map<string, Set<Function>>}
+     */
+    const syncWatchers = new Map();
+
     /** @param {string} key */
     function scheduleNotify(key) {
+        const watchers = syncWatchers.get(key);
+        if (watchers) {
+            for (const cb of watchers) {
+                try { cb(state[key]); } catch { /* swallow */ }
+            }
+        }
         pendingKeys.add(key);
         if (!microtaskScheduled) {
             microtaskScheduled = true;
@@ -179,15 +194,19 @@ export function createStore(storeName, initialState, { persist = true, transient
             if (frozen) return;
 
             if (typeof keyOrPartial === 'object' && keyOrPartial !== null) {
-                // Batch update — '*' key, always notify
+                // Batch update — '*' key, always notify. Every key is written
+                // before any watcher runs, so one reading another key of the
+                // batch sees its new value.
+                const written = [];
                 for (const k of Object.keys(keyOrPartial)) {
                     if (Object.prototype.hasOwnProperty.call(state, k)) {
                         state[k] = keyOrPartial[k];
-                        scheduleNotify(k);
+                        written.push(k);
                     } else {
                         storeLogger.warn(`[${storeName}] set() ignored unknown key "${k}" — not in initial state`);
                     }
                 }
+                for (const k of written) scheduleNotify(k);
             } else {
                 const key = keyOrPartial;
                 if (Object.prototype.hasOwnProperty.call(state, key)) {
@@ -254,6 +273,27 @@ export function createStore(storeName, initialState, { persist = true, transient
             return () => {
                 subs.delete(callback);
                 if (subs.size === 0) keySubs.delete(key);
+            };
+        },
+
+        /**
+         * Call `callback` with each value `key` takes, at once inside set()
+         * (not batched like subscribe), so none is missed.
+         * @param {string} key
+         * @param {(value: any) => void} callback
+         * @returns {() => void} stop watching
+         */
+        watchEach(key, callback) {
+            let watchers = syncWatchers.get(key);
+            if (!watchers) {
+                watchers = new Set();
+                syncWatchers.set(key, watchers);
+            }
+            watchers.add(callback);
+            const own = watchers;
+            return () => {
+                own.delete(callback);
+                if (own.size === 0 && syncWatchers.get(key) === own) syncWatchers.delete(key);
             };
         },
 
@@ -405,6 +445,8 @@ export const appStore = createStore('zephyr.app', {
     effectiveGroupName: null,
     observedGroupName: null,
     observedNodeName: null,
+    /** Last node choice known per profile ([{ profile, group, node }], oldest first, bounded), see known-selection.js. */
+    knownSelections: [],
 
     // System state
     isSysProxyEnabled: false,
@@ -432,6 +474,7 @@ export const appStore = createStore('zephyr.app', {
     transientKeys: [
         // Proxy group resolver state — re-resolved each session.
         'uiGroupName', 'uiPrimaryGroupName', 'effectiveGroupName', 'observedGroupName', 'observedNodeName',
+        'knownSelections',
         // Locks — must never survive a page reload. If the WebView is
         // refreshed while one of these is true (e.g. during a config switch
         // or latency test), the flag would be persisted to localStorage
