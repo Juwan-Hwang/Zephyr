@@ -585,6 +585,52 @@ pub fn parse_content_disposition_filename(header_value: &str) -> Option<String> 
     None
 }
 
+/// Longest profile stem, in bytes, accepted from a `Content-Disposition` name.
+const MAX_DISPOSITION_STEM_BYTES: usize = 64;
+
+/// Reduce a `Content-Disposition` filename to a profile file stem.
+///
+/// The header is server-controlled, and RFC 6266 §4.3 says recipients must
+/// not let it choose a directory: only the final path component is used.
+/// Some providers send names such as `"site.example/account"`, which used
+/// to abort the whole download in the filename sanitizer instead of just
+/// dropping the path part.
+///
+/// The name is fully percent-decoded first, so an encoded separator
+/// (`%2F`, `%5C`, `%252F`) is split on as well. A `.yaml`/`.yml` suffix is
+/// removed (ASCII case-insensitively), as are the trailing dots and spaces
+/// Windows would drop. Returns `None` when nothing usable is left: an empty
+/// name, a bare `.`/`..`, or a stem over 64 bytes. The result still has to
+/// pass `sanitize_config_file_name`; callers fall back to another name when
+/// it does not.
+#[must_use]
+pub fn disposition_profile_stem(filename: &str) -> Option<String> {
+    let decoded = crate::config::sanitizer::url_decode_complete(filename);
+    let last = decoded
+        .rsplit(['/', '\\'])
+        .map(str::trim)
+        .find(|segment| !segment.is_empty())?;
+
+    // Trim the characters Windows drops before looking for the extension,
+    // so `sample.yaml.` is not treated as the stem `sample.yaml` (which the
+    // caller would then turn into `sample.yaml.yaml`).
+    let trimmed = last.trim_end_matches([' ', '.']);
+    let lower = trimmed.to_ascii_lowercase();
+    let without_ext = if lower.ends_with(".yaml") {
+        trimmed.get(..trimmed.len() - 5)?
+    } else if lower.ends_with(".yml") {
+        trimmed.get(..trimmed.len() - 4)?
+    } else {
+        trimmed
+    };
+
+    let stem = without_ext.trim_end_matches([' ', '.']).trim_start();
+    if stem.is_empty() || stem.len() > MAX_DISPOSITION_STEM_BYTES {
+        return None;
+    }
+    Some(stem.to_owned())
+}
+
 /// Decode percent-encoded string (e.g. "%E4%B8%AD%E6%96%87" → "中文").
 #[must_use]
 pub fn percent_decode(input: &str) -> String {
@@ -1278,6 +1324,7 @@ fn classify_sub_error_message(e: &str) -> u16 {
         || e.contains("Invalid character in filename")
         || e.contains("Filename too long")
         || e.contains("Reserved filename")
+        || e.contains("reserved name")
         || e.contains("Invalid file type")
     {
         crate::event::codes::SUB_NAME_INVALID
@@ -2478,6 +2525,119 @@ mod tests {
     }
 
     #[test]
+    fn test_disposition_profile_stem_keeps_last_path_component() {
+        // Providers may send "<site>/<account>" as the suggested name.
+        assert_eq!(
+            disposition_profile_stem("provider.example.com/test-user@example.invalid"),
+            Some("test-user@example.invalid".to_owned())
+        );
+        assert_eq!(
+            disposition_profile_stem(r"folder\sample-profile.yaml"),
+            Some("sample-profile".to_owned())
+        );
+        // A trailing separator falls back to the last non-empty component.
+        assert_eq!(
+            disposition_profile_stem("provider.example.com/"),
+            Some("provider.example.com".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_disposition_profile_stem_splits_on_encoded_separators() {
+        assert_eq!(
+            disposition_profile_stem("a%2Fsample.yaml"),
+            Some("sample".to_owned())
+        );
+        assert_eq!(
+            disposition_profile_stem("a%5Csample.yml"),
+            Some("sample".to_owned())
+        );
+        // Double encoding is decoded completely before splitting.
+        assert_eq!(
+            disposition_profile_stem("a%252Fsample"),
+            Some("sample".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_disposition_profile_stem_never_yields_traversal() {
+        assert_eq!(
+            disposition_profile_stem("../../etc/passwd"),
+            Some("passwd".to_owned())
+        );
+        assert_eq!(disposition_profile_stem(".."), None);
+        assert_eq!(disposition_profile_stem("sample/.."), None);
+        assert_eq!(disposition_profile_stem("."), None);
+        for input in ["../x", r"..\x", "a/../../x.yaml", "%2e%2e%2fx"] {
+            let stem = disposition_profile_stem(input).unwrap();
+            assert!(
+                !stem.contains('/') && !stem.contains('\\'),
+                "{input} -> {stem}"
+            );
+            assert_ne!(stem, "..");
+        }
+    }
+
+    #[test]
+    fn test_disposition_profile_stem_extension_and_trimming() {
+        assert_eq!(
+            disposition_profile_stem("Sample.YAML"),
+            Some("Sample".to_owned())
+        );
+        assert_eq!(
+            disposition_profile_stem("sample.Yml"),
+            Some("sample".to_owned())
+        );
+        assert_eq!(
+            disposition_profile_stem("sample.txt"),
+            Some("sample.txt".to_owned())
+        );
+        // Trailing dots/spaces Windows would drop are removed.
+        assert_eq!(
+            disposition_profile_stem("sample. .yaml"),
+            Some("sample".to_owned())
+        );
+        assert_eq!(
+            disposition_profile_stem("  sample  "),
+            Some("sample".to_owned())
+        );
+        // A trailing dot or space after the extension must not hide it.
+        assert_eq!(
+            disposition_profile_stem("sample.yaml."),
+            Some("sample".to_owned())
+        );
+        assert_eq!(
+            disposition_profile_stem("sample.yml. "),
+            Some("sample".to_owned())
+        );
+        assert_eq!(
+            disposition_profile_stem("folder/sample.YAML . "),
+            Some("sample".to_owned())
+        );
+        assert_eq!(disposition_profile_stem("..."), None);
+        assert_eq!(disposition_profile_stem(""), None);
+        assert_eq!(disposition_profile_stem(".yaml"), None);
+        assert_eq!(disposition_profile_stem("/"), None);
+    }
+
+    #[test]
+    fn test_disposition_profile_stem_non_ascii_and_length() {
+        // Case folding of non-ASCII letters must not shift the slice.
+        assert_eq!(disposition_profile_stem("İİ.yaml"), Some("İİ".to_owned()));
+        assert_eq!(
+            disposition_profile_stem("示例配置.YAML"),
+            Some("示例配置".to_owned())
+        );
+        assert_eq!(
+            disposition_profile_stem(&"x".repeat(64)),
+            Some("x".repeat(64))
+        );
+        assert_eq!(disposition_profile_stem(&"x".repeat(65)), None);
+        // 22 three-byte characters = 66 bytes.
+        assert_eq!(disposition_profile_stem(&"示".repeat(22)), None);
+    }
+
+    #[test]
     fn test_parse_content_disposition_filename() {
         assert_eq!(
             parse_content_disposition_filename(r#"attachment; filename="config.yaml""#),
@@ -3160,6 +3320,11 @@ mod tests {
         );
         assert_eq!(
             classify_sub_error("Subscription name cannot be empty".to_owned()),
+            SUB_NAME_INVALID
+        );
+        // Saving a subscription as the runtime config is a name error.
+        assert_eq!(
+            classify_sub_error("Cannot use reserved name 'run_config'".to_owned()),
             SUB_NAME_INVALID
         );
         assert_eq!(
