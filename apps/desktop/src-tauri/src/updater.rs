@@ -1335,12 +1335,61 @@ fn parse_github_release_info(url: &str) -> Option<(String, String)> {
     None
 }
 
+/// Steps 1 and 2 of the update's swap: the current binary moves to the
+/// backup, then the new one into place. On failure the extracted binary is
+/// removed and the backup put back.
+async fn swap_in_new_binary(
+    exe_path: &std::path::Path,
+    backup_path: &std::path::Path,
+    temp_exe_path: &std::path::Path,
+) -> Result<(), String> {
+    // Step 1: Move old binary to backup (must succeed to guarantee rollback)
+    if exe_path.exists() {
+        // Clean up stale backup first
+        let _ = tokio::fs::remove_file(backup_path).await;
+        if let Err(e) = tokio::fs::rename(exe_path, backup_path).await {
+            let _ = tokio::fs::remove_file(temp_exe_path).await;
+            return Err(format!(
+                "Failed to move current binary to backup (update aborted for safety): {e}"
+            ));
+        }
+    }
+
+    // Step 2: Move new binary into place (target no longer exists, so rename will work)
+    let mut retries = 5;
+    loop {
+        match tokio::fs::rename(temp_exe_path, exe_path).await {
+            Ok(()) => break,
+            Err(e) => {
+                retries -= 1;
+                if retries == 0 {
+                    let _ = tokio::fs::remove_file(temp_exe_path).await;
+                    // Restore backup
+                    if backup_path.exists() {
+                        let _ = tokio::fs::rename(backup_path, exe_path).await;
+                    }
+                    return Err(format!(
+                        "Failed to install new core binary: {e}. Please close any running mihomo processes and try again."
+                    ));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn update_core_inner(
     window: Window,
     state: State<'_, MihomoState>,
     url: String,
 ) -> Result<core_manager::CoreStartResult, String> {
     let app = window.app_handle();
+    // Counted before the download: a Stop the user makes while the update
+    // downloads, waits for the start lock or replaces the binary leaves the
+    // core stopped instead of being taken as the baseline of the restart.
+    let stops_before = core_manager::core::core_process::user_stop_count();
     emit_download_status_ext(
         &window,
         Some(UpdateComponent::Core),
@@ -1422,6 +1471,34 @@ async fn update_core_inner(
     // instead of parking a tokio worker for the whole wait. A panicked blocking
     // task is reported through the same channel as a failed stop, so the
     // extracted binary is cleaned up either way.
+    // The start lock is taken first and held until the new binary runs or
+    // the old one is back: a start still in progress finishes before the
+    // stop, and no start runs between the stop and the restart, when the
+    // binary is missing, being replaced, or failed to start. It waits for a
+    // start in progress rather than giving up, since the update is already
+    // downloaded and checked.
+    // A Stop the user made since the update began (counted before the
+    // download, see `stops_before`), including while this waits for the
+    // lock, does not take the start lock: the restart below then leaves the
+    // core stopped.
+    // Every way out before the stop removes the extracted binary, as a
+    // failed stop does below.
+    let Some(start_guard) = core_manager::core::wait_for_start_lock(
+        &core_manager::core::CORE_START_LOCK,
+        core_manager::core::StartLockWait::UntilFree,
+    )
+    .await
+    else {
+        let _ = tokio::fs::remove_file(&temp_exe_path).await;
+        return Err(core_manager::CORE_ALREADY_STARTING.to_owned());
+    };
+    // A stop of the user's still running is tearing the core down: the
+    // update's own stop and restart wait for it, as a start does.
+    if !core_manager::core::core_process::wait_for_running_stops().await {
+        let _ = tokio::fs::remove_file(&temp_exe_path).await;
+        return Err(core_manager::core::core_process::CORE_STILL_STOPPING.to_owned());
+    }
+
     let app_for_stop = app.clone();
     let stop_res = tokio::task::spawn_blocking(move || {
         let stop_state = app_for_stop.state::<MihomoState>();
@@ -1430,7 +1507,7 @@ async fn update_core_inner(
     .await
     .unwrap_or_else(|e| Err(format!("Failed to stop core: {e}")));
     if let Err(e) = stop_res {
-        let _ = std::fs::remove_file(&temp_exe_path);
+        let _ = tokio::fs::remove_file(&temp_exe_path).await;
         return Err(e);
     }
 
@@ -1448,39 +1525,7 @@ async fn update_core_inner(
         .core_dir
         .join(format!("{}.backup", core_manager::core_binary_name()));
 
-    // Step 1: Move old binary to backup (must succeed to guarantee rollback)
-    if exe_path.exists() {
-        // Clean up stale backup first
-        let _ = std::fs::remove_file(&backup_path);
-        if let Err(e) = std::fs::rename(&exe_path, &backup_path) {
-            let _ = std::fs::remove_file(&temp_exe_path);
-            return Err(format!(
-                "Failed to move current binary to backup (update aborted for safety): {e}"
-            ));
-        }
-    }
-
-    // Step 2: Move new binary into place (target no longer exists, so rename will work)
-    let mut retries = 5;
-    loop {
-        match std::fs::rename(&temp_exe_path, &exe_path) {
-            Ok(()) => break,
-            Err(e) => {
-                retries -= 1;
-                if retries == 0 {
-                    let _ = std::fs::remove_file(&temp_exe_path);
-                    // Restore backup
-                    if backup_path.exists() {
-                        let _ = std::fs::rename(&backup_path, &exe_path);
-                    }
-                    return Err(format!(
-                        "Failed to install new core binary: {e}. Please close any running mihomo processes and try again."
-                    ));
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            }
-        }
-    }
+    swap_in_new_binary(&exe_path, &backup_path, &temp_exe_path).await?;
 
     // Step 2b: Set executable permissions (may fail on some platforms)
     if let Err(e) = install_core_binary(app) {
@@ -1490,32 +1535,27 @@ async fn update_core_inner(
             UPDATE_DOWNLOAD_FAILED,
             "install_core_binary failed: {e}, rolling back..."
         );
-        let _ = std::fs::remove_file(&exe_path);
-        if backup_path.exists() {
-            let _ = std::fs::rename(&backup_path, &exe_path);
-        }
-        return Err(format!(
-            "Failed to set executable permissions: {e}. Rolled back to previous version."
-        ));
+        // One rename replaces the failed binary with the backup. The failed
+        // binary is not removed first: when the backup is missing or the
+        // rename fails, removing it would leave no core binary at all.
+        return Err(match tokio::fs::rename(&backup_path, &exe_path).await {
+            Ok(()) => {
+                format!(
+                    "Failed to set executable permissions: {e}. Rolled back to previous version."
+                )
+            }
+            Err(rename_err) => {
+                emit_error!(
+                    Updater,
+                    UPDATE_DOWNLOAD_FAILED,
+                    "Rollback to the previous core failed: {rename_err}"
+                );
+                format!(
+                    "Failed to set executable permissions: {e}. Rolling back to the previous version also failed: {rename_err}."
+                )
+            }
+        });
     }
-
-    let (last_config, last_args, last_secret) = {
-        let lock = state
-            .0
-            .lock()
-            .map_err(|e| format!("Failed to lock state: {e}"))?;
-        let config = lock
-            .last_config_path()
-            .map(String::from)
-            .unwrap_or_else(|| "config.yaml".to_owned());
-        let args = lock.last_custom_args().map(Vec::from).unwrap_or_default();
-        let secret = if lock.last_secret().is_empty() {
-            None
-        } else {
-            Some(lock.last_secret().to_owned())
-        };
-        (config, args, secret)
-    };
 
     emit_download_status_ext(
         &window,
@@ -1524,47 +1564,122 @@ async fn update_core_inner(
         98,
     );
 
-    let result = core_manager::start_core(
-        app.clone(),
-        state,
-        last_config,
-        last_args,
-        last_secret,
-        Some(true),
-    )
-    .await;
-    match result {
+    // Still holding the start lock: the profile, arguments and secret are
+    // read now, and a failed start is rolled back before any other start can
+    // launch the failed binary.
+    // Under the same panic guard as every other start: a panic is a failed
+    // start, rolled back below, not a crashed updater.
+    let result = match core_manager::core::core_process::catch_start_panic(Box::pin(
+        core_manager::core::core_process::start_core_holding_lock(
+            app.clone(),
+            state,
+            Some(true),
+            None,
+            Some(stops_before),
+            &start_guard,
+        ),
+    ))
+    .await
+    {
+        // The user stopped the core before the new binary ran: it stays (the
+        // user asked for it), but nothing checked it yet, so the previous
+        // version is kept next to it for a manual rollback.
+        Err(e) if e == core_manager::core::core_process::CORE_STOPPED_BEFORE_START => Err(
+            "Core updated; not restarted because the core was stopped during the update. \
+             The new version has not run yet; the previous version is kept next to it"
+                .to_owned(),
+        ),
+        // The new core started and was stopped again for the user's Stop:
+        // the new binary stays (it passed its checks), the backup goes.
+        Err(e) if e == core_manager::core::core_process::CORE_STOPPED_MEANWHILE => {
+            let _ = tokio::fs::remove_file(&backup_path).await;
+            Err(
+                "Core updated; not restarted because the core was stopped during the update"
+                    .to_owned(),
+            )
+        }
         Ok(r) => {
-            // Step 3: New core started — delete backup
-            let _ = std::fs::remove_file(&backup_path);
-            emit_download_status_ext(&window, Some(UpdateComponent::Core), "Core ready", 100);
+            // Step 3: New core started — delete the backup while the lock is
+            // still held: the next update moves its own binary to the same
+            // path once it holds the lock, and needs that file for its
+            // rollback.
+            let _ = tokio::fs::remove_file(&backup_path).await;
             Ok(r)
         }
+        Err(e) => Err(roll_back_core_binary(&exe_path, &backup_path, &e).await),
+    };
+    drop(start_guard);
+    if result.is_ok() {
+        emit_download_status_ext(&window, Some(UpdateComponent::Core), "Core ready", 100);
+    }
+    result
+}
+
+/// More tries of the rollback rename after the first, 250 ms apart.
+const ROLLBACK_RENAME_RETRIES: u32 = 4;
+
+/// Step 4 of a core update: the new binary at `exe_path` failed to start
+/// (`error`), so put the backup back. Called with the start lock held.
+/// Returns the error to report.
+///
+/// Not when the failed start left the new core running (macOS: a root TUN
+/// core whose cleanup failed is adopted and tracked): the binary under a
+/// running, tracked core stays, and the backup is kept for a manual restore.
+async fn roll_back_core_binary(
+    exe_path: &std::path::Path,
+    backup_path: &std::path::Path,
+    error: &str,
+) -> String {
+    if error.contains(core_manager::core::tun_manager::ROOT_CORE_STILL_RUNNING) {
+        emit_error!(
+            Updater,
+            UPDATE_DOWNLOAD_FAILED,
+            "New core failed its start checks but is still running: {error}; not rolling back"
+        );
+        return format!(
+            "New core failed its start checks but is still running: {error}. \
+             The previous version was not restored under the running core; \
+             its backup is kept next to it."
+        );
+    }
+    emit_error!(
+        Updater,
+        UPDATE_DOWNLOAD_FAILED,
+        "New core failed to start: {error}, attempting rollback..."
+    );
+    // Give the failed process a moment to let go of its binary first.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    // The backup is renamed over the failed binary in one step, which
+    // replaces it (atomically on Unix). No separate existence check: one
+    // that errors would skip a rollback that can work, and a missing backup
+    // fails the rename and leaves the failed binary in place to report.
+    // On Windows the exiting process, an antivirus scan or the indexer can
+    // hold the binary a little longer, so the rename is tried a few times.
+    let mut renamed = tokio::fs::rename(backup_path, exe_path).await;
+    for _ in 0..ROLLBACK_RENAME_RETRIES {
+        if renamed.is_ok() || !tokio::fs::try_exists(backup_path).await.unwrap_or(true) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        renamed = tokio::fs::rename(backup_path, exe_path).await;
+    }
+    let rollback_ok = match renamed {
+        Ok(()) => true,
         Err(e) => {
-            // Step 4: Rollback — atomic rename swap
             emit_error!(
                 Updater,
                 UPDATE_DOWNLOAD_FAILED,
-                "New core failed to start: {e}, attempting rollback..."
+                "Rollback to the previous core failed: {e}"
             );
-            let rollback_ok = if backup_path.exists() {
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                // Remove the failed new binary, then rename backup back
-                let _ = std::fs::remove_file(&exe_path);
-                std::fs::rename(&backup_path, &exe_path).is_ok()
-            } else {
-                false
-            };
-            if rollback_ok {
-                Err(format!(
-                    "New core failed to start: {e}. Rolled back to previous version. Please restart the application."
-                ))
-            } else {
-                Err(format!(
-                    "New core failed to start: {e}. Rollback not available — manual repair may be needed."
-                ))
-            }
+            false
         }
+    };
+    if rollback_ok {
+        format!(
+            "New core failed to start: {error}. Rolled back to previous version. Please restart the application."
+        )
+    } else {
+        format!("New core failed to start: {error}. Rollback not available — manual repair may be needed.")
     }
 }
 
@@ -2446,6 +2561,46 @@ async fn update_client_inner(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn rollback_puts_the_backup_binary_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("core-bin");
+        let backup = dir.path().join("core-bin.backup");
+        std::fs::write(&exe, b"new").unwrap();
+        std::fs::write(&backup, b"old").unwrap();
+        let message = roll_back_core_binary(&exe, &backup, "exited").await;
+        assert!(
+            message.contains("Rolled back to previous version"),
+            "{message}"
+        );
+        assert_eq!(std::fs::read(&exe).unwrap(), b"old");
+        assert!(!backup.exists());
+
+        // Nothing to put back: the failed binary stays and the report says so.
+        std::fs::write(&exe, b"newer").unwrap();
+        let message = roll_back_core_binary(&exe, &backup, "exited").await;
+        assert!(message.contains("Rollback not available"), "{message}");
+        assert_eq!(std::fs::read(&exe).unwrap(), b"newer");
+    }
+
+    #[tokio::test]
+    async fn rollback_leaves_a_still_running_new_core_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("core-bin");
+        let backup = dir.path().join("core-bin.backup");
+        std::fs::write(&exe, b"new").unwrap();
+        std::fs::write(&backup, b"old").unwrap();
+        let error = format!(
+            "health check failed ({}; stopping the core will clean it up)",
+            core_manager::core::tun_manager::ROOT_CORE_STILL_RUNNING
+        );
+        let message = roll_back_core_binary(&exe, &backup, &error).await;
+        assert!(message.contains("still running"), "{message}");
+        assert!(!message.contains("Rolled back"), "{message}");
+        assert_eq!(std::fs::read(&exe).unwrap(), b"new");
+        assert_eq!(std::fs::read(&backup).unwrap(), b"old");
+    }
 
     #[test]
     fn test_strip_lowercase_v() {
