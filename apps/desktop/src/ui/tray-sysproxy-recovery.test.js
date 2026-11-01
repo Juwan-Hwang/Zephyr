@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const api = { getConfig: vi.fn(), invoke: vi.fn(), getProxies: vi.fn(), switchProxy: vi.fn(), closeAllConnections: vi.fn(), listen: vi.fn() };
+const api = { getConfig: vi.fn(), invoke: vi.fn(), getProxies: vi.fn(), switchProxyResult: vi.fn(), isLatestSwitch: vi.fn(() => true), coreReplacements: vi.fn(() => 0), SWITCH_BUSY: 'busy', closeAllConnections: vi.fn(), listen: vi.fn() };
 const sysproxy = { restoreSysProxy: vi.fn(async () => {}) };
 
 vi.mock('../api.js', () => api);
