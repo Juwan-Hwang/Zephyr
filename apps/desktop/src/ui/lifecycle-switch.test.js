@@ -5,6 +5,8 @@ const api = {
     closeAllConnections: vi.fn(async () => {}),
     restartCore: vi.fn(),
     invoke: vi.fn(),
+    proxySwitchMark: vi.fn(() => 0),
+    proxySwitchedSince: vi.fn(() => false),
 };
 vi.mock('../api.js', () => api);
 const notify = vi.fn();

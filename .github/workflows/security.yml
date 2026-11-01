@@ -409,8 +409,8 @@ jobs:
       - name: TypeScript/JSDoc typecheck
         run: pnpm --filter @zephyr/desktop typecheck
 
-      - name: Build CSS
-        run: pnpm --filter @zephyr/desktop build:css
+      - name: Build frontend assets
+        run: pnpm --filter @zephyr/desktop build:frontend
 
       - name: Build Rust (release)
         # Build workspace members except core-ffi (no tests, needs uniffi-bindgen).

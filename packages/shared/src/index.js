@@ -41,6 +41,8 @@ export const CONFIG_FILES = Object.freeze({
     READ_CONFIG_FILE: "read_config_file",
     WRITE_CONFIG_FILE: "write_config_file",
     OPEN_FOLDER: "open_config_folder",
+    OPEN_LOG_FOLDER: "open_log_folder",
+    EXPORT_LOGS: "export_logs",
 });
 
 // ---------------------------------------------------------------------------

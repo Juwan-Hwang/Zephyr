@@ -17,6 +17,20 @@ import { resetObservedGroup } from './observed-group.js';
 import { getDelayColorClass } from '../utils/format.js';
 import { showNotification } from './notifications.js';
 
+/**
+ * The profile a node switch is filed under, read when it is clicked: a
+ * failed read is no profile, and then nothing is saved.
+ * @returns {Promise<string>}
+ */
+async function profileForSwitch() {
+    try {
+        return activeProfile(await getSettingsCached(), 'config.yaml');
+    } catch (_e) {
+        return '';
+    }
+}
+
+
 /** Hover dwell before the wheel opens (ms). */
 export const WHEEL_HOVER_OPEN_DELAY = 300;
 
@@ -160,6 +174,9 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
     let success = false;
     /** @type {unknown} */
     let failure = null;
+    // The profile the click was made under: a profile switch while the
+    // request runs must not file this node under the one that replaced it.
+    const profileAtClick = await profileForSwitch();
     try {
         ({ ok: success, reason: failure } = await switchProxyResult(targetGroup, name));
     } catch (error) {
@@ -170,7 +187,7 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
     if (success) {
         // Responses can land out of order: only a newer accepted switch supersedes this one.
         if (currentSession > _acceptedSession) _acceptedSession = currentSession;
-        await afterWheelSwitch(targetGroup, name, currentSession);
+        await afterWheelSwitch(targetGroup, name, currentSession, profileAtClick);
         return;
     }
     // A GLOBAL selection is routed through the backend and reported as a
@@ -192,8 +209,9 @@ async function handleWheelProxySwitch(trigger, mainGroup, name, isSelected) {
  * @param {string} targetGroup
  * @param {string} name
  * @param {number} currentSession
+ * @param {string} profileAtClick the profile the switch was clicked under
  */
-async function afterWheelSwitch(targetGroup, name, currentSession) {
+async function afterWheelSwitch(targetGroup, name, currentSession, profileAtClick) {
     invalidateProxiesCache();
     // The observed exit node described the old selection; drop it so the pill
     // and home figures follow the new node (the watcher re-confirms it if active).
@@ -207,9 +225,8 @@ async function afterWheelSwitch(targetGroup, name, currentSession) {
         // A later click that fails must not drop this save: the core still runs this
         // node. Only a newer switch the core also accepted makes it stale.
         if (_acceptedSession !== currentSession) return;
-        const settings = await getSettingsCached();
-        const profileName = activeProfile(settings, 'config.yaml');
-        if (profileName && _acceptedSession === currentSession) {
+        const profileName = await profileForSwitch();
+        if (profileName && profileName === profileAtClick && _acceptedSession === currentSession) {
             await saveProxySelection(profileName, { node: name, group: targetGroup });
         }
     }).catch((e) => {
