@@ -22,3 +22,9 @@ overrides:
   undici: 8.12.4
   # CVE-2026-69152: tar uncontrolled recursion DoS via long-path member selection.
   tar: 7.5.21
+  # fast-uri: scheme spoofing, host confusion, path equivalence and scheme
+  # injection in URI normalization.  Transitive dep of ajv (via cdxgen).
+  fast-uri: 3.1.9
+  # minimatch: DoS via globparts amplification; no fix on the 10.x line.
+  # Transitive dep of eslint, glob and cdxgen.
+  minimatch: 11.0.1
