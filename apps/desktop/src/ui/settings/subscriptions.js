@@ -15,6 +15,7 @@ import {
 } from '../../api.js';
 import { switchToConfig, postRestartRecovery, restartedProfile, persistActiveConfig } from '../lifecycle.js';
 import { currentProfile, noteProfileRenamed } from '../active-profile.js';
+import { noteKnownSelection, renameKnownSelection } from '../known-selection.js';
 import { COMMANDS } from '@zephyr/shared';
 import { translations, t as tr } from '../../i18n.js';
 import { rulesLogger } from '../../utils/logger.js';
@@ -812,6 +813,7 @@ async function showEditPanel(configInfo) {
                 finalName = typeof renamed === 'string' && renamed ? renamed : finalName;
                 _subUpdating.delete(configInfo.name);
                 noteProfileRenamed(configInfo.name, finalName);
+                renameKnownSelection(configInfo.name, finalName);
                 invalidateSettingsCache();
                 // An "update failed" mark follows the subscription to its new name.
                 const failure = _subUpdateErrors.get(configInfo.name);
@@ -2015,6 +2017,8 @@ export function initSubscriptionSettings({
                     await invoke(COMMANDS.DELETE_CONFIG, { name });
                     deleted = true;
                     _subUpdateErrors.delete(name);
+                    // A later profile of the same name is a different file.
+                    noteKnownSelection(name, {});
                     invalidateConfigsCache();
                     showNotification(t.notifDeleteSuccess, 'success');
                 } catch (err) {

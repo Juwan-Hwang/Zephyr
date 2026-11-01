@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 const store = new Map();
-vi.mock('../api.js', () => ({ abortLatencyTests: vi.fn(), closeAllConnections: vi.fn(), restartCore: vi.fn(), invoke: vi.fn() }));
+vi.mock('../api.js', () => ({ abortLatencyTests: vi.fn(), closeAllConnections: vi.fn(), restartCore: vi.fn(), invoke: vi.fn(), proxySwitchMark: vi.fn(() => 0), proxySwitchedSince: vi.fn(() => false) }));
 vi.mock('@zephyr/shared', () => ({ COMMANDS: {} }));
 vi.mock('./state.js', () => ({ appStore: { get: (k) => store.get(k), set: (k, v) => store.set(k, v) } }));
 vi.mock('./cache.js', () => ({ invalidateSettingsCache: vi.fn(), invalidateProxiesCache: vi.fn(), invalidateConfigCache: vi.fn() }));

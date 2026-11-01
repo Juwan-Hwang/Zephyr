@@ -33,48 +33,217 @@ import { translations } from './i18n.js';
 // fail at runtime with "command not found".
 
 describe('Backend ↔ Frontend IPC command contract', () => {
-    // Derive backend commands from COMMANDS (all non-namespace-ref string values).
-    // This keeps the test in sync automatically as new commands are added.
-    const NAMESPACE_REFS = new Set([
-        'CORE', 'CONFIG_FILES', 'SYS_PROXY', 'TUN', 'TRAY', 'UPDATER',
-        'SHORTCUTS', 'SCHEDULER', 'SETTINGS', 'MISC', 'CRYPTO', 'SUBSCRIPTION', 'PRISM', 'RULE',
-        'PLUGIN', 'SCRIPT', 'SMART', 'FAILOVER', 'KV', 'TRACE_ADVANCED', 'OVERRIDE', 'NETWORK_OPTIM',
-        'NETWORK_COORDINATOR',
+    const srcTauriDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src-tauri/src');
+
+    /**
+     * `source` with Rust comments (nested block comments included) and the
+     * contents of string, raw string and char literals blanked to spaces,
+     * newlines kept, so indices still line up. Text that only looks like
+     * code there (`// generate_handler![old_cmd]`, `"]"`, `']'`) is gone.
+     * @param {string} source
+     * @returns {string}
+     */
+    function codeOnly(source) {
+        const blank = (/** @type {string} */ text) => text.replace(/[^\n]/g, ' ');
+        const rawString = /b?r(#*)"/y;
+        const charLiteral = /'(?:\\u\{[0-9a-fA-F]+\}|\\.|[^\\'\n])'/y;
+        /** End (exclusive) of the comment or literal starting at `i`, or `i` when none does. */
+        const literalEnd = (/** @type {number} */ i) => {
+            if (source.startsWith('//', i)) {
+                const nl = source.indexOf('\n', i);
+                return nl === -1 ? source.length : nl;
+            }
+            if (source.startsWith('/*', i)) {
+                let depth = 0;
+                let j = i;
+                do {
+                    if (source.startsWith('/*', j)) { depth++; j += 2; }
+                    else if (source.startsWith('*/', j)) { depth--; j += 2; }
+                    else j++;
+                } while (depth > 0 && j < source.length);
+                return j;
+            }
+            rawString.lastIndex = i;
+            const raw = !/[A-Za-z0-9_]/.test(source[i - 1] || '') && rawString.exec(source);
+            if (raw) {
+                const close = source.indexOf(`"${raw[1]}`, i + raw[0].length);
+                return close === -1 ? source.length : close + 1 + raw[1].length;
+            }
+            if (source[i] === '"') {
+                let j = i + 1;
+                while (j < source.length && source[j] !== '"') j += source[j] === '\\' ? 2 : 1;
+                return j + 1;
+            }
+            charLiteral.lastIndex = i;
+            const char = charLiteral.exec(source);
+            return char ? i + char[0].length : i;
+        };
+        let out = '';
+        let i = 0;
+        while (i < source.length) {
+            const end = literalEnd(i);
+            if (end > i) {
+                out += blank(source.slice(i, end));
+                i = end;
+            } else {
+                out += source[i];
+                i++;
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The text between the `[` at `open` and its matching `]` in code that
+     * went through codeOnly(), so only real brackets count.
+     * @param {string} code
+     * @param {number} open index of the opening `[`
+     * @returns {string|null} null when the list is never closed
+     */
+    function bracketBody(code, open) {
+        let depth = 0;
+        for (let i = open; i < code.length; i++) {
+            if (code[i] === '[') depth++;
+            else if (code[i] === ']' && --depth === 0) return code.slice(open + 1, i);
+        }
+        return null;
+    }
+
+    /**
+     * Commands registered with Tauri, read from the Rust source (not from
+     * COMMANDS): every `generate_handler![...]` list in lib.rs, each entry
+     * mapped from its path (`prism::prism_apply`) to the command name Tauri
+     * exposes (`prism_apply`). Attributes on an entry (`#[cfg(...)]`) are
+     * dropped; the entry itself still counts.
+     * @param {string} source
+     * @returns {string[]}
+     */
+    function registeredCommands(source) {
+        const names = [];
+        const code = codeOnly(source);
+        const re = /generate_handler!\s*\[/g;
+        let m;
+        while ((m = re.exec(code)) !== null) {
+            const open = m.index + m[0].length - 1;
+            const body = bracketBody(code, open);
+            if (body === null) throw new Error('generate_handler! list is never closed');
+            const entries = body.replace(/#\[[^\]]*\]/g, '');
+            for (const entry of entries.split(',')) {
+                const item = entry.trim();
+                if (item) names.push(item.split('::').pop().trim());
+            }
+        }
+        return names;
+    }
+
+    /**
+     * Every command name in COMMANDS, namespaces included.
+     * @param {Record<string, unknown>} obj
+     * @returns {string[]}
+     */
+    function commandValues(obj) {
+        /** @type {string[]} */
+        const out = [];
+        for (const v of Object.values(obj)) {
+            if (typeof v === 'string') out.push(v);
+            else if (v && typeof v === 'object') out.push(...commandValues(/** @type {Record<string, unknown>} */ (v)));
+        }
+        return out;
+    }
+
+    // Registered for the backend's own use (or kept for API completeness) and
+    // not called from the UI. Anything else registered must be in COMMANDS.
+    const BACKEND_ONLY = new Set([
+        'prism_get_last_trace',
+        'script_execute_write',
     ]);
-    const backendCommands = Object.values(COMMANDS).filter(
-        v => typeof v === 'string' && v.length > 0
-    );
+
+    const libSource = fs.readFileSync(path.join(srcTauriDir, 'lib.rs'), 'utf8');
+    const backendCommands = registeredCommands(libSource);
+    const backendSet = new Set(backendCommands);
+    const frontendSet = new Set(commandValues(COMMANDS));
+
+    it('reads the registered command list from lib.rs', () => {
+        // A parse that silently found nothing would make every check below pass.
+        expect(backendCommands.length).toBeGreaterThan(100);
+        expect(backendSet.has('start_core')).toBe(true);
+        expect(backendSet.has('prism_apply')).toBe(true);
+        for (const name of backendCommands) expect(name).toMatch(/^[a-z_][a-z0-9_]*$/);
+        expect(new Set(backendCommands).size, 'a command is registered twice').toBe(backendCommands.length);
+    });
+
+    it('parses entries after an attributed one, ignoring lists and brackets in comments, strings and chars', () => {
+        const sample = [
+            'fn run() {',
+            '    let _ = "not [a list]";',
+            '    builder.invoke_handler(tauri::generate_handler![',
+            '        first_cmd, // a comment with ] in it',
+            '        #[cfg(target_os = "windows")]',
+            '        platform::windows_only_cmd,',
+            '        /* block ] comment */ #[cfg(all(feature = "x", not(test)))] nested::attr_cmd,',
+            '        last_cmd',
+            '    ]);',
+            '    let _ = generate_handler![other_list_cmd];',
+            '    // tauri::generate_handler![commented_out_cmd]',
+            '    /* generate_handler![block_cmd /* nested */ still_comment] */',
+            '    let _ = "generate_handler![in_string_cmd]";',
+            '    let _ = r#"generate_handler![in_raw_string_cmd] "quoted" "#;',
+            "    let _ = (']', '\\'', '[');",
+            '    let _ = generate_handler![after_chars_cmd];',
+            '}',
+        ].join('\n');
+        expect(registeredCommands(sample)).toEqual([
+            'first_cmd', 'windows_only_cmd', 'attr_cmd', 'last_cmd', 'other_list_cmd', 'after_chars_cmd',
+        ]);
+    });
+
+    it('no command is renamed away from its function name', () => {
+        // The parser maps a registration to its function name; a renamed
+        // command would need the parser to follow the rename.
+        /** @type {string[]} */
+        const renamed = [];
+        /** @param {string} dir */
+        const walk = (dir) => {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) walk(full);
+                else if (entry.name.endsWith('.rs')
+                    && /#\[tauri::command\([^)]*\brename\s*=/.test(codeOnly(fs.readFileSync(full, 'utf8')))) {
+                    renamed.push(path.relative(srcTauriDir, full));
+                }
+            }
+        };
+        walk(srcTauriDir);
+        expect(renamed).toEqual([]);
+    });
 
     it('every backend command has a matching COMMANDS entry', () => {
-        // Verify all COMMANDS values that aren't namespace refs are valid strings
-        const commandEntries = Object.entries(COMMANDS);
-        const invalid = commandEntries.filter(([key, value]) => {
-            if (NAMESPACE_REFS.has(key)) return false;
-            return typeof value !== 'string' || value.length === 0;
-        });
+        const missing = backendCommands.filter(name => !frontendSet.has(name) && !BACKEND_ONLY.has(name));
         expect(
-            invalid,
-            invalid.length > 0
-                ? `COMMANDS has non-string or empty values:\n  ${invalid.map(([k, v]) => `${k}: ${typeof v}`).join('\n  ')}`
-                : 'all COMMANDS values are valid strings'
+            missing,
+            `Registered in lib.rs but missing from COMMANDS (add it, or to BACKEND_ONLY):\n  ${missing.join('\n  ')}`
         ).toEqual([]);
     });
 
     it('COMMANDS has no orphan entries (every value maps to a real backend command)', () => {
-        // Since backendCommands is derived from COMMANDS, this checks for consistency.
-        const backendSet = new Set(backendCommands);
-        const commandEntries = Object.entries(COMMANDS);
-        const orphans = commandEntries.filter(([key, value]) => {
-            if (NAMESPACE_REFS.has(key)) return false; // namespace refs
-            return !backendSet.has(value);
-        });
-
+        const orphans = [...frontendSet].filter(name => !backendSet.has(name));
         expect(
-            orphans.map(([k]) => k),
-            orphans.length > 0
-                ? `Orphan COMMANDS entries with no backend registration:\n  ${orphans.map(([k, v]) => `${k}: ${v}`).join('\n  ')}`
-                : 'no orphans'
+            orphans,
+            `COMMANDS values with no generate_handler! registration (invoke would fail with "command not found"):\n  ${orphans.join('\n  ')}`
         ).toEqual([]);
+    });
+
+    it('BACKEND_ONLY lists only registered commands that COMMANDS does not have', () => {
+        const stale = [...BACKEND_ONLY].filter(name => !backendSet.has(name) || frontendSet.has(name));
+        expect(stale).toEqual([]);
+    });
+
+    it('every COMMANDS key maps to a non-empty string or a namespace', () => {
+        const invalid = Object.entries(COMMANDS).filter(([, value]) => {
+            if (value && typeof value === 'object') return false; // namespace ref
+            return typeof value !== 'string' || value.length === 0;
+        });
+        expect(invalid.map(([k]) => k)).toEqual([]);
     });
 
     it('PRISM namespace covers all prism_* commands', () => {
@@ -138,6 +307,7 @@ describe('UI → shared/index.js COMMANDS reference contract', () => {
         // settings.js
         'COMMANDS.SET_UI_SCALE', 'COMMANDS.EXEMPT_UWP_APPS', 'COMMANDS.GET_LATEST_CLIENT_VERSIONS',
         'COMMANDS.UPDATE_CONFIG', 'COMMANDS.UPDATE_GEO_DATA', 'COMMANDS.READ_CONFIG',
+        'COMMANDS.EXPORT_LOGS', 'COMMANDS.OPEN_LOG_FOLDER',
         'COMMANDS.UPDATE_CORE', 'COMMANDS.UPDATE_CLIENT',
         'COMMANDS.DELETE_CONFIG',
         // Rule Library (settings.js)

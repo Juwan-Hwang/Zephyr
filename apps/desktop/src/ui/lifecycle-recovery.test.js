@@ -5,7 +5,7 @@ const prism = { rebuild: vi.fn(), overrideApplyAll: vi.fn() };
 const memory = { restoreProxySelectionResult: vi.fn(), waitForMihomoReady: vi.fn() };
 const proxies = { startSmartAutoTest: vi.fn(), syncCoreConfig: vi.fn() };
 
-vi.mock('../api.js', () => ({ abortLatencyTests: vi.fn(), closeAllConnections: vi.fn(), restartCore: vi.fn(), invoke: vi.fn() }));
+vi.mock('../api.js', () => ({ abortLatencyTests: vi.fn(), closeAllConnections: vi.fn(), restartCore: vi.fn(), invoke: vi.fn(), proxySwitchMark: vi.fn(() => 0), proxySwitchedSince: vi.fn(() => false) }));
 vi.mock('@zephyr/shared', () => ({ COMMANDS: {} }));
 vi.mock('./state.js', () => ({ appStore: { getState: vi.fn(() => ({})), setState: vi.fn() } }));
 vi.mock('./cache.js', () => ({ invalidateSettingsCache: vi.fn(), invalidateProxiesCache: vi.fn(), invalidateConfigCache: vi.fn() }));
