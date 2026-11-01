@@ -26,6 +26,7 @@ import { formatBytes, formatSpeed } from '../utils/format.js';
 import { connectionsLogger } from '../utils/logger.js';
 import { Bus, Events } from '../ui/events.js';
 import { reconcileKeyedList, resetKeyedList } from '../utils/keyed-list.js';
+import { toError } from '../types/guards.js';
 
 // ============================================
 // State
@@ -67,8 +68,13 @@ let _connPaused = false;
 /** Bumped on each Pause, so a request already in flight does not move the frozen rows. */
 let _pauseGen = 0;
 
-/** Debounce flag to prevent overlapping fetches */
-let isFetching = false;
+/**
+ * The fetch in flight and its page generation (null when none): a second
+ * fetch of the same page joins it instead of starting another, while a fetch
+ * left over from a destroyed page does not hold back the new page's first one.
+ * @type {{ generation: number, done: Promise<void> }|null}
+ */
+let fetchInFlight = null;
 
 /** Grand totals (kept for future use) */
 let _totalDownloaded = 0;
@@ -78,8 +84,13 @@ let _totalUploaded = 0;
 let _unsubI18n = null;
 /** @type {Function|null} */
 let _unsubTheme = null;
-/** Generation counter to invalidate stale poll callbacks on re-init */
+/**
+ * Page lifecycle generation, bumped on every init and destroy: poll callbacks
+ * and fetch responses from an earlier generation are dropped.
+ */
 let _pollGeneration = 0;
+/** Whether the page is open (initialized and not destroyed since). */
+let _pageOpen = false;
 /** @type {(() => void) | null} Visibility change handler, cleaned up on destroy. */
 let _visibilityHandler = null;
 
@@ -127,6 +138,7 @@ const PAGE_HTML = `
             </div>
             <div class="flex-1"></div>
             <!-- One quiet line instead of the old 4-card stats bar: count · ↓ total · ↑ total -->
+            <span id="conn-load-error" class="conn-summary" hidden></span>
             <span id="conn-summary" class="conn-summary tabular-nums">
                 <span id="stat-total">0</span>
                 <span class="conn-summary-num text-download">↓ <span id="stat-dl-total">0 B</span></span>
@@ -196,6 +208,7 @@ export function initConnectionsPage() {
         connectionsPollTimer = null;
     }
     _pollGeneration++;
+    _pageOpen = true;
 
     bindConnectionsEvents();
     bindConnTabEvents();
@@ -254,6 +267,10 @@ export function initConnectionsPage() {
  * Clean up resources when navigating away.
  */
 export function destroyConnectionsPage() {
+    // Invalidate poll callbacks and requests still in flight for this page.
+    _pollGeneration++;
+    _pageOpen = false;
+    closeOpenConnDetail?.();
     if (connectionsPollTimer != null) {
         clearTimeout(connectionsPollTimer);
         connectionsPollTimer = null;
@@ -381,7 +398,10 @@ function bindConnectionsEvents() {
             _connPaused = !_connPaused;
             if (_connPaused) _pauseGen++;
             syncPauseButton();
-            if (!_connPaused) void fetchAndRenderConnections();
+            // A fetch already in flight began before the resume (its list
+            // may be dropped as paused): a fresh one follows it, unless the
+            // page was left (or left and opened again) meanwhile.
+            if (!_connPaused) resumeFetch(_pollGeneration);
         });
     }
 
@@ -404,83 +424,159 @@ function archiveConnectionOnce(conn, at) {
     }
 }
 
-async function fetchAndRenderConnections() {
-    if (isFetching) return;
-    isFetching = true;
+/**
+ * Fetch and render the list, or wait for the fetch of this page already in
+ * flight, so a caller that awaits it sees the list that fetch renders.
+ * @returns {Promise<void>}
+ */
+function fetchAndRenderConnections() {
+    const generation = _pollGeneration;
+    if (fetchInFlight?.generation === generation) return fetchInFlight.done;
+    const done = fetchAndRenderOnce(generation).finally(() => {
+        // A newer page's fetch may have started meanwhile; leave its mark.
+        if (fetchInFlight?.done === done) fetchInFlight = null;
+    });
+    fetchInFlight = { generation, done };
+    return done;
+}
 
+/**
+ * The connections the core lists, minus the ones the user closed here (a
+ * poll in flight during a close may still list them). A closed id the core
+ * no longer lists is forgotten.
+ * @param {any[]} rawConns
+ * @returns {any[]}
+ */
+function withoutUserClosed(rawConns) {
+    if (userClosedIds.size === 0) return rawConns;
+    const listed = new Set(rawConns.map(/** @param {any} c */ (c) => c.id));
+    for (const id of userClosedIds) if (!listed.has(id)) userClosedIds.delete(id);
+    return userClosedIds.size > 0
+        ? rawConns.filter(/** @param {any} c */ (c) => !userClosedIds.has(c.id))
+        : rawConns;
+}
+
+/**
+ * Archive every cached connection the core no longer lists.
+ * @param {any[]} incomingConns
+ * @param {number} now
+ */
+function archiveDeadConnections(incomingConns, now) {
+    const aliveIds = new Set(incomingConns.map(/** @param {any} c */ (c) => c.id));
+    for (const oldConn of cachedConnections) {
+        if (!aliveIds.has(oldConn.id)) {
+            closedConnections.unshift(archiveConnection(oldConn, now));
+            delete connAccumulators[oldConn.id];
+        }
+    }
+    if (closedConnections.length > MAX_CLOSED_CONNS) {
+        closedConnections.length = MAX_CLOSED_CONNS;
+    }
+}
+
+/**
+ * Update a connection's totals and speed from the core's cumulative byte
+ * counters. Speed = deltaBytes / deltaTime (bytes per second).
+ * @param {any} conn
+ * @param {number} now
+ */
+function updateAccumulator(conn, now) {
+    const id = conn.id;
+    const curDl = conn.download ?? 0;
+    const curUl = conn.upload ?? 0;
+    const acc = connAccumulators[id];
+    if (!acc) {
+        // First time seeing this connection — baseline, speed starts at 0
+        // Totals start from the core's own cumulative counters (they used to start at 0
+        // when the page opened); speed still comes from the delta between polls.
+        connAccumulators[id] = { dl: curDl, ul: curUl, prevDl: curDl, prevUl: curUl, seenAt: now, prevTs: now, dlSpeed: 0, ulSpeed: 0 };
+        return;
+    }
+    const dt = (now - acc.prevTs) / 1000; // seconds since last poll
+
+    // Positive-only delta guards against counter resets or API quirks
+    const dlDelta = Math.max(0, curDl - acc.prevDl);
+    const ulDelta = Math.max(0, curUl - acc.prevUl);
+
+    acc.dl += dlDelta;
+    acc.ul += ulDelta;
+
+    // Compute instantaneous speed (bytes/sec), with smoothing for dt < 100ms edge case
+    if (dt > 0.05) {
+        acc.dlSpeed = dlDelta / dt;
+        acc.ulSpeed = ulDelta / dt;
+    }
+    // else: keep previous speed (poll too fast or duplicate)
+
+    acc.prevDl = curDl;
+    acc.prevUl = curUl;
+    acc.prevTs = now;
+}
+
+/** @param {any} data the core's /connections answer */
+function coreTotalsOf(data) {
+    // A missing counter (null, '') is not zero: Number() would read it so.
+    const total = (/** @type {any} */ v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
+    const dl = total(data?.downloadTotal);
+    const ul = total(data?.uploadTotal);
+    return Number.isFinite(dl) && Number.isFinite(ul) ? { dl, ul } : null;
+}
+
+/**
+ * Show `message` in place of the summary line, or the summary again (null).
+ * @param {string|null} message
+ */
+function showLoadError(message) {
+    const errorEl = document.getElementById('conn-load-error');
+    const summaryEl = document.getElementById('conn-summary');
+    if (errorEl) {
+        errorEl.textContent = message ?? '';
+        errorEl.hidden = message === null;
+    }
+    if (summaryEl) summaryEl.hidden = message !== null;
+}
+
+/** @param {unknown} err a failed fetch of the list */
+function showFetchError(err) {
+    // Shown in place of the summary line until the next fetch that works
+    // (the summary keeps its count and totals spans for that fetch).
+    const t = /** @type {any} */ (translations)[currentLang] ?? {};
+    showLoadError(t.loadFailed || 'Failed to load connections');
+    const _err = toError(err);
+    // A core that cannot be reached fails every poll: shown above, logged
+    // at debug level so the log is not flooded.
+    if (_err.message?.includes('Failed to fetch') || _err.message?.includes('NetworkError')
+        || _err.message?.startsWith('Network request failed')) {
+        connectionsLogger.debug('Fetch error', err);
+    } else {
+        connectionsLogger.warn('Fetch error', err);
+    }
+}
+
+/** @param {number} generation `_pollGeneration` when the fetch started */
+async function fetchAndRenderOnce(generation) {
     try {
         const pauseGen = _pauseGen;
         const data = await getConnections();
+        // The page was destroyed or re-initialized while this request was in
+        // flight: its response belongs to a page that no longer exists.
+        if (generation !== _pollGeneration) return;
         // Paused while this request was in flight: leave the frozen list as it is.
         if (_connPaused && pauseGen !== _pauseGen) return;
-        const rawConns = (/** @type {any} */ (data)).connections || [];
-        if (userClosedIds.size > 0) {
-            const listed = new Set(rawConns.map(/** @param {any} c */ (c) => c.id));
-            for (const id of userClosedIds) if (!listed.has(id)) userClosedIds.delete(id);
-        }
-        const incomingConns = userClosedIds.size > 0
-            ? rawConns.filter(/** @param {any} c */ (c) => !userClosedIds.has(c.id))
-            : rawConns;
-
-        // ── Phase 1: Detect dead connections & archive them ──
-        const aliveIds = new Set(incomingConns.map(/** @param {any} c */ (c) => c.id));
+        const incomingConns = withoutUserClosed((/** @type {any} */ (data)).connections || []);
         const now = Date.now();
 
-        for (const oldConn of cachedConnections) {
-            if (!aliveIds.has(oldConn.id)) {
-                closedConnections.unshift(archiveConnection(oldConn, now));
-                delete connAccumulators[oldConn.id];
-            }
-        }
-
-        if (closedConnections.length > MAX_CLOSED_CONNS) {
-            closedConnections.length = MAX_CLOSED_CONNS;
-        }
+        // ── Phase 1: Detect dead connections & archive them ──
+        archiveDeadConnections(incomingConns, now);
 
         // ── Phase 2: Update accumulators (delta-based total + speed tracking) ──
-        // Mihomo reports download/upload as cumulative bytes per connection.
-        // Speed = deltaBytes / deltaTime (bytes per second)
-        for (const conn of incomingConns) {
-            const id = conn.id;
-            const curDl = conn.download ?? 0;
-            const curUl = conn.upload ?? 0;
-
-            if (!connAccumulators[id]) {
-                // First time seeing this connection — baseline, speed starts at 0
-                // Totals start from the core's own cumulative counters (they used to start at 0
-                // when the page opened); speed still comes from the delta between polls.
-                connAccumulators[id] = { dl: curDl, ul: curUl, prevDl: curDl, prevUl: curUl, seenAt: now, prevTs: now, dlSpeed: 0, ulSpeed: 0 };
-            } else {
-                const acc = connAccumulators[id];
-                const dt = (now - acc.prevTs) / 1000; // seconds since last poll
-
-                // Positive-only delta guards against counter resets or API quirks
-                const dlDelta = Math.max(0, curDl - acc.prevDl);
-                const ulDelta = Math.max(0, curUl - acc.prevUl);
-
-                acc.dl += dlDelta;
-                acc.ul += ulDelta;
-
-                // Compute instantaneous speed (bytes/sec), with smoothing for dt < 100ms edge case
-                if (dt > 0.05) {
-                    acc.dlSpeed = dlDelta / dt;
-                    acc.ulSpeed = ulDelta / dt;
-                }
-                // else: keep previous speed (poll too fast or duplicate)
-
-                acc.prevDl = curDl;
-                acc.prevUl = curUl;
-                acc.prevTs = now;
-            }
-        }
+        for (const conn of incomingConns) updateAccumulator(conn, now);
 
         cachedConnections = incomingConns;
 
         // ── Phase 3: Update UI ──
-        const d = /** @type {any} */ (data);
-        _coreTotals = Number.isFinite(Number(d?.downloadTotal)) && Number.isFinite(Number(d?.uploadTotal))
-            ? { dl: Number(d.downloadTotal), ul: Number(d.uploadTotal) }
-            : null;
+        _coreTotals = coreTotalsOf(data);
+        showLoadError(null);
         updateConnStats(incomingConns);
 
         renderConnectionList(
@@ -496,17 +592,8 @@ async function fetchAndRenderConnections() {
         }
 
     } catch (err) {
-        const metaEl = document.getElementById('connections-meta');
-        const t = /** @type {any} */ (translations)[currentLang] ?? {};
-        if (metaEl) {
-            metaEl.textContent = t.loadFailed || 'Failed to load connections';
-        }
-        const _err = err instanceof Error ? err : new Error(String(err));
-        if (!_err.message?.includes('Failed to fetch') && !_err.message?.includes('NetworkError')) {
-            connectionsLogger.warn('Fetch error', err);
-        }
-    } finally {
-        isFetching = false;
+        if (generation !== _pollGeneration) return;
+        showFetchError(err);
     }
 }
 
@@ -792,6 +879,10 @@ function renderConnectionList(connections, mode) {
     // put it back on the same connection's row.
     const focusedRow = /** @type {HTMLElement | null} */ (document.activeElement?.closest?.('.conn-row') ?? null);
     const focusedId = focusedRow && container.contains(focusedRow) ? focusedRow.dataset.connId : undefined;
+    // Its place in the list: when its connection is gone (closed from its
+    // own row), focus moves to the row now in that place, not to <body>.
+    const focusedIndex = focusedId === undefined ? -1
+        : Array.from(container.querySelectorAll('.conn-row')).indexOf(/** @type {Element} */ (focusedRow));
 
     reconcileKeyedList(container, filtered, {
         getKey: (/** @type {any} */ conn) => String(conn.id ?? ''),
@@ -805,8 +896,9 @@ function renderConnectionList(connections, mode) {
     bindRowClickDelegate(container);
 
     if (focusedId !== undefined && !document.activeElement?.closest?.('.conn-row')) {
-        const row = Array.from(container.querySelectorAll('.conn-row'))
-            .find(el => /** @type {HTMLElement} */ (el).dataset.connId === focusedId);
+        const rows = Array.from(container.querySelectorAll('.conn-row'));
+        const row = rows.find(el => /** @type {HTMLElement} */ (el).dataset.connId === focusedId)
+            ?? rows[Math.min(focusedIndex, rows.length - 1)];
         /** @type {HTMLElement | undefined} */ (row)?.focus({ preventScroll: true });
     }
 
@@ -1141,18 +1233,76 @@ function closeOneLabel() {
  */
 async function closeSingleConnection(id, btn) {
     if (!id) return;
+    const generation = _pollGeneration;
     const t = /** @type {any} */ (translations)[currentLang] ?? {};
     btn.setAttribute('disabled', '');
     try {
         await closeConnection(id);
         // A poll already in flight may still list it: keep it out of the active list.
         userClosedIds.add(id);
+        dropClosedRow(id);
         showNotification(t.connClosedOne || 'Connection closed', 'success');
-        await fetchAndRenderConnections();
+        await refreshAfterClose(generation);
     } catch {
         btn.removeAttribute('disabled');
         showNotification(t.closeConnFailed || 'Failed to close connection', 'error');
     }
+}
+
+/**
+ * Move a connection the user closed from the kept list to the Closed list
+ * (a later poll no longer lists it, so it would never get there otherwise),
+ * drop its counters, and redraw the tab shown: the row goes even when the
+ * refresh that follows fails, or none follows because the page was left.
+ * @param {string} id
+ */
+function dropClosedRow(id) {
+    const conn = cachedConnections.find((/** @type {any} */ c) => c.id === id);
+    if (conn) {
+        archiveConnectionOnce(conn, Date.now());
+        if (closedConnections.length > MAX_CLOSED_CONNS) closedConnections.length = MAX_CLOSED_CONNS;
+    }
+    delete connAccumulators[id];
+    cachedConnections = cachedConnections.filter((/** @type {any} */ c) => c.id !== id);
+    updateClosedBadge();
+    // The count drops with the row, also when the next fetch fails.
+    updateConnStats(cachedConnections);
+    renderConnectionList(
+        currentConnTab === 'active' ? cachedConnections : closedConnections,
+        currentConnTab,
+    );
+}
+
+/**
+ * Fetch the list with a request that starts now: a fetch already in flight
+ * may have read the core before a close resolved, so it is waited for and
+ * followed by a new one rather than joined.
+ * @returns {Promise<void>}
+ */
+async function fetchFreshConnections() {
+    const generation = _pollGeneration;
+    if (fetchInFlight?.generation === generation) await fetchInFlight.done;
+    if (generation !== _pollGeneration) return;
+    await fetchAndRenderConnections();
+}
+
+/**
+ * Refresh the list after a close with a fresh fetch. When the page the
+ * close started on was left meanwhile, its refresh is gone with it; when the
+ * page was opened again, that page's own first fetch may predate the close,
+ * so it gets a fresh one (its other rows stay).
+ * @param {number} generation `_pollGeneration` when the close started
+ * @returns {Promise<boolean>} whether it refreshed and the page is still the same
+ */
+async function refreshAfterClose(generation) {
+    if (generation !== _pollGeneration) {
+        if (_pageOpen) await fetchFreshConnections();
+        return false;
+    }
+    await fetchFreshConnections();
+    // Left or opened again while the refresh ran: what follows it (moving
+    // focus) belongs to the page that is gone.
+    return generation === _pollGeneration;
 }
 
 /** @param {HTMLElement} row */
@@ -1229,9 +1379,30 @@ function restoreDetailFocus(opener, connId) {
 /** Pending hide of the detail backdrop after its close animation. */
 /** @type {ReturnType<typeof setTimeout>|undefined} */
 let connDetailHideTimer;
+/** Bumped each time a detail dialog opens. */
+let connDetailToken = 0;
 /** Document-level key handler of the open detail dialog (catches keys even when focus slipped out). */
+/**
+ * Fetch after Resume: right away, or once a fetch begun before it is done,
+ * while the page visit `generation` is still the current one.
+ * @param {number} generation
+ */
+function resumeFetch(generation) {
+    const inFlight = fetchInFlight?.generation === generation ? fetchInFlight : null;
+    if (inFlight === null) {
+        void fetchAndRenderConnections();
+        return;
+    }
+    void inFlight.done.catch(() => {}).then(() => {
+        if (generation === _pollGeneration && _pageOpen && !_connPaused) void fetchAndRenderConnections();
+    });
+}
+
 /** @type {((e: KeyboardEvent) => void)|null} */
 let connDetailKeyHandler = null;
+/** Closes the open detail dialog without moving focus (null when none is open). */
+/** @type {(() => void)|null} */
+let closeOpenConnDetail = null;
 
 /**
  * Show a detail overlay panel for a single connection.
@@ -1365,6 +1536,8 @@ function showConnDetail(conn, mode, openerRow = null) {
     bg.classList.remove('hidden');
     bg.classList.add('flex');
 
+    // This dialog, told apart from a later one for the same connection.
+    const detailToken = ++connDetailToken;
     // Register active detail view for live refresh
     activeDetailConnId = conn.id;
     activeDetailMode = mode;
@@ -1385,7 +1558,7 @@ function showConnDetail(conn, mode, openerRow = null) {
     });
 
     // Dismiss handler
-    const dismiss = () => {
+    const dismiss = (restoreFocus = true) => {
         activeDetailConnId = null;
         activeDetailMode = null;
         bg.classList.add('opacity-0');
@@ -1403,9 +1576,15 @@ function showConnDetail(conn, mode, openerRow = null) {
         }, 150);
         if (connDetailKeyHandler) document.removeEventListener('keydown', connDetailKeyHandler);
         connDetailKeyHandler = null;
+        if (closeOpenConnDetail === closeWithoutFocus) closeOpenConnDetail = null;
         bg.onclick = null;
-        restoreDetailFocus(opener, conn.id);
+        if (restoreFocus) restoreDetailFocus(opener, conn.id);
     };
+    // Leaving the page closes the dialog too: it sits on the body, over
+    // whichever page comes next, and its key handler would trap that
+    // page's keyboard focus.
+    const closeWithoutFocus = () => dismiss(false);
+    closeOpenConnDetail = closeWithoutFocus;
 
     // Keyboard: Escape closes, Tab stays inside the dialog. Listen on the document so a Tab
     // pressed after focus slipped out (e.g. a click on the panel's text) is still caught.
@@ -1435,13 +1614,14 @@ function showConnDetail(conn, mode, openerRow = null) {
     document.addEventListener('keydown', connDetailKeyHandler);
     document.getElementById('detail-dismiss-btn')?.focus({ preventScroll: true });
 
-    document.getElementById('detail-dismiss-btn')?.addEventListener('click', dismiss);
+    document.getElementById('detail-dismiss-btn')?.addEventListener('click', () => dismiss());
     bg.onclick = (e) => { if (e.target === bg) dismiss(); };
 
     // Close connection button (only active)
     const closeBtn = document.getElementById('detail-close-btn');
     if (closeBtn && mode === 'active') {
         closeBtn.addEventListener('click', async () => {
+            const generation = _pollGeneration;
             setButtonLoading(closeBtn, t, 'closing');
 
             try {
@@ -1451,10 +1631,16 @@ function showConnDetail(conn, mode, openerRow = null) {
                 delete connAccumulators[conn.id];
                 // Already archived: the refresh below must not archive it a second time.
                 userClosedIds.add(conn.id);
-                cachedConnections = cachedConnections.filter((/** @type {any} */ c) => c.id !== conn.id);
+                dropClosedRow(conn.id);
                 showNotification(t.connClosed || 'Connection closed', 'success');
-                dismiss();
-                await fetchAndRenderConnections();
+                // The page may have been left and opened again meanwhile, with
+                // another dialog open now: close only the one this was for.
+                // Left meanwhile (and maybe opened again): focus is the newer
+                // page's, so the dialog closes without moving it.
+                if (connDetailToken === detailToken && activeDetailConnId === conn.id) dismiss(generation === _pollGeneration);
+                if (!await refreshAfterClose(generation)) return;
+                // A newer dialog is open: focus stays in it.
+                if (connDetailToken !== detailToken && activeDetailConnId !== null) return;
                 // The refresh removes the closed row that just took focus back; land on the tab instead.
                 const active = document.activeElement;
                 if (!active || active === document.body || !active.isConnected) restoreDetailFocus(null, conn.id);
@@ -1572,6 +1758,7 @@ async function handleCloseAllConnections() {
     if (!btn) return;
 
     if (_bulkCloseInFlight) return;
+    const generation = _pollGeneration;
     const t = /** @type {any} */ (translations)[currentLang] ?? {};
     _bulkCloseInFlight = true;
     setButtonLoading(btn, t, 'closing');
@@ -1614,22 +1801,47 @@ async function handleCloseAllConnections() {
             const liveIds = new Set(live.map((/** @type {any} */ c) => c.id));
             const ended = cachedConnections.filter((/** @type {any} */ c) => !liveIds.has(c.id) && !userClosedIds.has(c.id));
             await closeAllConnections();
-            for (const conn of [...ended, ...live]) {
+            // A poll of this same visit that ran during the close may have
+            // listed connections opened meanwhile: the core closed those too.
+            // A newer visit's list is its own and is left alone.
+            const addedMeanwhile = generation === _pollGeneration
+                ? cachedConnections.filter((/** @type {any} */ c) => !liveIds.has(c.id) && !userClosedIds.has(c.id)
+                    && !ended.some((/** @type {any} */ e) => e.id === c.id))
+                : [];
+            /** @type {Set<string>} */
+            const handled = new Set();
+            for (const conn of [...ended, ...live, ...addedMeanwhile]) {
+                handled.add(conn.id);
                 userClosedIds.add(conn.id);
                 archiveOnce(conn);
+                delete connAccumulators[conn.id];
             }
-            connAccumulators = {};
-            cachedConnections = [];
+            // Only what this close handled: when the page was opened again
+            // meanwhile, its own fetch has filled the list with newer ones.
+            cachedConnections = cachedConnections.filter((/** @type {any} */ c) => !handled.has(c.id));
         }
         if (closedConnections.length > MAX_CLOSED_CONNS) closedConnections.length = MAX_CLOSED_CONNS;
         if (failed > 0) showNotification(t.closeConnsFailed || 'Failed to close connections', 'error');
         else if (connectionsSearchQuery) showNotification(tFmt('matchingConnsClosed', { count: closedMatching }), 'success');
         else showNotification(t.connsClosed || 'All connections closed', 'success');
-        await fetchAndRenderConnections();
+        // Counted and drawn here: the refresh waits for a poll in flight
+        // first, and can fail or be skipped (page left). The badge counts
+        // the archive wherever the user is; the list and stats only while
+        // the visit that started the close is still on screen.
+        updateClosedBadge();
+        if (generation === _pollGeneration && _pageOpen) {
+            updateConnStats(cachedConnections);
+            renderConnectionList(
+                currentConnTab === 'active' ? cachedConnections : closedConnections,
+                currentConnTab,
+            );
+        }
+        await refreshAfterClose(generation);
     } catch {
         showNotification(t.closeConnsFailed || 'Failed to close connections', 'error');
     } finally {
         _bulkCloseInFlight = false;
+        // Also resets the Close All button, which the page keeps across visits.
         switchConnTab(currentConnTab);
     }
 }
