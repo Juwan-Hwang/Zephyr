@@ -4,8 +4,8 @@ use tauri::{AppHandle, Manager as _, State};
 use super::fetch_util::fetch_url_content;
 use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
 use zephyr_core::config::subscription::{
-    classify_sub_error, extract_name_from_rules, is_literal_private_host, is_private_ip,
-    parse_content_disposition_filename, quote_short_id_values, redact_url_in_string,
+    classify_sub_error, disposition_profile_stem, extract_name_from_rules, is_literal_private_host,
+    is_private_ip, parse_content_disposition_filename, quote_short_id_values, redact_url_in_string,
     select_global_candidate, try_decode_base64_content, validate_subscription_name,
     validate_subscription_url_basic,
 };
@@ -2449,6 +2449,64 @@ fn content_may_supply_rule_name(content_is_parsed_yaml: bool, content: &str) -> 
             .is_some_and(|v| v.get("rules").is_some_and(serde_yaml::Value::is_sequence))
 }
 
+/// File name of the generated runtime config. It lives in the core
+/// directory, and the profile list hides a profile with this name, so a
+/// subscription must never be saved under it.
+const RUN_CONFIG_FILE_NAME: &str = "run_config.yaml";
+
+/// Characters Windows does not allow in file names. Control characters are
+/// already rejected by the sanitizer.
+const WINDOWS_INVALID_FILENAME_CHARS: [char; 7] = ['<', '>', ':', '"', '|', '?', '*'];
+
+/// Return the name a server-suggested file name would be saved under, if it
+/// can be used for a new profile on every platform.
+///
+/// The checks run on the sanitized name, not the raw candidate, because the
+/// sanitizer percent-decodes again: a deeply encoded `%3F` or `%2F` would
+/// otherwise only turn into `?` or `/` after the check. The sanitized name
+/// must also be stable (sanitizing it again changes nothing), so the later
+/// sanitization in the download path cannot reveal anything new. It must
+/// contain no character Windows rejects and must not be the reserved
+/// runtime config name.
+fn usable_suggested_file_name(candidate: &str) -> Option<String> {
+    use zephyr_core::config::sanitizer::sanitize_config_file_name;
+
+    let name = sanitize_config_file_name(candidate.to_owned()).ok()?;
+    let stable = sanitize_config_file_name(name.clone()).is_ok_and(|again| again == name);
+    (stable && !name.contains(WINDOWS_INVALID_FILENAME_CHARS) && name != RUN_CONFIG_FILE_NAME)
+        .then_some(name)
+}
+
+/// Choose the file name for a newly added subscription.
+///
+/// Candidates are tried in priority order and the first usable one wins
+/// (see `usable_suggested_file_name`):
+/// 1. the server's `Content-Disposition` filename, reduced to its last
+///    path component (see `disposition_profile_stem`);
+/// 2. the name derived from the config's rules (computed lazily, only when
+///    the header gave nothing usable).
+///
+/// A candidate that is unusable falls through to the next instead of
+/// failing the download, since both come from the server and are only
+/// naming hints. `None` means the caller keeps the user-provided name.
+fn pick_new_subscription_file_name(
+    disposition: Option<&str>,
+    rule_name: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    if let Some(name) = disposition
+        .and_then(disposition_profile_stem)
+        .and_then(|stem| usable_suggested_file_name(&format!("{stem}.yaml")))
+    {
+        return Some(name);
+    }
+
+    rule_name().and_then(|name| usable_suggested_file_name(&format!("{name}.yaml")))
+}
+
+/// Download a subscription, validate and normalise its content, and save it
+/// as a profile. New subscriptions (`overwrite == false`) may take their
+/// file name from the server (see `pick_new_subscription_file_name`) and get
+/// a numeric suffix on collision; updates always write to `name`.
 #[allow(clippy::cognitive_complexity)]
 async fn download_sub_inner_raw(
     app: &AppHandle,
@@ -2993,33 +3051,24 @@ async fn download_sub_inner_raw(
     // Only apply enhanced naming (Content-Disposition / rules) for new subscriptions.
     // When updating (overwrite == true), always use the frontend-provided name directly.
     if !overwrite {
-        let rule_name = if content_may_supply_rule_name(content_is_parsed_yaml, &content) {
-            extract_name_from_rules(&content)
-        } else {
-            None
-        };
-
-        // Priority 1: Content-Disposition filename
-        if let Some(dfn) = &disp_filename {
-            let stem = if dfn.to_lowercase().ends_with(".yaml") {
-                &dfn[..dfn.len() - 5]
-            } else if dfn.to_lowercase().ends_with(".yml") {
-                &dfn[..dfn.len() - 4]
+        if let Some(name) = pick_new_subscription_file_name(disp_filename.as_deref(), || {
+            if content_may_supply_rule_name(content_is_parsed_yaml, &content) {
+                extract_name_from_rules(&content)
             } else {
-                dfn.as_str()
-            };
-            if !stem.is_empty() && stem.len() <= 64 {
-                clean_name = format!("{stem}.yaml");
+                None
             }
-        }
-        // Priority 2: Rule-extracted name
-        else if let Some(rn) = &rule_name {
-            clean_name = format!("{rn}.yaml");
+        }) {
+            clean_name = name;
         }
     }
 
     clean_name = zephyr_core::config::sanitizer::sanitize_config_file_name(clean_name)
         .map_err(|e| e.to_string())?;
+    // A profile saved as run_config.yaml would be hidden from the profile
+    // list; reject it the same way renaming a profile to it is rejected.
+    if clean_name == RUN_CONFIG_FILE_NAME {
+        return Err("Cannot use reserved name 'run_config'".to_owned());
+    }
 
     // When overwrite is true (updating an existing subscription), write directly.
     // When false (adding a new subscription), auto-append numeric suffix to avoid collisions.
@@ -3368,6 +3417,121 @@ pub async fn fetch_text(app: AppHandle, url: String) -> Result<String, String> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    #[test]
+    fn test_pick_new_subscription_file_name_prefers_disposition() {
+        use super::pick_new_subscription_file_name;
+        // The rule-derived name is not computed when the header is usable.
+        let rule_name_called = std::cell::Cell::new(false);
+        assert_eq!(
+            pick_new_subscription_file_name(Some("sample-profile.yaml"), || {
+                rule_name_called.set(true);
+                Some("Sample-Group".to_owned())
+            }),
+            Some("sample-profile.yaml".to_owned())
+        );
+        assert!(!rule_name_called.get());
+        // A path-like header keeps only its last component instead of
+        // aborting the download (regression: "Path traversal detected").
+        assert_eq!(
+            pick_new_subscription_file_name(
+                Some("provider.example.com/test-user@example.invalid"),
+                || None
+            ),
+            Some("test-user@example.invalid.yaml".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_pick_new_subscription_file_name_falls_back() {
+        use super::pick_new_subscription_file_name;
+        // Unusable header -> rule-derived name.
+        assert_eq!(
+            pick_new_subscription_file_name(Some(".."), || Some("Sample-Group".to_owned())),
+            Some("Sample-Group.yaml".to_owned())
+        );
+        // Reserved device name from the header -> rule-derived name.
+        assert_eq!(
+            pick_new_subscription_file_name(Some("folder/NUL.yaml"), || Some(
+                "Sample-Group".to_owned()
+            )),
+            Some("Sample-Group.yaml".to_owned())
+        );
+        // Over-long header -> rule-derived name.
+        let long = "x".repeat(65);
+        assert_eq!(
+            pick_new_subscription_file_name(Some(&long), || Some("Sample-Group".to_owned())),
+            Some("Sample-Group.yaml".to_owned())
+        );
+        // Unusable rule name too -> keep the user-provided name (None).
+        assert_eq!(
+            pick_new_subscription_file_name(Some(".."), || Some("a/b".to_owned())),
+            None
+        );
+        // Names Windows cannot create fall back instead of failing the write.
+        assert_eq!(
+            pick_new_subscription_file_name(Some("folder/sample?profile.yaml"), || Some(
+                "Sample-Group".to_owned()
+            )),
+            Some("Sample-Group.yaml".to_owned())
+        );
+        assert_eq!(
+            pick_new_subscription_file_name(Some("sample-profile.yaml"), || None),
+            Some("sample-profile.yaml".to_owned())
+        );
+        assert_eq!(
+            pick_new_subscription_file_name(None, || Some("Sample:Group".to_owned())),
+            None
+        );
+        // The reserved runtime config name is never picked.
+        assert_eq!(
+            pick_new_subscription_file_name(Some("folder/run_config.yaml"), || Some(
+                "Sample-Group".to_owned()
+            )),
+            Some("Sample-Group.yaml".to_owned())
+        );
+        assert_eq!(
+            pick_new_subscription_file_name(None, || Some("run_config".to_owned())),
+            None
+        );
+        assert_eq!(pick_new_subscription_file_name(None, || None), None);
+    }
+
+    #[test]
+    fn test_pick_new_subscription_file_name_deep_encoding_falls_back() {
+        use super::pick_new_subscription_file_name;
+        // Wrap `s` in `layers` extra levels of percent-encoding of its `%`.
+        let encode = |s: &str, layers: usize| {
+            let mut out = s.to_owned();
+            for _ in 0..layers {
+                out = out.replace('%', "%25");
+            }
+            out
+        };
+        // `?` hidden under six layers survives the stem reduction and only
+        // appears in the final sanitization: fall back instead of failing.
+        let hidden_question = encode("sample%3Fprofile.yaml", 5);
+        assert_eq!(
+            pick_new_subscription_file_name(Some(&hidden_question), || Some(
+                "Sample-Group".to_owned()
+            )),
+            Some("Sample-Group.yaml".to_owned())
+        );
+        // A separator encoded deeper than both decoders reach is never kept
+        // as a literal `%2F` prefix in the saved name.
+        let hidden_slash = encode("provider.example.com%2Fsample-profile.yaml", 11);
+        assert_eq!(
+            pick_new_subscription_file_name(Some(&hidden_slash), || Some(
+                "Sample-Group".to_owned()
+            )),
+            Some("Sample-Group.yaml".to_owned())
+        );
+        // A singly encoded name is still decoded and used as is.
+        assert_eq!(
+            pick_new_subscription_file_name(Some("sample%20profile.yaml"), || None),
+            Some("sample profile.yaml".to_owned())
+        );
+    }
+
     #[test]
     fn test_content_may_supply_rule_name() {
         use super::{content_may_supply_rule_name, extract_name_from_rules};
