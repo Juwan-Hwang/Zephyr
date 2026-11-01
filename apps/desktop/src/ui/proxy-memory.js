@@ -6,12 +6,13 @@
  * @module ui/proxy-memory
  */
 
-import { getConfig, invoke, switchProxy } from '../api.js';
+import { getConfig, invoke, switchProxyResult, proxySwitchMark, proxySwitchedSince, coreReplacements } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
 import { fetchProxyGroups, isWritableGroupType } from './proxy-groups.js';
 import { invalidateSettingsCache } from './cache.js';
 import { proxyMemoryLogger } from '../utils/logger.js';
 import { appStore } from './state.js';
+import { noteKnownSelection, knownSelection, knownSelectionRevision, knownSelectionChangedSince } from './known-selection.js';
 
 /** Maximum retries for waiting mihomo to be ready. */
 const MAX_READY_RETRIES = 50;
@@ -40,25 +41,37 @@ const PROVIDER_WAIT_DELAY = 1500;
  */
 const PROVIDER_STAGGER_RETRIES = 3;
 
+/** Selection writes reach the backend one at a time, in call order. */
+let selectionWriteTail = Promise.resolve();
+
 /**
  * Save current proxy selection for a profile (v2: group + node).
  * Uses atomic backend command to avoid Read-Modify-Write race conditions.
  * Invalidates settings cache to ensure subsequent reads get fresh data.
  * @param {string} profileName - Profile filename (e.g., "my-sub.yaml")
- * @param {{ node?: string, group?: string }} [selection]
+ * @param {{ node?: string, group?: string|null }} [selection]
  */
 export async function saveProxySelection(profileName, { node, group } = {}) {
-    try {
-        await invoke(COMMANDS.UPDATE_PROXY_SELECTION, {
-            profileName,
-            nodeName: node,
-            groupName: group || null,
-        });
-        // Invalidate cache so subsequent restoreProxySelection reads fresh data
-        invalidateSettingsCache();
-    } catch (e) {
-        proxyMemoryLogger.warn('Failed to save proxy selection:', e);
-    }
+    // Known even if the write below fails, so a later profile switch can retry it.
+    noteKnownSelection(profileName, { group, node });
+    // Two writes in flight at once commit in whichever order they take the
+    // settings lock: chained, an older save cannot land after a newer one
+    // and name the node the user left.
+    const write = selectionWriteTail.then(async () => {
+        try {
+            await invoke(COMMANDS.UPDATE_PROXY_SELECTION, {
+                profileName,
+                nodeName: node,
+                groupName: group || null,
+            });
+            // Invalidate cache so subsequent restoreProxySelection reads fresh data
+            invalidateSettingsCache();
+        } catch (e) {
+            proxyMemoryLogger.warn('Failed to save proxy selection:', e);
+        }
+    });
+    selectionWriteTail = write;
+    await write;
 }
 
 /**
@@ -287,11 +300,31 @@ export async function restoreProxySelection(profileName) {
  * @returns {Promise<'restored' | 'nothing' | 'failed'>}
  */
 export async function restoreProxySelectionResult(profileName) {
+    // A choice recorded for this profile from here on (the user picking a
+    // node while the settings, the core or the groups are read, or while the
+    // switch runs) is newer than the restored one and stays known.
+    const revisionBefore = knownSelectionRevision();
+    // So is a node switch sent from here on, or one still waiting for the
+    // core: it records its node only once the core answers, and the switches
+    // of a group go out in order, so a restore switch sent after it would
+    // land last and replace it.
+    const switchMark = proxySwitchMark();
+    // The core this restore is for: the waits below can take many seconds,
+    // and a core started meanwhile (another profile, say) is not switched
+    // to this profile's node, nor is that node recorded for this profile.
+    const coreBefore = coreReplacements();
+    // The group open now: one the user opens from here on (while the
+    // settings, the core or the groups are read) stays open.
+    const groupBefore = appStore.get('uiGroupName');
     try {
         // Read directly from backend to avoid stale cache
         const settings = await invoke(COMMANDS.GET_SETTINGS);
         const raw = settings.last_proxy_selection?.[profileName];
-        const saved = parseSelection(raw);
+        // Every choice saved in this session is recorded first, so a recorded
+        // one is at least as new as the saved one; it is also the one to
+        // restore when writing it to the settings failed.
+        const known = knownSelection(profileName);
+        const saved = known ? { group: known.group, node: known.node } : parseSelection(raw);
 
         // Always wait for mihomo to be ready, even if no saved node exists.
         // Callers removed their hardcoded delays and rely on this function
@@ -320,6 +353,12 @@ export async function restoreProxySelectionResult(profileName) {
             // Use empty strings because the Rust backend's update_proxy_selection
             // requires node_name as String (not Option<String>).
             // parseSelection() treats "" as null via the `|| null` check.
+            // A choice made since the settings were read replaced the
+            // stale entry already: clearing now would erase it.
+            // So would a node switch sent since: it records its choice once
+            // the core answers, and a clear landing after that erases it.
+            if (knownSelectionChangedSince(revisionBefore, profileName)
+                || proxySwitchedSince(switchMark)) return 'nothing';
             try {
                 await saveProxySelection(profileName, { node: '', group: '' });
             } catch { /* ignore cleanup errors */ }
@@ -332,7 +371,22 @@ export async function restoreProxySelectionResult(profileName) {
 
         const proxyGroupsResult = await loadGroupsForRestore(preferredGroupName, saved.node);
         if (!proxyGroupsResult) return 'failed';
-        return await switchToSaved(proxyGroupsResult, saved.node);
+        // Checked before each switch: a node the user picked meanwhile is
+        // newer than the saved one and is not switched away from.
+        const { outcome, group } = await switchToSaved(
+            proxyGroupsResult,
+            saved.node,
+            (own, ownInFlight = 0) => knownSelectionChangedSince(revisionBefore, profileName)
+                || proxySwitchedSince(switchMark, own, { ownInFlight })
+                || coreReplacements() !== coreBefore,
+        );
+        if (outcome === 'restored' && coreReplacements() === coreBefore) {
+            if (appStore.get('uiGroupName') === groupBefore) appStore.set('uiGroupName', group);
+            if (!knownSelectionChangedSince(revisionBefore, profileName)) {
+                noteKnownSelection(profileName, { group, node: saved.node });
+            }
+        }
+        return outcome;
     } catch (e) {
         proxyMemoryLogger.warn('Failed to restore proxy selection:', e);
         return 'failed';
@@ -429,11 +483,17 @@ async function groupsToTry(preferred, fallback) {
 /**
  * Switch to the saved node: in the resolved UI group when it lists the node,
  * otherwise in any writable group that does.
+ * Stops ('nothing') once `superseded` says a newer choice was made (it is
+ * told how many switches this restore sent so far, all answered).
  * @param {any} proxyGroupsResult
  * @param {string} node
- * @returns {Promise<'restored' | 'nothing' | 'failed'>}
+ * @param {(own: number, ownInFlight?: number) => boolean} [superseded]
+ *   own: this restore's switches started so far; ownInFlight: how many of
+ *   them are still running
+ * @returns {Promise<{ outcome: 'restored' | 'nothing' | 'failed', group: string|null }>}
+ *   the group switched in, when restored
  */
-async function switchToSaved(proxyGroupsResult, node) {
+async function switchToSaved(proxyGroupsResult, node, superseded = () => false) {
     // Use the resolved uiGroupName (from resolver) instead of the old
     // keyword-guessed mainGroup.  This fixes the core bug where the
     // restored selection was applied to the wrong group.
@@ -449,22 +509,43 @@ async function switchToSaved(proxyGroupsResult, node) {
     const fallback = findWritableGroupsWithNode(proxyMap, node, preferred);
     const { groups, modeUnknown } = await groupsToTry(preferred, fallback);
     // The saved node is no longer in this profile.
-    if (groups.length === 0) return modeUnknown ? 'failed' : 'nothing';
+    // With the mode unknown nothing could be tried, unless a newer choice
+    // took over meanwhile: then there is nothing to restore.
+    if (groups.length === 0) return { outcome: modeUnknown && !superseded(0) ? 'failed' : 'nothing', group: null };
+    let sent = 0;
     for (const group of groups) {
-        // switchProxy throws when the core answers with an error; that is a
-        // refusal of this group, so the next one still gets its try.
+        if (superseded(sent)) return { outcome: 'nothing', group: null };
+        // An error answer is a refusal of this group, so the next one still
+        // gets its try. A newer choice made while the switch waited for its
+        // turn (a pick recorded meanwhile) drops it unsent.
         let switched = false;
+        // Dropped unsent because a newer choice was made: that choice wins,
+        // so no other group gets the saved node either.
+        let dropped = false;
         try {
-            switched = await switchProxy(group, node);
+            sent += 1;
+            const own = sent;
+            // Checked in its turn, when this switch is the one running: it
+            // does not count as a newer switch itself.
+            const result = await switchProxyResult(group, node, {
+                canSend: () => {
+                    dropped = superseded(own, 1);
+                    return !dropped;
+                },
+            });
+            if (result.error) throw result.error;
+            switched = result.ok;
         } catch (err) {
             proxyMemoryLogger.warn(`Restoring ${node} in ${group} failed:`, err);
         }
-        if (switched) {
-            appStore.set('uiGroupName', group);
-            return 'restored';
-        }
+        if (dropped) return { outcome: 'nothing', group: null };
+        // A user switch that started while this one ran is the newer
+        // choice: the saved node is not recorded over it.
+        if (switched) return superseded(sent) ? { outcome: 'nothing', group: null } : { outcome: 'restored', group };
     }
-    return 'failed';
+    // A newer choice made while the last switch ran wins over the refusal.
+    if (superseded(sent)) return { outcome: 'nothing', group: null };
+    return { outcome: 'failed', group: null };
 }
 
 /**
