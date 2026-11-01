@@ -19,7 +19,6 @@ export function validateHttpUrl(raw) {
     const value = (raw ?? '').trim();
     if (!value) return 'empty';
     // The backend refuses control characters (the URL parser would silently drop tabs/newlines).
-    // eslint-disable-next-line no-control-regex
     if (/[\u0000-\u001f\u007f]/.test(value)) return 'invalid';
     /** @type {URL} */
     let u;
