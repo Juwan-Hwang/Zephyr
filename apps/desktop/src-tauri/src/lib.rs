@@ -2425,19 +2425,14 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
         }
     }
 
-    // Read the last-known core port + config from MihomoState.
-    let (port, config_path, custom_args, started_at) = {
+    // Read the last-known core port and start time from MihomoState.
+    let (port, started_at) = {
         let state = app.state::<MihomoState>();
         let guard = state
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        (
-            guard.last_port(),
-            guard.last_config_path().map(str::to_owned),
-            guard.last_custom_args().map(<[String]>::to_vec),
-            guard.started_at(),
-        )
+        (guard.last_port(), guard.started_at())
     };
 
     let Some(core_port) = port else {
@@ -2527,18 +2522,17 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
         "Core unresponsive after resume — restarting"
     );
 
-    // Restart with the last-known config.
-    let config = config_path.unwrap_or_else(|| "config.yaml".to_owned());
-    let args = custom_args.unwrap_or_default();
+    // Restart with the profile and arguments the core was last started
+    // with, read once the start lock is held: a start still running may fail
+    // and leave this core unresponsive, so it waits for that start; the start
+    // time then tells whether it replaced the core, and a replacement that
+    // has since exited is restarted as it was, not as this check found it.
     let state = app.state::<MihomoState>();
-    // On success, start_core_inner already notifies the coordinator with a
+    // On success, start_core_locked already notifies the coordinator with a
     // Manual event, so no duplicate notification is needed here.
-    match Box::pin(core_manager::core::core_process::start_core_with(
+    match Box::pin(core_manager::core::core_process::start_core_after_pending(
         app.clone(),
         state,
-        config,
-        args,
-        None,
         Some(true), // Force restart: the old process may still be alive but unresponsive
         Some(started_at),
     ))

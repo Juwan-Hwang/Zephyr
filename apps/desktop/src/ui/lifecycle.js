@@ -16,6 +16,7 @@ import { showNotification } from './notifications.js';
 import { t } from '../i18n.js';
 
 import { activeProfile, noteActiveProfile } from './active-profile.js';
+import { knownSelection, hasKnownSelections } from './known-selection.js';
 
 /**
  * Save the active profile. Resolves to the error instead of throwing it.
@@ -35,50 +36,65 @@ export async function persistActiveConfig(configName) {
 
 /**
  * 切换前保存当前配置的代理选择（失败只记日志）
+ *
+ * Reads the live choice from the core with a short timeout. When the core is
+ * too busy to answer (a latency test still queued) or the read fails, it saves
+ * the last choice known for the running profile and group instead.
  */
 async function saveCurrentSelection() {
   try {
     const { fetchProxyGroups } = await import('./proxy-groups.js');
     const groupName = appStore.get('uiGroupName');
     // 使用短超时 —— 如果 mihomo 繁忙（如延迟测试仍在队列中），
-    // 回退到 appStore 状态而不是阻塞数秒
+    // 回退到已知的最近一次选择而不是阻塞数秒
     let timer;
     // Pass preferredGroupName so the resolver targets the user's chosen group
     // instead of the effective group.  Without this, `current` may come from
     // a different group (e.g., "兜底分流") whose `now` is a group name (e.g.,
     // "手动切换"), which would be incorrectly saved as the proxy node.
-    const fetchPromise = fetchProxyGroups({ preferredGroupName: groupName ?? undefined });
+    // A failed read falls back to the known choice the same way as a slow one.
+    const fetchPromise = fetchProxyGroups({ preferredGroupName: groupName ?? undefined })
+      .catch((/** @type {unknown} */ e) => {
+        apiLogger.warn('[switchToConfig] Reading the current selection failed:', e);
+        return null;
+      });
     const timeoutPromise = new Promise(resolve => { timer = setTimeout(() => resolve(null), 500); });
     const currentProxyGroups = await Promise.race([fetchPromise, timeoutPromise]);
     clearTimeout(timer);
 
-    let nodeToSave = null;
-    if (currentProxyGroups && currentProxyGroups.current) {
-      // fetch 成功，使用实时数据
-      nodeToSave = currentProxyGroups.current;
-    } else {
-      // fetch 超时，回退到 appStore 中缓存的当前节点
-      nodeToSave = appStore.get('currentProxy');
-    }
+    // The core answered but its group has no selection: there is nothing to
+    // save, and a known choice would not be what the core runs now.
+    if (currentProxyGroups && !currentProxyGroups.current) return;
+    const live = currentProxyGroups?.current ? currentProxyGroups : null;
+    // Nothing live and nothing known: nothing to save.
+    if (!live && !hasKnownSelections()) return;
 
-    if (nodeToSave) {
-      const liveSettings = await invoke(COMMANDS.GET_SETTINGS);
-      const activeConfig = activeProfile(liveSettings, 'config.yaml');
-      // The minimal config runs: no profile to save the choice under.
-      if (!activeConfig) return;
-      const { saveProxySelection } = await import('./proxy-memory.js');
-      // Use the resolver's uiGroupName when live data was available
-      // (it may normalize or fall back from the raw appStore value).
-      // On timeout fallback, use the raw groupName to keep node and
-      // group sources consistent.
-      const resolvedGroup = (currentProxyGroups && currentProxyGroups.current)
-        ? (currentProxyGroups.uiGroupName || currentProxyGroups.mainGroup || groupName || null)
-        : (groupName || null);
-      await saveProxySelection(activeConfig, {
-        node: nodeToSave,
-        group: resolvedGroup,
-      });
+    const liveSettings = await invoke(COMMANDS.GET_SETTINGS);
+    const activeConfig = activeProfile(liveSettings, 'config.yaml');
+    // The minimal config runs: no profile to save the choice under.
+    if (!activeConfig) return;
+
+    /** @type {{ node: string, group: string|null } | null} */
+    let selection = null;
+    if (live) {
+      // fetch 成功，使用实时数据。Use the resolver's uiGroupName (it may
+      // normalize or fall back from the raw appStore value).
+      selection = {
+        node: live.current,
+        group: live.uiGroupName || live.mainGroup || groupName || null,
+      };
+    } else {
+      // fetch 超时：只用属于当前配置、当前分组的已知选择。No group picked in
+      // the UI (reset after its group vanished): which group the known
+      // choice belongs to cannot be checked, so nothing is saved and the
+      // profile keeps the choice it already has.
+      const known = groupName ? knownSelection(activeConfig, groupName) : null;
+      if (known) selection = { node: known.node, group: known.group };
     }
+    if (!selection) return;
+
+    const { saveProxySelection } = await import('./proxy-memory.js');
+    await saveProxySelection(activeConfig, selection);
   } catch (e) {
     apiLogger.warn('[switchToConfig] Failed to save proxy selection:', e);
   }

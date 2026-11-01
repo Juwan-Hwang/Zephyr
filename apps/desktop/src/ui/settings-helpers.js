@@ -78,6 +78,24 @@ export function saveSettings(patch) {
 }
 
 /**
+ * Like saveSettings(), but the returned promise rejects when the write fails,
+ * for callers that must report it (a change the core already runs that
+ * settings.json, which overrides every profile at core start, did not take).
+ * @param {Record<string, *>} patch
+ * @returns {Promise<void>}
+ */
+export function saveSettingsChecked(patch) {
+    const run = saveQueue.then(async () => {
+        await invoke(COMMANDS.PATCH_SETTINGS, { patch });
+        invalidateSettingsCache();
+    });
+    saveQueue = run.catch((e) => {
+        settingsLogger.warn('Failed to save settings:', e);
+    });
+    return run;
+}
+
+/**
  * Read a single field from settings.json.
  *
  * @template T
@@ -89,4 +107,28 @@ export async function getSetting(key, fallback) {
     const settings = await invoke(COMMANDS.GET_SETTINGS);
     const value = settings[key];
     return (value === null || value === undefined) ? fallback : value;
+}
+
+/**
+ * Why a port dialog save is refused, or null when it can go ahead: a port out
+ * of range (0 disables it), no proxy port left (mixed and SOCKS both 0), or two
+ * listeners on one port. `hiddenLive` are ports not shown but possibly live.
+ * @param {number[]} shown the ports the save writes
+ * @param {number} mixedVal
+ * @param {number} socksVal
+ * @param {number[]} hiddenLive
+ * @returns {{ key: string, fallback: string } | null}
+ */
+export function portPatchError(shown, mixedVal, socksVal, hiddenLive) {
+    if (shown.some((val) => !Number.isInteger(val) || val < 0 || val > 65535)) {
+        return { key: 'portRangeError', fallback: 'Port must be between 0 and 65535' };
+    }
+    if (mixedVal === 0 && socksVal === 0) {
+        return { key: 'portAllDisabledError', fallback: 'At least one proxy port (Mixed or SOCKS5) must be enabled' };
+    }
+    const used = [...shown, ...hiddenLive.filter((v) => Number.isInteger(v))].filter((v) => v > 0);
+    if (new Set(used).size !== used.length) {
+        return { key: 'portDuplicateError', fallback: 'Each port can only be used once' };
+    }
+    return null;
 }
