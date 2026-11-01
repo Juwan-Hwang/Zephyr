@@ -621,6 +621,7 @@ pub fn restart_as_admin_cmd(app: tauri::AppHandle, enable_tun: bool) -> Result<(
         );
     }
     let state = app.state::<crate::core_manager::MihomoState>();
+    let _user_stop = crate::core_manager::core::core_process::note_user_stop();
     let _ = crate::core_manager::stop_core_inner(&app, &state);
     app.cleanup_before_exit();
     app.exit(0);

@@ -11914,7 +11914,7 @@ MIT License (SPDX: MIT):
 
 MIT License (SPDX: MIT):
   * tracing-core 0.1.36 — https://github.com/tokio-rs/tracing
-  * zip 9.0.4 — https://github.com/zip-rs/zip2
+  * zip 9.0.5 — https://github.com/zip-rs/zip2
 
 MIT License (SPDX: MIT):
   * typenum 1.20.1 — https://github.com/paholg/typenum

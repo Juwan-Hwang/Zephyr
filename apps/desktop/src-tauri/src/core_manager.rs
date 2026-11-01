@@ -51,6 +51,8 @@ pub use core::{
     try_acquire_tun_toggle,
     update_config_url,
     update_profile_file,
+    update_profile_file_resolved_within,
+    update_profile_file_within,
     update_subscription_interval,
     update_subscription_ua,
     write_config_file,
@@ -65,7 +67,7 @@ pub use core::{
     MihomoState,
     ReadLogResult,
     // Constants
-    CORE_STARTING,
+    CORE_ALREADY_STARTING,
     DEFAULT_MIXED_PORT,
     MAX_RESPONSE_SIZE,
     TUN_MODE_ACTIVE,

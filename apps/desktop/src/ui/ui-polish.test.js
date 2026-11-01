@@ -479,7 +479,9 @@ describe('flag emoji with letter-spacing', () => {
         const { css: preflight } = await (await createGenerator(config)).generate('', { preflights: true });
         expect(preflight).toMatch(/(?:^|[};\s])html,\s*:host\s*\{[^}]*font-feature-settings:\s*var\(--default-font-featureSettings,/);
         expect(preflight).toMatch(/(?:^|[};\s])code,\s*kbd,\s*samp,\s*pre\s*\{[^}]*font-feature-settings:\s*var\(--default-monoFont-featureSettings,/);
-    });
+        // Importing UnoCSS and generating the preflight takes seconds on a
+        // loaded machine (the pre-push hook runs it beside other work).
+    }, 30000);
 
     it('nothing else resets font-feature-settings in our stylesheet', () => {
         expect(css.match(/font-feature-settings\s*:/g) ?? []).toHaveLength(0);

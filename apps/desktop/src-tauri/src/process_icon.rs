@@ -435,8 +435,15 @@ fn is_local_fs(path: &Path) -> bool {
 }
 
 fn cache_get(path: &str) -> Option<Option<String>> {
+    cache_get_at(path, Instant::now())
+}
+
+/// Looks `path` up as if the clock read `now`. Tests move `now` forward
+/// instead of moving entries back: `Instant` cannot go before the moment
+/// the machine booted, so a fresh CI runner cannot age an entry backwards.
+fn cache_get_at(path: &str, now: Instant) -> Option<Option<String>> {
     let (icon, at) = CACHE.lock().ok()?.as_ref()?.get(path).cloned()?;
-    (icon.is_some() || at.elapsed() < MISS_TTL).then_some(icon)
+    (icon.is_some() || now.saturating_duration_since(at) < MISS_TTL).then_some(icon)
 }
 
 fn cache_put(path: String, icon: Option<String>) {
@@ -2017,19 +2024,10 @@ mod tests {
             Some(Some("data:image/png;base64,AA==".to_owned()))
         );
         assert_eq!(cache_get("/test/missing"), Some(None));
-        // Age both entries past the miss lifetime.
-        let past = Instant::now()
-            .checked_sub(MISS_TTL + Duration::from_secs(1))
-            .unwrap();
-        if let Some(map) = CACHE.lock().unwrap().as_mut() {
-            for key in ["/test/found", "/test/missing"] {
-                if let Some(entry) = map.get_mut(key) {
-                    entry.1 = past;
-                }
-            }
-        }
-        assert!(cache_get("/test/found").is_some());
-        assert_eq!(cache_get("/test/missing"), None);
+        // Look both entries up once the miss lifetime has passed.
+        let later = Instant::now() + MISS_TTL + Duration::from_secs(1);
+        assert!(cache_get_at("/test/found", later).is_some());
+        assert_eq!(cache_get_at("/test/missing", later), None);
     }
 
     #[cfg(unix)]
