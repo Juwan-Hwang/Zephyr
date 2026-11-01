@@ -16,6 +16,7 @@ import { fetchAndConvertSRRules } from '../rules.js';
 import { SVG_ICONS } from './icons.js';
 import { getActiveConfigContent } from './advanced.js';
 import { validateConfig, isPrismRule } from './prism.js';
+import { configUpdateOutcome } from './config-update.js';
 
 // --- State ---
 
@@ -331,13 +332,21 @@ async function saveRules() {
         const result = await invoke(COMMANDS.UPDATE_CONFIG, { patch: { rules: currentConfigRules } });
         await closeAllConnections();
 
-        originalConfigRules = [...currentConfigRules];
+        const outcome = configUpdateOutcome(/** @type {any} */ (result));
+        // A partial save left the active profile without the rules: keep
+        // them marked unsaved so Save stays available for a retry.
+        if (outcome !== 'partial') {
+            originalConfigRules = [...currentConfigRules];
+        }
         updateSaveRulesBtnVisibility();
 
-        if (result && (/** @type {any} */ (result)).hot_reload_success) {
+        if (outcome === 'applied') {
             showNotification(/** @type {any} */ (translations)[currentLang].notifRulesSaved, 'success');
+        } else if (outcome === 'partial') {
+            // Live now, but the active profile did not take the rules.
+            showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'warning');
         } else {
-            showNotification(result?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'info');
+            showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'info');
         }
     } catch (err) {
         showNotification(/** @type {any} */ (translations)[currentLang].notifRulesParseFailed, 'error');

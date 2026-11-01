@@ -1493,24 +1493,6 @@ async fn update_core_inner(
         ));
     }
 
-    let (last_config, last_args, last_secret) = {
-        let lock = state
-            .0
-            .lock()
-            .map_err(|e| format!("Failed to lock state: {e}"))?;
-        let config = lock
-            .last_config_path()
-            .map(String::from)
-            .unwrap_or_else(|| "config.yaml".to_owned());
-        let args = lock.last_custom_args().map(Vec::from).unwrap_or_default();
-        let secret = if lock.last_secret().is_empty() {
-            None
-        } else {
-            Some(lock.last_secret().to_owned())
-        };
-        (config, args, secret)
-    };
-
     emit_download_status_ext(
         &window,
         Some(UpdateComponent::Core),
@@ -1518,15 +1500,12 @@ async fn update_core_inner(
         98,
     );
 
-    let result = core_manager::start_core(
-        app.clone(),
-        state,
-        last_config,
-        last_args,
-        last_secret,
-        Some(true),
-    )
-    .await;
+    // Waits for a start still in progress rather than giving up: a give-up
+    // here would roll back the binary that start may already be running. The
+    // profile, arguments and secret are read once that start has ended.
+    let result =
+        core_manager::core::core_process::start_core_after_pending(app.clone(), state, Some(true))
+            .await;
     match result {
         Ok(r) => {
             // Step 3: New core started — delete backup
