@@ -14,7 +14,8 @@ await initTrayEventListeners();
 describe('a node picked in the tray', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        api.switchProxy.mockResolvedValue(true);
+        api.switchProxyResult.mockResolvedValue({ ok: true, reason: null, seq: 1 });
+        api.isLatestSwitch.mockReturnValue(true);
     });
 
     it('is remembered for the running profile, so a later restart restores it', async () => {
@@ -26,16 +27,64 @@ describe('a node picked in the tray', () => {
     it('is remembered for the profile running when it was picked, even if a profile switch lands meanwhile', async () => {
         let profile = 'old.yaml';
         api.invoke.mockImplementation(async (cmd) => (cmd === 'get_settings' ? { last_config: profile } : null));
-        api.switchProxy.mockImplementation(async () => { profile = 'new.yaml'; return true; });
+        api.switchProxyResult.mockImplementation(async () => { profile = 'new.yaml'; return { ok: true, reason: null, seq: 1 }; });
         await handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Tokyo' } });
         expect(memory.saveProxySelection).toHaveBeenCalledWith('old.yaml', { node: 'Tokyo', group: 'Proxy' });
     });
 
     it('is not remembered when the switch was refused', async () => {
-        api.switchProxy.mockResolvedValue(false);
+        api.switchProxyResult.mockResolvedValue({ ok: false, reason: null, seq: 1 });
         api.invoke.mockImplementation(async (cmd) => (cmd === 'get_settings' ? { last_config: 'sub.yaml' } : null));
         await handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Tokyo' } });
         expect(memory.saveProxySelection).not.toHaveBeenCalled();
+    });
+
+    it('runs tray clicks in click order, also when the first one\'s profile read is slower', async () => {
+        // The first read is held; every later one answers at once.
+        /** @type {() => void} */
+        let releaseFirst = () => {};
+        let held = false;
+        api.invoke.mockImplementation((cmd) => {
+            if (cmd !== 'get_settings') return Promise.resolve(null);
+            if (held) return Promise.resolve({ last_config: 'sub.yaml' });
+            held = true;
+            return new Promise((resolve) => { releaseFirst = () => resolve({ last_config: 'sub.yaml' }); });
+        });
+        const first = handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Tokyo' } });
+        const second = handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Osaka' } });
+        await new Promise((r) => setTimeout(r, 20));
+        // The second click waits for the first.
+        expect(api.switchProxyResult).not.toHaveBeenCalled();
+        releaseFirst();
+        await Promise.all([first, second]);
+        expect(api.switchProxyResult.mock.calls.map((c) => c[1])).toEqual(['Tokyo', 'Osaka']);
+        expect(memory.saveProxySelection.mock.calls.map((c) => c[1].node)).toEqual(['Tokyo', 'Osaka']);
+    });
+
+    it('is not remembered when a later switch of the group stands over it', async () => {
+        api.isLatestSwitch.mockReturnValue(false);
+        api.invoke.mockImplementation(async (cmd) => (cmd === 'get_settings' ? { last_config: 'sub.yaml' } : null));
+        await handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Tokyo' } });
+        expect(memory.saveProxySelection).not.toHaveBeenCalled();
+    });
+
+    it('is not sent when a network change begins while it waits behind another switch', async () => {
+        const { appStore } = await import('./state.js');
+        api.invoke.mockImplementation(async (cmd) => (cmd === 'get_settings' ? { last_config: 'sub.yaml' } : null));
+        let sendable;
+        api.switchProxyResult.mockImplementation(async (_g, _n, opts) => {
+            // Its turn comes after a mode change began and ended.
+            appStore.set('isNetworkUpdating', true);
+            await new Promise((r) => setTimeout(r, 0));
+            appStore.set('isNetworkUpdating', false);
+            await new Promise((r) => setTimeout(r, 0));
+            sendable = opts.canSend();
+            return sendable ? { ok: true, reason: null, seq: 1 } : { ok: false, reason: api.SWITCH_BUSY, seq: 1 };
+        });
+        await handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Tokyo' } });
+        expect(sendable).toBe(false);
+        expect(memory.saveProxySelection).not.toHaveBeenCalled();
+        expect(notifications.showNotification).toHaveBeenCalledWith(expect.any(String), 'warning');
     });
 
     it('is refused while another network change runs, as the node cards refuse it', async () => {
@@ -47,7 +96,7 @@ describe('a node picked in the tray', () => {
         } finally {
             appStore.set('isNetworkUpdating', false);
         }
-        expect(api.switchProxy).not.toHaveBeenCalled();
+        expect(api.switchProxyResult).not.toHaveBeenCalled();
         expect(memory.saveProxySelection).not.toHaveBeenCalled();
         expect(notifications.showNotification).toHaveBeenCalledWith(expect.any(String), 'warning');
     });
@@ -64,7 +113,7 @@ describe('a node picked in the tray', () => {
         } finally {
             appStore.set('isNetworkUpdating', false);
         }
-        expect(api.switchProxy).not.toHaveBeenCalled();
+        expect(api.switchProxyResult).not.toHaveBeenCalled();
         expect(memory.saveProxySelection).not.toHaveBeenCalled();
     });
 });

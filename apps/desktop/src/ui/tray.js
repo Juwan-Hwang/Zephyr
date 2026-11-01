@@ -4,7 +4,8 @@
  * Extracted from ui.js for modularity.
  */
 
-import { getConfig, getProxies, switchProxy, closeAllConnections, invoke, listen } from '../api.js';
+import { getConfig, getProxies, switchProxyResult, isLatestSwitch, SWITCH_BUSY, closeAllConnections, invoke, listen } from '../api.js';
+import { noNetworkChangeSince } from './network-change.js';
 import { switchToConfig } from './lifecycle.js';
 import { activeProfile, currentProfile } from './active-profile.js';
 import { saveProxySelection } from './proxy-memory.js';
@@ -392,6 +393,8 @@ export async function initTrayEventListeners() {
     // Listen for proxy change from tray
     _trayEventUnlisteners.push(unlisten4);
 
+    /** @type {Promise<void>} */
+    let trayProxyQueue = Promise.resolve();
     const unlisten5 = await listen('tray-proxy-changed', async (event) => {
         /** @type {any} */
         const ev = event;
@@ -406,48 +409,68 @@ export async function initTrayEventListeners() {
             return;
         }
 
-        try {
-            const profile = await trayPickProfile();
-            // A change may have taken the guard while the profile was read:
-            // check again right before switching, as the node cards do.
-            if (appStore.get('isNetworkUpdating')) {
-                showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
-                await updateTrayMenu(true).catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
-                return;
-            }
-            const success = await switchProxy(group, proxy);
-            if (success) {
-                invalidateProxiesCache();
-                invalidateRunConfigCache();
-
-                // Sync uiGroupName when tray explicitly specifies a group
-                if (group) {
-                    appStore.set('uiGroupName', group);
+        // Taken at the click: a change that begins later, also while this
+        // switch waits behind another one of the group, drops it unsent.
+        const canSend = noNetworkChangeSince();
+        // Tray clicks run one after another: each reads the profile, is
+        // queued for its group and saved in click order, so an earlier
+        // click whose reads finish late never becomes the last switch or
+        // the last save.
+        const run = trayProxyQueue.then(async () => {
+            try {
+                const profile = await trayPickProfile();
+                // A change may have taken the guard while the profile was read:
+                // check again right before switching, as the node cards do.
+                if (appStore.get('isNetworkUpdating')) {
+                    showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
+                    await updateTrayMenu(true).catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
+                    return;
                 }
-                await rememberTraySelection(profile, group, proxy);
-
-                await closeAllConnections();
-                // Let syncCoreConfig() handle the display update with leaf node resolution
-                import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
-
-                const proxiesPage = document.querySelector('[data-page="proxies"]');
-                if (proxiesPage && proxiesPage.classList.contains('hidden') === false) {
-                    import('./proxies.js').then(m => m.refreshProxies()).catch(() => {});
+                const result = await switchProxyResult(group, proxy, { canSend });
+                // Callers of switchProxy expected an HTTP refusal to reject, as before.
+                if (result.error) throw result.error;
+                if (result.reason === SWITCH_BUSY) {
+                    showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
+                    await updateTrayMenu(true).catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
+                    return;
                 }
+                const success = result.ok;
+                if (success) {
+                    invalidateProxiesCache();
+                    invalidateRunConfigCache();
 
-                updateTrayMenu(true).catch(() => {});
-                // Refresh tray again after a short delay to ensure mihomo has updated `now`
-                setTimeout(() => updateTrayMenu(true).catch(() => {}), 500);
-            } else {
-                // A GLOBAL selection is routed through the backend and reported
-                // as a rejected request instead of a thrown error, so surface it
-                // instead of failing silently on a user-initiated switch.
-                trayLogger.warn('Tray proxy switch was not applied');
-                showNotification(tr('notifSwitchFailed', 'Failed to switch node'), 'error');
+                    // Sync uiGroupName when tray explicitly specifies a group
+                    if (group) {
+                        appStore.set('uiGroupName', group);
+                    }
+                    // A later switch of the group from any surface stands over this one.
+                    if (isLatestSwitch(group, result.seq)) await rememberTraySelection(profile, group, proxy);
+
+                    await closeAllConnections();
+                    // Let syncCoreConfig() handle the display update with leaf node resolution
+                    import('./proxies.js').then(m => m.syncCoreConfig()).catch(() => {});
+
+                    const proxiesPage = document.querySelector('[data-page="proxies"]');
+                    if (proxiesPage && proxiesPage.classList.contains('hidden') === false) {
+                        import('./proxies.js').then(m => m.refreshProxies()).catch(() => {});
+                    }
+
+                    updateTrayMenu(true).catch(() => {});
+                    // Refresh tray again after a short delay to ensure mihomo has updated `now`
+                    setTimeout(() => updateTrayMenu(true).catch(() => {}), 500);
+                } else {
+                    // A GLOBAL selection is routed through the backend and reported
+                    // as a rejected request instead of a thrown error, so surface it
+                    // instead of failing silently on a user-initiated switch.
+                    trayLogger.warn('Tray proxy switch was not applied');
+                    showNotification(tr('notifSwitchFailed', 'Failed to switch node'), 'error');
+                }
+            } catch (err) {
+                trayLogger.error('Failed to switch proxy from tray', err);
             }
-        } catch (err) {
-            trayLogger.error('Failed to switch proxy from tray', err);
-        }
+        });
+        trayProxyQueue = run;
+        await run;
     });
     _trayEventUnlisteners.push(unlisten5);
 
