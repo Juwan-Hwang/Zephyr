@@ -3,7 +3,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // The wheel only needs the node list; everything else is a no-op.
 vi.mock('../api.js', () => ({
     getProxies: vi.fn(),
-    switchProxyResult: vi.fn().mockResolvedValue({ ok: true, reason: null }),
+    // Runs the click's `prepare` in its turn, as the real queue does, and
+    // drops the switch unsent as busy when canSend says no.
+    switchProxyResult: vi.fn(async (_group, _name, options) => {
+        const prepared = await options?.prepare?.();
+        if (options?.canSend && !options.canSend()) return { ok: false, reason: 'busy', prepared, seq: 1 };
+        return { ok: true, reason: null, prepared, seq: 1 };
+    }),
+    isLatestSwitch: vi.fn(() => true),
+    coreReplacements: vi.fn(() => 0),
+    SWITCH_BUSY: 'busy',
     abortLatencyTests: vi.fn(),
     closeAllConnections: vi.fn().mockResolvedValue(undefined),
 }));
@@ -29,6 +38,7 @@ vi.mock('./cache.js', () => ({
     getSettingsCached: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('./proxy-memory.js', () => ({ saveProxySelection: vi.fn() }));
+vi.mock('./running-profile.js', () => ({ readRunningProfile: vi.fn().mockResolvedValue('config.yaml') }));
 vi.mock('./notifications.js', () => ({ showNotification: vi.fn() }));
 
 const GROUPS = {
@@ -263,7 +273,7 @@ describe('node quick-switch wheel', () => {
         jp.click();
         expect(isShown(dom.dropdown)).toBe(false);
         await vi.advanceTimersByTimeAsync(0);
-        expect(api.switchProxyResult).toHaveBeenCalledWith('Proxy', 'JP 01');
+        expect(api.switchProxyResult).toHaveBeenCalledWith('Proxy', 'JP 01', expect.anything());
     });
 
     it('restores the old node name and reports an error when the switch fails or throws', async () => {
@@ -281,16 +291,16 @@ describe('node quick-switch wheel', () => {
         }
         // Same titled toast as the proxies page; a thrown error carries its reason.
         expect(proxies.notifySwitchFailed).toHaveBeenCalledTimes(2);
-        expect(proxies.notifySwitchFailed).toHaveBeenNthCalledWith(1, rejected);
+        expect(proxies.notifySwitchFailed).toHaveBeenNthCalledWith(1, rejected, false);
         expect(/** @type {any} */ (proxies.notifySwitchFailed).mock.calls[1][0]).toBeInstanceOf(Error);
     });
 
     it('saves an older accepted switch when the newer click fails, and reports only the newer one', async () => {
         const api = await import('../api.js');
         const proxies = await import('./proxies.js');
-        const cache = await import('./cache.js');
         const memory = await import('./proxy-memory.js');
-        /** @type {any} */ (cache.getSettingsCached).mockResolvedValue({ last_config: 'sub' });
+        const running = await import('./running-profile.js');
+        /** @type {any} */ (running.readRunningProfile).mockResolvedValue('sub');
         /** @type {(v: any) => void} */
         let resolveA = () => {};
         /** @type {(e: any) => void} */
@@ -311,14 +321,62 @@ describe('node quick-switch wheel', () => {
         rejectB(boom);
         await vi.advanceTimersByTimeAsync(0);
         const syncsBeforeA = /** @type {any} */ (proxies.syncCoreConfig).mock.calls.length;
-        resolveA({ ok: true, reason: null });
+        resolveA({ ok: true, reason: null, prepared: 'sub' });
         await vi.advanceTimersByTimeAsync(3000);
         // The failed newer click's resync may have read the core before A landed: A redraws.
         expect(/** @type {any} */ (proxies.syncCoreConfig).mock.calls.length).toBeGreaterThan(syncsBeforeA);
         expect(memory.saveProxySelection).toHaveBeenCalledTimes(1);
         expect(memory.saveProxySelection).toHaveBeenCalledWith('sub', { node: 'JP 01', group: 'Proxy' });
         expect(proxies.notifySwitchFailed).toHaveBeenCalledTimes(1);
-        expect(proxies.notifySwitchFailed).toHaveBeenCalledWith(boom);
+        expect(proxies.notifySwitchFailed).toHaveBeenCalledWith(boom, false);
+    });
+
+    it('a network change that began after the click drops the switch unsent and leaves the wheel idle', async () => {
+        const api = await import('../api.js');
+        const state = await import('./state.js');
+        const memory = await import('./proxy-memory.js');
+        const notes = await import('./notifications.js');
+        await hoverOpen();
+        /** @type {any} */ (api.switchProxyResult).mockClear();
+        const realQueue = /** @type {any} */ (api.switchProxyResult).getMockImplementation();
+        // The change begins once the click is queued, before its turn.
+        /** @type {any} */ (api.switchProxyResult).mockImplementationOnce((/** @type {any[]} */ ...args) => {
+            /** @type {any} */ (state.appStore.get).mockImplementation((/** @type {string} */ k) => (k === 'isNetworkUpdating' ? true : null));
+            return realQueue(...args);
+        });
+        try {
+            /** @type {HTMLElement} */ (Array.from(dom.list.querySelectorAll('[role="option"]'))
+                .find((o) => o.textContent === 'JP 01')).click();
+            await vi.advanceTimersByTimeAsync(3000);
+            expect(api.switchProxyResult).toHaveBeenCalledTimes(1);
+            expect(memory.saveProxySelection).not.toHaveBeenCalled();
+            expect(notes.showNotification).toHaveBeenCalledWith('consoleSubUpdateBusy', 'info');
+            // The label is back on the node the core runs, not "switching".
+            expect(document.getElementById('current-node-name')?.textContent).toBe('HK 02');
+        } finally {
+            /** @type {any} */ (state.appStore.get).mockImplementation(() => null);
+        }
+    });
+
+    it('does not save its node when the core took a newer switch than its own', async () => {
+        const api = await import('../api.js');
+        const memory = await import('./proxy-memory.js');
+        const running = await import('./running-profile.js');
+        /** @type {any} */ (running.readRunningProfile).mockResolvedValue('sub');
+        // A node card's switch, taken by the core after this one, is the latest.
+        /** @type {any} */ (api.isLatestSwitch).mockReturnValue(false);
+        try {
+            await hoverOpen();
+            /** @type {HTMLElement} */ (Array.from(dom.list.querySelectorAll('[role="option"]'))
+                .find((o) => o.textContent === 'JP 01')).click();
+            await vi.advanceTimersByTimeAsync(3000);
+            expect(api.switchProxyResult).toHaveBeenCalledWith('Proxy', 'JP 01', expect.anything());
+            // Asked about its own switch, by the number the queue gave it.
+            expect(api.isLatestSwitch).toHaveBeenCalledWith('Proxy', 1);
+            expect(memory.saveProxySelection).not.toHaveBeenCalled();
+        } finally {
+            /** @type {any} */ (api.isLatestSwitch).mockReturnValue(true);
+        }
     });
 
     it('is keyboard operable: Enter opens on the current node, arrows move, Escape returns focus', async () => {
