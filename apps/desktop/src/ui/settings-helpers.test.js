@@ -15,7 +15,7 @@ vi.mock('../utils/logger.js', () => ({
 import { invoke } from '../api.js';
 import { invalidateSettingsCache } from './cache.js';
 import { settingsLogger } from '../utils/logger.js';
-import { saveSetting, saveSettings, getSetting } from './settings-helpers.js';
+import { saveSetting, saveSettings, saveSettingsChecked, getSetting, portPatchError } from './settings-helpers.js';
 
 const invokeMock = /** @type {import('vitest').Mock} */ (invoke);
 
@@ -89,6 +89,17 @@ describe('saveSettings', () => {
     });
 });
 
+describe('saveSettingsChecked', () => {
+    it('rejects when the write fails, and later writes still run', async () => {
+        invokeMock.mockRejectedValueOnce(new Error('nope'));
+        await expect(saveSettingsChecked({ x: 1 })).rejects.toThrow('nope');
+        expect(invalidateSettingsCache).not.toHaveBeenCalled();
+        await expect(saveSettingsChecked({ y: 2 })).resolves.toBeUndefined();
+        expect(invokeMock).toHaveBeenLastCalledWith('patch_settings', { patch: { y: 2 } });
+        expect(invalidateSettingsCache).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('getSetting', () => {
     it('returns the stored value', async () => {
         invokeMock.mockResolvedValue({ mode: 'global' });
@@ -112,5 +123,19 @@ describe('getSetting', () => {
     it('propagates backend errors to the caller', async () => {
         invokeMock.mockRejectedValue(new Error('ipc failed'));
         await expect(getSetting('mode', 'rule')).rejects.toThrow('ipc failed');
+    });
+});
+
+describe('portPatchError', () => {
+    it('accepts distinct ports with one proxy port on', () => {
+        expect(portPatchError([7890, 0], 7890, 0)).toBeNull();
+    });
+    it('refuses, in order: out of range, no proxy port, a shared port', () => {
+        expect(portPatchError([70000, 0], 70000, 0)?.key).toBe('portRangeError');
+        expect(portPatchError([Number.NaN, 1080], Number.NaN, 1080)?.key).toBe('portRangeError');
+        expect(portPatchError([0, 0], 0, 0)?.key).toBe('portAllDisabledError');
+        expect(portPatchError([7890, 7890], 7890, 7890)?.key).toBe('portDuplicateError');
+        // A shown Redir/TProxy port counts like the others.
+        expect(portPatchError([7890, 0, 7890], 7890, 0)?.key).toBe('portDuplicateError');
     });
 });

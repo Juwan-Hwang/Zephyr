@@ -16,6 +16,8 @@ import { fetchAndConvertSRRules } from '../rules.js';
 import { SVG_ICONS } from './icons.js';
 import { getActiveConfigContent } from './advanced.js';
 import { validateConfig, isPrismRule } from './prism.js';
+import { configUpdateOutcome } from './config-update.js';
+import { toError } from '../types/guards.js';
 
 // --- State ---
 
@@ -295,6 +297,32 @@ async function importSRRules() {
     }
 }
 
+/**
+ * Whether the core rejects the profile once it carries `rules`. Only when it
+ * accepts the profile as it is: a profile the check cannot pass anyway (a
+ * provider path it cannot reach from the check, say) tells nothing about the
+ * rules, and the check being unavailable or the profile unreadable by js-yaml
+ * skips it.
+ * @param {string} content the profile as saved
+ * @param {any[]} rules
+ * @returns {Promise<boolean>}
+ */
+async function rulesRejected(content, rules) {
+    try {
+        const profileConfig = jsyaml.load(content);
+        const base = profileConfig && typeof profileConfig === 'object' && !Array.isArray(profileConfig) ? profileConfig : {};
+        if (await validateConfig(jsyaml.dump({ ...base, rules }))) return false;
+        if (!await validateConfig(content)) {
+            rulesLogger.warn('Rules validation inconclusive: the profile fails the check without them');
+            return false;
+        }
+        return true;
+    } catch (validationErr) {
+        rulesLogger.warn('Rules validation skipped:', validationErr);
+        return false;
+    }
+}
+
 async function saveRules() {
     const btn = /** @type {HTMLButtonElement} */ (document.getElementById('save-rules-btn'));
     if (!btn) return;
@@ -315,29 +343,53 @@ async function saveRules() {
             showNotification(t.jsYamlSaveError || 'js-yaml is not loaded. Cannot save/load rules.', 'error');
             return;
         }
-        const _saveConfig = jsyaml.load(content);
+        // The list this save sends. Edits made while it is in flight are not
+        // in it, so they stay unsaved (Save stays visible) when it ends.
+        const savingRules = [...currentConfigRules];
 
-        // Validate rules config before applying
-        try {
-            const testConfig = jsyaml.dump({ rules: currentConfigRules });
-            const isValid = await validateConfig(testConfig);
-            if (!isValid) {
-                rulesLogger.warn('Rules validation failed, applying anyway');
-            }
-        } catch (validationErr) {
-            rulesLogger.warn('Rules validation skipped:', validationErr);
+        // Validate rules config before applying: the whole profile with the new
+        // rules, since rules name the profile's own groups and providers (rules
+        // alone would fail on every policy that is a group).
+        // A profile js-yaml cannot read (a tag it does not know, say) only
+        // skips the check: the backend still saves the rules and reports
+        // what it could not save.
+        if (await rulesRejected(content, savingRules)) {
+            // Not saved: the next start of the profile would fail its check.
+            showNotification(/** @type {any} */ (translations)[currentLang].notifRulesInvalid
+                || 'The core rejected the profile with these rules, so they were not saved.', 'error');
+            return;
         }
 
-        const result = await invoke(COMMANDS.UPDATE_CONFIG, { patch: { rules: currentConfigRules } });
-        await closeAllConnections();
+        /** @type {any} */
+        let result;
+        try {
+            result = await invoke(COMMANDS.UPDATE_CONFIG, { patch: { rules: savingRules } });
+        } catch (saveErr) {
+            // Not a parse failure: the backend could not save them (the core
+            // is still starting, say). Show its reason; the rules stay unsaved.
+            rulesLogger.error('Save failed', saveErr);
+            showNotification(toError(saveErr).message || /** @type {any} */ (translations)[currentLang].notifRulesParseFailed, 'error');
+            return;
+        }
+        // The rules are saved; connections that keep their old routing are
+        // only a leftover, not a failed save.
+        await closeAllConnections().catch((closeErr) => rulesLogger.warn('Failed to close connections after saving rules', closeErr));
 
-        originalConfigRules = [...currentConfigRules];
+        const outcome = configUpdateOutcome(/** @type {any} */ (result));
+        // A partial save left the active profile without the rules: keep
+        // them marked unsaved so Save stays available for a retry.
+        if (outcome !== 'partial') {
+            originalConfigRules = savingRules;
+        }
         updateSaveRulesBtnVisibility();
 
-        if (result && (/** @type {any} */ (result)).hot_reload_success) {
+        if (outcome === 'applied') {
             showNotification(/** @type {any} */ (translations)[currentLang].notifRulesSaved, 'success');
+        } else if (outcome === 'partial') {
+            // Live now, but the active profile did not take the rules.
+            showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'warning');
         } else {
-            showNotification(result?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'info');
+            showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'info');
         }
     } catch (err) {
         showNotification(/** @type {any} */ (translations)[currentLang].notifRulesParseFailed, 'error');

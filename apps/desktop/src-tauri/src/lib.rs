@@ -964,6 +964,16 @@ fn patch_settings_blocking(
             };
         }
         patch_field!(theme);
+        // The settings page saves its own switches and arguments as a patch,
+        // so a full snapshot read before another write cannot undo that write.
+        patch_field!(close_to_tray);
+        patch_field!(lightweight_mode);
+        patch_field!(silent_start);
+        patch_field!(auto_update);
+        patch_field!(auto_update_client);
+        patch_field!(autostart);
+        patch_field!(hide_timeout_nodes);
+        patch_field!(custom_args);
         // A non-null mode was already rejected during validation, so only an
         // explicit null (Restore Defaults) reaches here: it is an intentional
         // preference reset, not a live mode change. Live mode changes go
@@ -2377,9 +2387,6 @@ write_frontend_log,
 async fn handle_system_resume(app: &tauri::AppHandle) {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
-    use tokio::io::AsyncReadExt as _;
-    use tokio::io::AsyncWriteExt as _;
-    use tokio::net::TcpStream;
 
     /// Guard: prevents concurrent resume handlers from racing.
     /// Multiple `Resumed` events can fire in rapid succession on some OSes.
@@ -2425,19 +2432,18 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
         }
     }
 
-    // Read the last-known core port + config from MihomoState.
-    let (port, config_path, custom_args, started_at) = {
+    // A stop the user makes from here on (the page, the tray) is kept: the
+    // restart below is skipped once one happened.
+    let stops_before = core_manager::core::core_process::user_stop_count();
+
+    // Read the last-known core port and start time from MihomoState.
+    let (port, started_at) = {
         let state = app.state::<MihomoState>();
         let guard = state
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        (
-            guard.last_port(),
-            guard.last_config_path().map(str::to_owned),
-            guard.last_custom_args().map(<[String]>::to_vec),
-            guard.started_at(),
-        )
+        (guard.last_port(), guard.started_at())
     };
 
     let Some(core_port) = port else {
@@ -2448,36 +2454,11 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
     // Probe: try TCP connect + HTTP request, 3 attempts with 1s delay.
     // Each operation has a 2s timeout to avoid hanging if the OS accepts
     // connections but the process is frozen (common after sleep/wake).
-    let request =
-        format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{core_port}\r\nConnection: close\r\n\r\n");
     let mut healthy = false;
     for i in 0..3 {
-        let connect_result = tokio::time::timeout(
-            Duration::from_secs(2),
-            TcpStream::connect((std::net::Ipv4Addr::new(127, 0, 0, 1), core_port)),
-        )
-        .await;
-
-        if let Ok(Ok(mut stream)) = connect_result {
-            let write_result =
-                tokio::time::timeout(Duration::from_secs(2), stream.write_all(request.as_bytes()))
-                    .await;
-            if matches!(write_result, Ok(Ok(()))) {
-                let mut buf = [0u8; 128];
-                let read_result =
-                    tokio::time::timeout(Duration::from_secs(2), stream.read(&mut buf)).await;
-                if let Ok(Ok(n)) = read_result {
-                    let resp = buf.get(..n).unwrap_or(&[]);
-                    if resp.starts_with(b"HTTP/1.1 200")
-                        || resp.starts_with(b"HTTP/1.1 401")
-                        || resp.starts_with(b"HTTP/1.0 200")
-                        || resp.starts_with(b"HTTP/1.0 401")
-                    {
-                        healthy = true;
-                        break;
-                    }
-                }
-            }
+        if core_manager::core::core_process::core_api_answers(core_port).await {
+            healthy = true;
+            break;
         }
         // Skip the sleep on the final iteration to reduce restart downtime.
         if i < 2 {
@@ -2527,20 +2508,20 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
         "Core unresponsive after resume — restarting"
     );
 
-    // Restart with the last-known config.
-    let config = config_path.unwrap_or_else(|| "config.yaml".to_owned());
-    let args = custom_args.unwrap_or_default();
+    // Restart with the profile and arguments the core was last started
+    // with, read once the start lock is held: a start still running may fail
+    // and leave this core unresponsive, so it waits for that start; the start
+    // time then tells whether it replaced the core, and a replacement that
+    // has since exited is restarted as it was, not as this check found it.
     let state = app.state::<MihomoState>();
-    // On success, start_core_inner already notifies the coordinator with a
+    // On success, start_core_locked already notifies the coordinator with a
     // Manual event, so no duplicate notification is needed here.
-    match Box::pin(core_manager::core::core_process::start_core_with(
+    match Box::pin(core_manager::core::core_process::start_core_after_pending(
         app.clone(),
         state,
-        config,
-        args,
-        None,
         Some(true), // Force restart: the old process may still be alive but unresponsive
         Some(started_at),
+        Some(stops_before),
     ))
     .await
     {
@@ -2556,6 +2537,13 @@ async fn handle_system_resume(app: &tauri::AppHandle) {
             }),
         ),
         Err(e) if e == core_manager::core::core_process::CORE_START_SUPERSEDED => superseded(),
+        Err(e) if e == core_manager::core::core_process::CORE_STOPPED_MEANWHILE => {
+            crate::emit_info!(
+                System,
+                SYS_RESUMED_CORE_HEALTHY,
+                "Core was stopped while it was checked after resume — not restarting it"
+            );
+        }
         Err(e) => crate::emit_error!(
             System,
             SYS_RESUMED_CORE_RESTART,

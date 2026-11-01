@@ -599,6 +599,46 @@ export async function getProxiesMerged(existingData) {
  * @throws {ApiError}
  */
 export async function switchProxyResult(group, name) {
+  proxySwitchStarts += 1;
+  proxySwitchesInFlight += 1;
+  try {
+    return await sendProxySwitch(group, name);
+  } finally {
+    proxySwitchesInFlight -= 1;
+  }
+}
+
+/** Node switches started so far, and the ones not answered yet. */
+let proxySwitchStarts = 0;
+let proxySwitchesInFlight = 0;
+
+/**
+ * Where an automatic switch (failover, a carried node) starts: pass it to
+ * proxySwitchedSince right before sending its own switch.
+ * @returns {number}
+ */
+export function proxySwitchMark() {
+  return proxySwitchStarts;
+}
+
+/**
+ * Whether a node switch started after `mark` was taken, or one is still
+ * waiting for the core's answer: a choice the user sent may then land after
+ * (or not be visible yet to) a check of the live selection, and an automatic
+ * switch sent now could replace it.
+ * @param {number} mark proxySwitchMark() from before
+ * @returns {boolean}
+ */
+export function proxySwitchedSince(mark) {
+  return proxySwitchStarts !== mark || proxySwitchesInFlight > 0;
+}
+
+/**
+ * @param {string} group
+ * @param {string} name
+ * @returns {Promise<{ ok: boolean, reason: unknown, error?: ApiError }>}
+ */
+async function sendProxySwitch(group, name) {
   try {
     // GLOBAL switches go through the backend so the user-change generation is
     // bumped under the restore lock; otherwise an in-flight fallback restore
