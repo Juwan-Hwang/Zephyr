@@ -66,6 +66,11 @@ reason = "glib 0.18.x unsound VariantStrIter; locked by gtk-rs GTK3, fix require
 # ── Rust: unmaintained crates (no fix available) ──
 
 [[IgnoredVulns]]
+id = "RUSTSEC-2026-0543"
+ignoreUntil = 2027-12-31
+reason = "chrono unmaintained; direct dep and via clash-prism-*, no fixed release"
+
+[[IgnoredVulns]]
 id = "RUSTSEC-2025-0141"
 ignoreUntil = 2027-12-31
 reason = "bincode unmaintained; transitive dep, no drop-in replacement"

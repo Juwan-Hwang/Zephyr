@@ -9,8 +9,9 @@
   },
   "scripts": {
     "dev": "pnpm --filter @zephyr/desktop tauri dev",
-    "build": "pnpm --filter @zephyr/desktop build:css && pnpm --filter @zephyr/desktop tauri build",
+    "build": "pnpm --filter @zephyr/desktop tauri build",
     "build:css": "pnpm --filter @zephyr/desktop build:css",
+    "build:frontend": "pnpm --filter @zephyr/desktop build:frontend",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
