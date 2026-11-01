@@ -36,8 +36,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: "1.100.0"
+      # The workspace Cargo.lock at the root is the one every build uses.
       - name: Run cargo audit
-        working-directory: apps/desktop/src-tauri
         run: |
           cargo install cargo-audit --locked
           cargo audit
@@ -347,7 +347,7 @@ jobs:
             echo "\u2705 Capabilities checked"
           fi
 
-          if [ ! -f "apps/desktop/src-tauri/Cargo.lock" ]; then
+          if [ ! -f "Cargo.lock" ]; then
             echo "::warning::Cargo.lock not found. Commit it for reproducible builds."
             WARNINGS=$((WARNINGS + 1))
           else
@@ -409,8 +409,8 @@ jobs:
       - name: TypeScript/JSDoc typecheck
         run: pnpm --filter @zephyr/desktop typecheck
 
-      - name: Build CSS
-        run: pnpm --filter @zephyr/desktop build:css
+      - name: Build frontend assets
+        run: pnpm --filter @zephyr/desktop build:frontend
 
       - name: Build Rust (release)
         # Build workspace members except core-ffi (no tests, needs uniffi-bindgen).

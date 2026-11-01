@@ -15,6 +15,7 @@ vi.mock('../api.js', () => ({
     resetLatencyTestController: vi.fn(),
     switchProxy: vi.fn().mockResolvedValue(true),
     switchProxyResult: vi.fn().mockResolvedValue({ ok: true, reason: null }),
+    isLatestSwitch: vi.fn(() => true),
     getConfig: vi.fn().mockResolvedValue({ mode: 'rule' }),
     closeAllConnections: vi.fn().mockResolvedValue(true),
 }));

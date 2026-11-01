@@ -7,8 +7,59 @@ use std::sync::Mutex;
 // Global TUN mode flag
 pub static TUN_MODE_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-// Global lock to prevent concurrent core start operations
-pub static CORE_STARTING: AtomicBool = AtomicBool::new(false);
+/// Serializes core start operations. Only the start holding the guard can
+/// release it (by dropping it), so a start that waits too long gives up
+/// instead of taking the lock from one that is still running.
+///
+/// Crate-private: the lock is not reentrant, so code holding it must not
+/// call a start entry point: one that waits until the lock is free would
+/// wait forever, a bounded one gives up with "already starting".
+pub(crate) static CORE_START_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// How long a start waits for an earlier one before giving up. Longer than
+/// a config save holds the lock at most (its hot reload may take
+/// `config_manager::CONFIG_RELOAD_TIMEOUT`), so a profile switch made while
+/// a save reloads waits for it instead of reporting another start.
+pub const CORE_START_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// The error a start returns when another start still holds the start lock
+/// after [`CORE_START_LOCK_TIMEOUT`].
+pub const CORE_ALREADY_STARTING: &str = "core is already starting; please wait and try again";
+
+/// Wait up to `timeout` for `lock`; `None` when it is still held then. The
+/// guard is the only way to release the lock, so a start that times out
+/// never runs alongside the one still holding it, and the earlier start
+/// finishing later cannot release a lock it no longer holds.
+pub async fn acquire_start_lock(
+    lock: &tokio::sync::Mutex<()>,
+    timeout: std::time::Duration,
+) -> Option<tokio::sync::MutexGuard<'_, ()>> {
+    tokio::time::timeout(timeout, lock.lock()).await.ok()
+}
+
+/// How long a start waits for an earlier one still holding the start lock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartLockWait {
+    /// Give up after [`CORE_START_LOCK_TIMEOUT`]: a start the user asked for
+    /// and is waiting on, which reports [`CORE_ALREADY_STARTING`] instead.
+    Bounded,
+    /// Wait until the earlier start ends, however long it takes: a background
+    /// restart that still has to run after it (resume recovery, the restart
+    /// onto a core binary the updater just installed).
+    UntilFree,
+}
+
+/// Take `lock` the way `wait` says; `None` only when a [`StartLockWait::Bounded`]
+/// wait ran out.
+pub async fn wait_for_start_lock(
+    lock: &tokio::sync::Mutex<()>,
+    wait: StartLockWait,
+) -> Option<tokio::sync::MutexGuard<'_, ()>> {
+    match wait {
+        StartLockWait::Bounded => acquire_start_lock(lock, CORE_START_LOCK_TIMEOUT).await,
+        StartLockWait::UntilFree => Some(lock.lock().await),
+    }
+}
 
 // Global lock to prevent concurrent TUN toggle operations (from both main UI and tray)
 pub static TUN_TOGGLING: AtomicBool = AtomicBool::new(false);
@@ -255,6 +306,8 @@ pub mod fetch_util;
 pub mod log_writer;
 pub mod network_optim;
 pub mod secure_io;
+#[cfg(test)]
+mod start_lock_test;
 pub mod subscription;
 pub mod subscription_scheduler;
 #[cfg(test)]
@@ -264,8 +317,8 @@ pub mod tun_manager;
 // Re-export all public items from submodules so that `pub use core::*` in core_manager.rs works
 pub use config_manager::{
     delete_config, export_logs, list_configs, open_config_folder, open_log_folder,
-    read_config_file, rename_config, update_config_url, update_subscription_interval,
-    update_subscription_ua, write_config_file,
+    profile_file_is_absent, read_config_file, rename_config, update_config_url,
+    update_subscription_interval, update_subscription_ua, write_config_file,
 };
 pub use core_log::read_core_log;
 pub use core_process::{
@@ -275,7 +328,8 @@ pub use core_process::{
 };
 pub use crypto::{
     decrypt_all_profiles, encrypt_all_profiles, is_machine_key_persisted, read_profile_file,
-    save_profile_file, update_profile_file, write_profile_file,
+    save_profile_file, update_profile_file, update_profile_file_resolved_within,
+    write_profile_file,
 };
 pub use secure_io::write_file_secure;
 pub use subscription::{download_sub, download_sub_batch, fetch_text};
