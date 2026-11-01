@@ -422,6 +422,51 @@ pub fn update_profile_file(
     edit: impl FnOnce(&str) -> Option<String>,
 ) -> Result<bool, String> {
     let transform_guard = crate::lock_profile_transform();
+    edit_profile_file_locked(app, path, edit, transform_guard)
+}
+
+/// [`update_profile_file`], but waiting at most `wait` for the transform
+/// guard (see [`crate::lock_profile_transform_within`]): for a caller that
+/// holds the core start lock meanwhile. Errs, editing nothing, when an
+/// encryption batch still held it then.
+pub fn update_profile_file_within(
+    app: &tauri::AppHandle,
+    path: &Path,
+    wait: std::time::Duration,
+    edit: impl FnOnce(&str) -> Option<String>,
+) -> Result<bool, String> {
+    let transform_guard =
+        crate::lock_profile_transform_within(wait).ok_or_else(|| PROFILE_BUSY.to_owned())?;
+    edit_profile_file_locked(app, path, edit, transform_guard)
+}
+
+/// [`update_profile_file_within`] for the file `resolve` names once the
+/// profile-transform guard is held: a rename, which moves the file and the
+/// recorded path under that guard, cannot leave the edit a stale path.
+/// `resolve` runs under the guard and returns the file to edit, or why
+/// there is none.
+pub fn update_profile_file_resolved_within(
+    app: &tauri::AppHandle,
+    wait: std::time::Duration,
+    resolve: impl FnOnce() -> Result<std::path::PathBuf, String>,
+    edit: impl FnOnce(&str) -> Option<String>,
+) -> Result<bool, String> {
+    let transform_guard =
+        crate::lock_profile_transform_within(wait).ok_or_else(|| PROFILE_BUSY.to_owned())?;
+    let path = resolve()?;
+    edit_profile_file_locked(app, &path, edit, transform_guard)
+}
+
+/// Why [`update_profile_file_within`] edited nothing: the profiles were still
+/// being encrypted or decrypted when its wait ended.
+pub const PROFILE_BUSY: &str = "the profiles are being encrypted or decrypted, try again shortly";
+
+fn edit_profile_file_locked(
+    app: &tauri::AppHandle,
+    path: &Path,
+    edit: impl FnOnce(&str) -> Option<String>,
+    transform_guard: std::sync::MutexGuard<'static, ()>,
+) -> Result<bool, String> {
     let result = read_profile_file(path).and_then(|current| {
         let Some(updated) = edit(&current) else {
             return Ok(false);

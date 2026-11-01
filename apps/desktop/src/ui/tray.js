@@ -4,7 +4,8 @@
  * Extracted from ui.js for modularity.
  */
 
-import { getConfig, getProxies, switchProxy, closeAllConnections, invoke, listen } from '../api.js';
+import { getConfig, getProxies, switchProxyResult, isLatestSwitch, SWITCH_BUSY, closeAllConnections, invoke, listen } from '../api.js';
+import { noNetworkChangeSince } from './network-change.js';
 import { switchToConfig } from './lifecycle.js';
 import { activeProfile, currentProfile } from './active-profile.js';
 import { saveProxySelection } from './proxy-memory.js';
@@ -406,6 +407,9 @@ export async function initTrayEventListeners() {
             return;
         }
 
+        // Taken at the click: a change that begins later, also while this
+        // switch waits behind another one of the group, drops it unsent.
+        const canSend = noNetworkChangeSince();
         try {
             const profile = await trayPickProfile();
             // A change may have taken the guard while the profile was read:
@@ -415,7 +419,15 @@ export async function initTrayEventListeners() {
                 await updateTrayMenu(true).catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
                 return;
             }
-            const success = await switchProxy(group, proxy);
+            const result = await switchProxyResult(group, proxy, { canSend });
+            // Callers of switchProxy expected an HTTP refusal to reject, as before.
+            if (result.error) throw result.error;
+            if (result.reason === SWITCH_BUSY) {
+                showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
+                await updateTrayMenu(true).catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
+                return;
+            }
+            const success = result.ok;
             if (success) {
                 invalidateProxiesCache();
                 invalidateRunConfigCache();
@@ -424,7 +436,8 @@ export async function initTrayEventListeners() {
                 if (group) {
                     appStore.set('uiGroupName', group);
                 }
-                await rememberTraySelection(profile, group, proxy);
+                // A later switch of the group from any surface stands over this one.
+                if (isLatestSwitch(group, result.seq)) await rememberTraySelection(profile, group, proxy);
 
                 await closeAllConnections();
                 // Let syncCoreConfig() handle the display update with leaf node resolution
