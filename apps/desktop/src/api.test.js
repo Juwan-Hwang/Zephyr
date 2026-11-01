@@ -17,6 +17,7 @@ import {
     getConnections,
     closeConnection,
     abortLatencyTests,
+    resetLatencyTestController,
     testProxy,
     enableAutoStart,
     disableAutoStart,
@@ -33,6 +34,20 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  ApiError
 // ═══════════════════════════════════════════════════════════════════════════════
+
+
+/**
+ * Stubs fetch so each request waits until the test answers it.
+ * @returns {Array<{ body: string, answer: (v: any) => void }>} the requests, in the order sent
+ */
+function holdFetches() {
+    /** @type {Array<{ body: string, answer: (v: any) => void }>} */
+    const sent = [];
+    vi.stubGlobal('fetch', vi.fn((url, init) => new Promise((resolve) => {
+        sent.push({ body: `${url} ${init.body}`, answer: resolve });
+    })));
+    return sent;
+}
 
 describe('ApiError', () => {
     it('is an Error instance', () => {
@@ -413,6 +428,382 @@ describe('switchProxy', () => {
         await expect(switchProxy('Proxy', 'Bad')).rejects.toThrow();
         vi.unstubAllGlobals();
     });
+
+    it('counts a switch as started and in flight until it is answered', async () => {
+        const api = await import('./api.js');
+        /** @type {(v: any) => void} */
+        let answer = () => {};
+        vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { answer = resolve; })));
+        const mark = api.proxySwitchMark();
+        expect(api.proxySwitchedSince(mark)).toBe(false);
+        const pending = api.switchProxyResult('Proxy', 'node-a.example');
+        expect(api.proxySwitchedSince(mark)).toBe(true);
+        await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+        answer({ ok: true });
+        expect(await pending).toMatchObject({ ok: true, reason: null });
+        // Answered: only the newer start counts now.
+        expect(api.proxySwitchedSince(mark)).toBe(true);
+        expect(api.proxySwitchedSince(api.proxySwitchMark())).toBe(false);
+        // Not when it was the caller's own (answered) switch.
+        expect(api.proxySwitchedSince(mark, 1)).toBe(false);
+        vi.unstubAllGlobals();
+    });
+
+    it('a refused switch does not count when only landed ones matter', async () => {
+        const api = await import('./api.js');
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 400, text: async () => 'no' })));
+        const mark = api.proxySwitchMark();
+        expect((await api.switchProxyResult('Proxy', 'gone.example')).ok).toBe(false);
+        expect(api.proxySwitchedSince(mark)).toBe(true);
+        expect(api.proxySwitchedSince(mark, 0, { landedOnly: true })).toBe(false);
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+        expect((await api.switchProxyResult('Proxy', 'node.example')).ok).toBe(true);
+        expect(api.proxySwitchedSince(mark, 0, { landedOnly: true })).toBe(true);
+        vi.unstubAllGlobals();
+    });
+
+    it('reports a direct switch that timed out as possibly applied, not as an error', async () => {
+        const api = await import('./api.js');
+        vi.stubGlobal('fetch', vi.fn(async () => { throw new DOMException('Aborted', 'AbortError'); }));
+        const result = await api.switchProxyResult('Proxy', 'node.example');
+        expect(result.ok).toBe(false);
+        expect(result.maybeApplied).toBe(true);
+        expect(result.error).toBeUndefined();
+        // A connection that failed outright still rejects: nothing went out.
+        vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+        await expect(api.switchProxyResult('Proxy', 'node.example')).rejects.toBeTruthy();
+        vi.unstubAllGlobals();
+    });
+
+    it('counts a sent switch that got no answer as possibly landed', async () => {
+        const api = await import('./api.js');
+        // The core may have applied it before the connection dropped.
+        vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('network down'); }));
+        const mark = api.proxySwitchMark();
+        await expect(api.switchProxyResult('Proxy', 'node.example')).rejects.toBeTruthy();
+        expect(api.proxySwitchedSince(mark, 0, { landedOnly: true })).toBe(true);
+        // One whose prepare threw never went out: it changed nothing.
+        const mark2 = api.proxySwitchMark();
+        await expect(api.switchProxyResult('Proxy', 'node.example', {
+            prepare: async () => { throw new Error('no profile'); },
+        })).rejects.toBeTruthy();
+        expect(api.proxySwitchedSince(mark2, 0, { landedOnly: true })).toBe(false);
+        vi.unstubAllGlobals();
+    });
+
+    it('sends switches of one group in the order they were made', async () => {
+        const api = await import('./api.js');
+        const sent = holdFetches();
+        const first = api.switchProxyResult('Proxy', 'node-a.example');
+        const second = api.switchProxyResult('Proxy', 'node-b.example');
+        const other = api.switchProxyResult('Other', 'node-c.example');
+        await vi.waitFor(() => expect(sent).toHaveLength(2));
+        // The second switch of Proxy waits for the first; Other does not.
+        expect(sent.map((s) => s.body)).toEqual([
+            expect.stringContaining('/proxies/Proxy {"name":"node-a.example"}'),
+            expect.stringContaining('/proxies/Other {"name":"node-c.example"}'),
+        ]);
+        sent[0].answer({ ok: false, status: 500, statusText: 'Error', text: async () => '' });
+        await vi.waitFor(() => expect(sent).toHaveLength(3));
+        expect(sent[2].body).toContain('/proxies/Proxy {"name":"node-b.example"}');
+        sent[1].answer({ ok: true });
+        sent[2].answer({ ok: true });
+        expect((await first).ok).toBe(false);
+        expect((await second).ok).toBe(true);
+        expect((await other).ok).toBe(true);
+    });
+
+    it('drops a switch still waiting when the core restarts', async () => {
+        vi.stubGlobal('__TAURI_INTERNALS__', {
+            invoke: vi.fn(async () => ({ port: 9091, secret: 's', active_config: 'b.yaml' })),
+            transformCallback: vi.fn(),
+        });
+        vi.resetModules();
+        const api = await import('./api.js');
+        const sent = holdFetches();
+        const first = api.switchProxyResult('Proxy', 'node-a.example');
+        const waiting = api.switchProxyResult('Proxy', 'node-b.example');
+        await vi.waitFor(() => expect(sent).toHaveLength(1));
+        await api.restartCore('b.yaml');
+        sent[0].answer({ ok: true });
+        expect((await first).ok).toBe(true);
+        expect(await waiting).toMatchObject({ ok: false, reason: api.SWITCH_BUSY });
+        expect(sent).toHaveLength(1);
+        vi.unstubAllGlobals();
+    });
+
+    it('drops a switch whose turn comes while the core restarts', async () => {
+        /** @type {(v: any) => void} */
+        let finishStart = () => {};
+        vi.stubGlobal('__TAURI_INTERNALS__', {
+            invoke: vi.fn(() => new Promise((resolve) => { finishStart = resolve; })),
+            transformCallback: vi.fn(),
+        });
+        vi.resetModules();
+        const api = await import('./api.js');
+        const sent = holdFetches();
+        const first = api.switchProxyResult('Proxy', 'node-a.example');
+        const waiting = api.switchProxyResult('Proxy', 'node-b.example');
+        await vi.waitFor(() => expect(sent).toHaveLength(1));
+        const restart = api.restartCore('b.yaml');
+        // Its turn comes before the restart has finished.
+        sent[0].answer({ ok: true });
+        expect((await first).ok).toBe(true);
+        expect(await waiting).toMatchObject({ ok: false, reason: api.SWITCH_BUSY });
+        expect(sent).toHaveLength(1);
+        finishStart({ port: 9091, secret: 's', active_config: 'b.yaml' });
+        await restart;
+        vi.unstubAllGlobals();
+    });
+
+    it('prepares each switch in its turn and drops one the caller no longer lets go out', async () => {
+        vi.resetModules();
+        const api = await import('./api.js');
+        /** @type {Array<(v: any) => void>} */
+        const answers = [];
+        vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { answers.push(resolve); })));
+        /** @type {string[]} */
+        const order = [];
+        /** @type {(v: string) => void} */
+        let finishRead = () => {};
+        // The first click's read is slow: the second click still goes out after it.
+        const first = api.switchProxyResult('Proxy', 'node-a.example', {
+            prepare: () => new Promise((resolve) => { finishRead = (v) => { order.push('read a'); resolve(v); }; }),
+        });
+        let busy = false;
+        const second = api.switchProxyResult('Proxy', 'node-b.example', {
+            prepare: async () => { order.push('read b'); return 'b.yaml'; },
+            canSend: () => !busy,
+        });
+        await Promise.resolve();
+        expect(fetch).not.toHaveBeenCalled();
+        finishRead('a.yaml');
+        await vi.waitFor(() => expect(answers).toHaveLength(1));
+        busy = true;
+        answers[0]({ ok: true });
+        expect(await first).toMatchObject({ ok: true, reason: null, prepared: 'a.yaml' });
+        expect(await second).toMatchObject({ ok: false, reason: api.SWITCH_BUSY, prepared: 'b.yaml' });
+        expect(order).toEqual(['read a', 'read b']);
+        expect(fetch).toHaveBeenCalledTimes(1);
+        vi.unstubAllGlobals();
+    });
+
+    it('lets a canSend check leave out the switch it is made for, but not another one', async () => {
+        vi.resetModules();
+        const api = await import('./api.js');
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+        const mark = api.proxySwitchMark();
+        // Its own switch alone is running: not superseded.
+        const own = await api.switchProxyResult('Proxy', 'node-a.example', {
+            canSend: () => !api.proxySwitchedSince(mark, 1, { ownInFlight: 1 }),
+        });
+        expect(own).toMatchObject({ ok: true });
+        // Without ownInFlight its own running switch counts as a newer one.
+        const mark2 = api.proxySwitchMark();
+        const blind = await api.switchProxyResult('Proxy', 'node-a.example', {
+            canSend: () => !api.proxySwitchedSince(mark2, 1),
+        });
+        expect(blind).toMatchObject({ ok: false, reason: api.SWITCH_BUSY });
+        // Another switch started meanwhile still counts.
+        const mark3 = api.proxySwitchMark();
+        const other = api.switchProxyResult('Other', 'node-x.example');
+        const late = await api.switchProxyResult('Proxy', 'node-b.example', {
+            canSend: () => !api.proxySwitchedSince(mark3, 1, { ownInFlight: 1 }),
+        });
+        await other;
+        expect(late).toMatchObject({ ok: false, reason: api.SWITCH_BUSY });
+        vi.unstubAllGlobals();
+    });
+
+    it('counts a switch unanswered when the mark was taken as one made after it', async () => {
+        vi.resetModules();
+        const api = await import('./api.js');
+        /** @type {Array<(v: any) => void>} */
+        const answers = [];
+        vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { answers.push(resolve); })));
+        const pending = api.switchProxyResult('Proxy', 'node-a.example');
+        await vi.waitFor(() => expect(answers).toHaveLength(1));
+        const mark = api.proxySwitchMark();
+        answers[0]({ ok: true });
+        await pending;
+        // Answered after the mark: its caller may not have recorded its node yet.
+        expect(api.proxySwitchedSince(mark, 0, { landedOnly: true })).toBe(true);
+        expect(api.proxySwitchedSince(api.proxySwitchMark())).toBe(false);
+        vi.unstubAllGlobals();
+    });
+
+    it('drops a switch whose turn comes while restartCore runs', async () => {
+        /** @type {(v: any) => void} */
+        let finishStart = () => {};
+        vi.stubGlobal('__TAURI_INTERNALS__', {
+            invoke: vi.fn(() => new Promise((resolve) => { finishStart = resolve; })),
+            transformCallback: vi.fn(),
+        });
+        vi.resetModules();
+        const api = await import('./api.js');
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+        const restart = api.restartCore('b.yaml');
+        // Made while the restart runs, with no switch ahead of it.
+        expect(await api.switchProxyResult('Proxy', 'node-a.example')).toMatchObject({ ok: false, reason: api.SWITCH_BUSY });
+        expect(fetch).not.toHaveBeenCalled();
+        finishStart({ port: 9091, secret: 's', active_config: 'b.yaml' });
+        await restart;
+        vi.unstubAllGlobals();
+    });
+
+    it('waits for running switches before a profile switch reads the node', async () => {
+        vi.resetModules();
+        const api = await import('./api.js');
+        /** @type {Array<(v: any) => void>} */
+        const answers = [];
+        vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { answers.push(resolve); })));
+        expect(await api.settleProxySwitches(10)).toBe(true);
+        const first = api.switchProxyResult('Proxy', 'node-a.example');
+        const second = api.switchProxyResult('Proxy', 'node-b.example');
+        await vi.waitFor(() => expect(answers).toHaveLength(1));
+        // Still running at the timeout.
+        expect(await api.settleProxySwitches(10)).toBe(false);
+        const settled = api.settleProxySwitches(5000);
+        answers[0]({ ok: true });
+        await vi.waitFor(() => expect(answers).toHaveLength(2));
+        answers[1]({ ok: true });
+        expect(await settled).toBe(true);
+        await Promise.all([first, second]);
+        // Nothing in flight once settled.
+        expect(api.proxySwitchedSince(api.proxySwitchMark())).toBe(false);
+        vi.unstubAllGlobals();
+    });
+
+    it('keeps an accepted switch the newest when a later one waiting for its answer fails', async () => {
+        vi.resetModules();
+        const api = await import('./api.js');
+        /** @type {Array<(v: any) => void>} */
+        const answers = [];
+        vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { answers.push(resolve); })));
+        const first = api.switchProxyResult('Proxy', 'node-a.example');
+        const second = api.switchProxyResult('Proxy', 'node-b.example');
+        await vi.waitFor(() => expect(answers).toHaveLength(1));
+        answers[0]({ ok: true });
+        const a = await first;
+        // The later one is still waiting: the accepted one stands for now.
+        expect(api.isLatestSwitch('Proxy', a.seq)).toBe(true);
+        await vi.waitFor(() => expect(answers).toHaveLength(2));
+        answers[1]({ ok: false, status: 400, text: async () => 'no' });
+        const b = await second;
+        expect(b.ok).toBe(false);
+        expect(api.isLatestSwitch('Proxy', a.seq)).toBe(true);
+        // Once the core is replaced, it runs its own selection.
+        api.noteCoreReplaced();
+        expect(api.isLatestSwitch('Proxy', a.seq)).toBe(false);
+        vi.unstubAllGlobals();
+    });
+
+    it('an accepted switch is no longer the newest once a later one went out and got no answer', async () => {
+        vi.resetModules();
+        const api = await import('./api.js');
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+        const a = await api.switchProxyResult('Proxy', 'node-a.example');
+        // B reaches the core, but the connection drops before its answer:
+        // the core may run it.
+        vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('connection reset'); }));
+        await expect(api.switchProxyResult('Proxy', 'node-b.example')).rejects.toBeTruthy();
+        expect(api.isLatestSwitch('Proxy', a.seq)).toBe(false);
+        vi.unstubAllGlobals();
+    });
+
+    it('a GLOBAL switch the core did not confirm counts as possibly landed, a refused one does not', async () => {
+        const invokeSpy = vi.fn(async () => undefined);
+        vi.stubGlobal('__TAURI_INTERNALS__', { invoke: invokeSpy, transformCallback: vi.fn() });
+        vi.resetModules();
+        const api = await import('./api.js');
+        const a = await api.switchProxyResult('GLOBAL', 'node-a.example');
+        expect(a.ok).toBe(true);
+        // Refused by the backend: the core did not switch.
+        invokeSpy.mockRejectedValueOnce("GLOBAL proxy group no longer contains node 'node-b.example'");
+        const b = await api.switchProxyResult('GLOBAL', 'node-b.example');
+        expect(b.ok).toBe(false);
+        expect(api.isLatestSwitch('GLOBAL', a.seq)).toBe(true);
+        // Sent but not confirmed (a timeout): the core may run it.
+        // Not sent (no core, or an error answer): it changed nothing.
+        invokeSpy.mockRejectedValueOnce('The core did not switch the GLOBAL proxy group');
+        const n = await api.switchProxyResult('GLOBAL', 'node-n.example');
+        expect(n.ok).toBe(false);
+        expect(api.isLatestSwitch('GLOBAL', a.seq)).toBe(true);
+        invokeSpy.mockRejectedValueOnce('Failed to switch GLOBAL proxy group (no answer from the core)');
+        const c = await api.switchProxyResult('GLOBAL', 'node-c.example');
+        expect(c.ok).toBe(false);
+        expect(api.isLatestSwitch('GLOBAL', a.seq)).toBe(false);
+        vi.unstubAllGlobals();
+    });
+
+    it('an older accepted switch stays outdated after many refused switches of the group', async () => {
+        vi.resetModules();
+        const api = await import('./api.js');
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+        const a = await api.switchProxyResult('Proxy', 'node-a.example');
+        const b = await api.switchProxyResult('Proxy', 'node-b.example');
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 400, text: async () => 'no' })));
+        for (let i = 0; i < 300; i += 1) await api.switchProxyResult('Proxy', `node-${i}.example`);
+        expect(api.isLatestSwitch('Proxy', a.seq)).toBe(false);
+        expect(api.isLatestSwitch('Proxy', b.seq)).toBe(true);
+        vi.unstubAllGlobals();
+    });
+
+    it('a later accepted switch stands over an earlier one', async () => {
+        vi.resetModules();
+        const api = await import('./api.js');
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+        const a = await api.switchProxyResult('Proxy', 'node-a.example');
+        const b = await api.switchProxyResult('Proxy', 'node-b.example');
+        expect(api.isLatestSwitch('Proxy', a.seq)).toBe(false);
+        expect(api.isLatestSwitch('Proxy', b.seq)).toBe(true);
+        vi.unstubAllGlobals();
+    });
+
+    it('a later accepted switch in another group stands over an earlier one (one saved selection per profile)', async () => {
+        vi.resetModules();
+        const api = await import('./api.js');
+        /** @type {Array<(v: any) => void>} */
+        const answers = [];
+        vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { answers.push(resolve); })));
+        const tokyo = api.switchProxyResult('Proxy', 'node-tokyo.example');
+        const osaka = api.switchProxyResult('Auto', 'node-osaka.example');
+        await vi.waitFor(() => expect(answers).toHaveLength(2));
+        // The later click (another group) is answered first.
+        answers[1]({ ok: true });
+        const b = await osaka;
+        answers[0]({ ok: true });
+        const a = await tokyo;
+        expect(api.isLatestSwitch('Proxy', a.seq)).toBe(false);
+        expect(api.isLatestSwitch('Auto', b.seq)).toBe(true);
+        // Accepted by a core since replaced: it no longer stands over anything.
+        api.noteCoreReplaced();
+        const c = await (async () => {
+            const next = api.switchProxyResult('Proxy', 'node-kyoto.example');
+            await vi.waitFor(() => expect(answers).toHaveLength(3));
+            answers[2]({ ok: true });
+            return next;
+        })();
+        expect(api.isLatestSwitch('Proxy', c.seq)).toBe(true);
+        vi.unstubAllGlobals();
+    });
+
+    it('drops a waiting switch when the backend replaced the core', async () => {
+        vi.resetModules();
+        const api = await import('./api.js');
+        /** @type {Array<(v: any) => void>} */
+        const answers = [];
+        vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { answers.push(resolve); })));
+        const first = api.switchProxyResult('Proxy', 'node-a.example');
+        const waiting = api.switchProxyResult('Proxy', 'node-b.example');
+        await vi.waitFor(() => expect(answers).toHaveLength(1));
+        api.noteCoreReplaced();
+        answers[0]({ ok: true });
+        expect((await first).ok).toBe(true);
+        expect(await waiting).toMatchObject({ ok: false, reason: api.SWITCH_BUSY });
+        expect(fetch).toHaveBeenCalledTimes(1);
+        vi.unstubAllGlobals();
+    });
 });
 
 describe('getConfig', () => {
@@ -496,6 +887,46 @@ describe('getConnections', () => {
         expect(result).toEqual(mockData);
         vi.unstubAllGlobals();
     });
+
+    it('gives up on a body that never arrives and aborts its request', async () => {
+        vi.useFakeTimers();
+        try {
+            /** @type {AbortSignal|undefined} */
+            let signal;
+            vi.stubGlobal('fetch', vi.fn((_url, init) => {
+                signal = init.signal;
+                // A real streaming body that stalls mid-JSON: res.json() locks it.
+                // Aborting the request errors the body, as fetch does.
+                const stream = new ReadableStream({
+                    start(c) {
+                        c.enqueue(new TextEncoder().encode('{"connections":['));
+                        signal?.addEventListener('abort', () => c.error(new DOMException('Aborted', 'AbortError')));
+                    },
+                });
+                return Promise.resolve(new Response(stream, { status: 200 }));
+            }));
+            const pending = getConnections();
+            const failed = expect(pending).rejects.toBeInstanceOf(ApiError);
+            await vi.advanceTimersByTimeAsync(10_000);
+            await failed;
+            expect(signal?.aborted).toBe(true);
+        } finally {
+            vi.useRealTimers();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('leaves a request whose body arrived alone', async () => {
+        /** @type {AbortSignal|undefined} */
+        let signal;
+        vi.stubGlobal('fetch', vi.fn((_url, init) => {
+            signal = init.signal;
+            return Promise.resolve(new Response('{"connections":[]}', { status: 200 }));
+        }));
+        await expect(getConnections()).resolves.toEqual({ connections: [] });
+        expect(signal?.aborted).toBe(false);
+        vi.unstubAllGlobals();
+    });
 });
 
 describe('closeConnection', () => {
@@ -569,6 +1000,49 @@ describe('testProxy', () => {
 
         const result = await testProxy('BadProxy');
         expect(result).toBe(-1);
+        vi.unstubAllGlobals();
+    });
+
+    /** A delay answer whose body stalls mid-JSON until its request is aborted. */
+    function stallingDelayBody() {
+        /** @type {{ signal?: AbortSignal }} */
+        const seen = {};
+        vi.stubGlobal('fetch', vi.fn((_url, init) => {
+            seen.signal = init.signal;
+            const stream = new ReadableStream({
+                start(c) {
+                    c.enqueue(new TextEncoder().encode('{"delay":'));
+                    init.signal?.addEventListener('abort', () => c.error(new DOMException('Aborted', 'AbortError')));
+                },
+            });
+            return Promise.resolve(new Response(stream, { status: 200 }));
+        }));
+        return seen;
+    }
+
+    it('ends a test whose body stalls when its timeout passes', async () => {
+        vi.useFakeTimers();
+        try {
+            const seen = stallingDelayBody();
+            const pending = testProxy('Stalled', 1000);
+            await vi.advanceTimersByTimeAsync(2_000);
+            await expect(pending).resolves.toBe(-1);
+            expect(seen.signal?.aborted).toBe(true);
+        } finally {
+            vi.useRealTimers();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('ends a test whose body stalls when the tests are stopped', async () => {
+        const seen = stallingDelayBody();
+        resetLatencyTestController();
+        const pending = testProxy('Stalled', 60_000);
+        await vi.waitFor(() => expect(seen.signal).toBeDefined());
+        await new Promise((r) => setTimeout(r, 0));
+        abortLatencyTests();
+        await expect(pending).resolves.toBe(-1);
+        expect(seen.signal?.aborted).toBe(true);
         vi.unstubAllGlobals();
     });
 });
