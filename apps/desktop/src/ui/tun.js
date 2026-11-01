@@ -15,6 +15,14 @@ import { postRestartRecovery, restartedProfile } from './lifecycle.js';
 import { currentProfile } from './active-profile.js';
 import { renderTunStatus } from './tun-status.js';
 
+/**
+ * The backend's answer when the user stopped the core before a root restart
+ * ran (`core_process::CORE_STOPPED_BEFORE_START`).
+ */
+const CORE_STOPPED_BEFORE_START = 'core was stopped by the user before the start ran';
+/** The backend's answer when the user stopped the core during the root restart (`CORE_STOPPED_MEANWHILE`). */
+const CORE_STOPPED_MEANWHILE = 'core was stopped by the user meanwhile';
+
 // Records the TUN preference only, for callers that
 // have already applied TUN to the running core themselves — `patch_settings`
 // now rejects a non-null `tun_enabled`, which is the owner-path split this
@@ -241,9 +249,15 @@ export function initTunToggle() {
                             setWsSecret(result);
                         }
                     } catch (authErr) {
-                        tunLogger.error('authErr', authErr);
+                        // A stop of the user's during the restart is no failure.
+                        if (authErr !== CORE_STOPPED_BEFORE_START && authErr !== CORE_STOPPED_MEANWHILE) {
+                            tunLogger.error('authErr', authErr);
+                        }
                         if (authErr === 'canceled') {
                             showNotification(t.tunAuthCanceled || 'Authorization canceled', 'error');
+                        } else if (authErr === CORE_STOPPED_BEFORE_START || authErr === CORE_STOPPED_MEANWHILE) {
+                            // The user stopped the core while this restart
+                            // waited: nothing was started, nothing failed.
                         } else if (typeof authErr === 'string' && authErr.startsWith('root_start_failed')) {
                             // The backend prefixes the marker and appends the
                             // detail, so this must be a prefix match: the script
