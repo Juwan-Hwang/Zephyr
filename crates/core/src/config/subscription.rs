@@ -1310,6 +1310,11 @@ fn classify_sub_error_message(e: &str) -> u16 {
 ///
 /// This prevents leaking subscription tokens to logs and frontend.
 /// Migrated from `src-tauri/src/core/subscription.rs`.
+///
+/// Optimization:
+/// - Streams masked output directly into pre-allocated `result` buffer via `format_masked_url_to`.
+/// - Avoids `to_owned()` intermediate heap allocations for URL strings and parts.
+/// - Parses the URL slice directly instead of allocating temporary `String`s.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 #[must_use]
 pub fn redact_url_in_string(s: String) -> String {
@@ -1353,8 +1358,7 @@ pub fn redact_url_in_string(s: String) -> String {
         }
         let url_str = &s[start..url_end];
         if url::Url::parse(url_str).is_ok() {
-            let redacted = crate::config::merge::mask_url(url_str.to_owned());
-            result.push_str(&redacted);
+            crate::config::merge::format_masked_url_to(url_str, &mut result);
             start_idx = url_end;
         } else {
             let is_https = s[start..].starts_with("https://");
