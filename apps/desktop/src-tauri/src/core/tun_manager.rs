@@ -244,6 +244,11 @@ pub const ROOT_START_FAILED_MARKER: &str = "root_start_failed";
 /// unrelated start failure never changes the saved TUN preference.
 pub const TUN_START_FAILED_MARKER: &str = "tun_start_failed";
 
+/// Part of a failed start's error when the root TUN core that start launched
+/// is still running: its cleanup failed, so it was adopted and is tracked. A
+/// core update does not put the old binary back under that running core.
+pub const ROOT_CORE_STILL_RUNNING: &str = "a root TUN core is still running and is now tracked";
+
 /// Typed error representing failure modes during root TUN core startup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RootStartError {
@@ -336,6 +341,55 @@ fn root_script_failure(
         RootStartError::ExecutionFailed("osascript failed".to_owned())
     } else {
         RootStartError::ExecutionFailed(format!("osascript failed: {err}"))
+    }
+}
+
+/// The authorization script of a root start while it may still wait for the
+/// administrator password: the app quitting meanwhile ends it, so a password
+/// entered after the quit cannot start a root core nothing manages.
+#[cfg(target_os = "macos")]
+static PENDING_ROOT_SCRIPT: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
+
+/// Records the pending authorization script; dropping it forgets the script.
+#[cfg(target_os = "macos")]
+struct PendingRootScript;
+
+#[cfg(target_os = "macos")]
+impl PendingRootScript {
+    #[must_use]
+    fn record(pid: u32) -> Self {
+        *PENDING_ROOT_SCRIPT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pid);
+        Self
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for PendingRootScript {
+    fn drop(&mut self) {
+        *PENDING_ROOT_SCRIPT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+}
+
+/// At quit: ends a root start's authorization script that still waits, so
+/// it cannot start a root core after the app is gone. Called before the
+/// exit cleanup of root cores, which then stops one the script already
+/// started.
+#[cfg(target_os = "macos")]
+pub fn cancel_pending_root_start() {
+    let pid = PENDING_ROOT_SCRIPT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    if let Some(pid) = pid.and_then(|p| i32::try_from(p).ok()) {
+        // SAFETY: kill(2) takes plain integers and touches no memory; the pid
+        // is the app's own script child, recorded only until it is reaped.
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
     }
 }
 
@@ -476,6 +530,8 @@ pub async fn restart_core_as_root(
             )));
         }
     };
+    // Until the script is seen finished, a quit cancels it.
+    let mut pending_script = Some(PendingRootScript::record(child.id()));
 
     // Wait a bit for osascript to potentially show errors (like user cancel)
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
@@ -486,6 +542,7 @@ pub async fn restart_core_as_root(
             if !status.success() {
                 return Err(root_script_failure(&mut child, &config_file, &content));
             }
+            drop(pending_script.take());
         }
         Ok(None) => {
             // Still running, which is expected - password dialog is showing
@@ -520,6 +577,9 @@ pub async fn restart_core_as_root(
                         return Err(root_script_failure(&mut child, &config_file, &content));
                     }
                     script_finished = true;
+                    // Reaped: its pid may be reused, so a quit no longer
+                    // signals it.
+                    drop(pending_script.take());
                     // This run re-verified every legacy candidate as root, just
                     // like the standalone kill does. Recording them matters
                     // because this script is not only a kill: a foreign root

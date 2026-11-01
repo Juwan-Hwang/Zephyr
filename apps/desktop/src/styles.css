@@ -2669,6 +2669,8 @@ button[data-home-mode] {
 .conn-search-clear:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
 .conn-search-clear.hidden { display: none; }
 .conn-summary { display: inline-flex; align-items: center; gap: 12px; padding-inline-end: 4px; font-size: 12px; color: var(--text-secondary); }
+/* `hidden` swaps the summary and the load error: the inline-flex above would override it. */
+.conn-summary[hidden] { display: none; }
 
 .conn-summary-count { font-weight: 700; color: var(--text-primary); }
 .conn-summary-num { font-weight: 600; }

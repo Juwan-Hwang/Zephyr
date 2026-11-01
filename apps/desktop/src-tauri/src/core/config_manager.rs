@@ -739,6 +739,53 @@ fn remove_deleted_metadata(paths: &super::AppPaths, names: &[String]) -> Result<
     save_metadata(paths, &metadata)
 }
 
+/// Drop the node choice and primary group kept for a deleted profile: a
+/// profile created later under the same name is a different file, and
+/// must not start on the deleted one's node. Best effort, like the record
+/// above: the file is already gone. As for the metadata, a differently
+/// spelled key (case, Unicode form) goes too when its own file is absent.
+/// A selection saved after this finds the file absent and is not kept
+/// (see [`profile_file_is_absent`]).
+fn forget_deleted_profile_choices(app: &AppHandle, paths: &super::AppPaths, names: &[String]) {
+    let lowers: Vec<String> = names.iter().map(|n| normalized_lower(n)).collect();
+    let dir = paths.profiles_dir.clone();
+    let gone = |key: &str| {
+        lowers.iter().any(|lower| normalized_lower(key) == *lower)
+            && (names.iter().any(|n| n == key) || path_is_absent(&dir.join(key)))
+    };
+    let kept = {
+        let state = app.state::<SettingsState>();
+        let guard = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.last_proxy_selection.keys().any(|k| gone(k))
+            || guard.primary_group_preference.keys().any(|k| gone(k))
+    };
+    if !kept {
+        return;
+    }
+    if let Err(e) = crate::commit_settings(app, |s| {
+        s.last_proxy_selection.retain(|k, _| !gone(k));
+        s.primary_group_preference.retain(|k, _| !gone(k));
+    }) {
+        crate::emit_warn!(
+            Config,
+            CONFIG_PERSIST_FAILED,
+            "Failed to drop the node choice of a deleted profile: {e}"
+        );
+    }
+}
+
+/// Whether the profile `name` is confirmed absent from the profiles
+/// directory: a node choice or primary group is not saved for it then, so
+/// a save that lands after the profile was deleted does not bring its
+/// choice back for a later profile of the same name.
+#[must_use]
+pub fn profile_file_is_absent(paths: &super::AppPaths, name: &str) -> bool {
+    path_is_absent(&paths.profiles_dir.join(name))
+}
+
 /// Delete one profile file and its metadata entries as a single
 /// transform-guarded transaction on the blocking pool.
 ///
@@ -798,6 +845,9 @@ async fn delete_profile_file_transaction(
                     "Failed to record deleted profile {deleted_name} as migrated: the next migration may copy it back once"
                 );
             }
+        }
+        if remove_result.is_ok() {
+            forget_deleted_profile_choices(&app, &paths, &metadata_names);
         }
         cleanup_dangling_last_config(&app, &paths, &deleted_name);
         remove_result.and(metadata_result)
