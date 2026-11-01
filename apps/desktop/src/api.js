@@ -71,12 +71,15 @@ const DEFAULT_TIMEOUT = 10_000;
  * - 网络异常 / 超时同样抛出 {@link ApiError}
  *
  * @param {string} endpoint  - 相对于 BASE_URL 的路径，如 `/proxies`
- * @param {RequestInit & { timeout?: number }} [init]
+ * @param {RequestInit & { timeout?: number, abortAfterHeaders?: boolean }} [init]
+ *   `abortAfterHeaders`: the caller's `signal` keeps aborting the request
+ *   after the response is returned (while its body is read); otherwise it is
+ *   detached.
  * @returns {Promise<Response>}
  * @throws {ApiError}
  */
 async function apiFetch(endpoint, init = {}) {
-  const { timeout = DEFAULT_TIMEOUT, signal: externalSignal, headers, ...rest } = init;
+  const { timeout = DEFAULT_TIMEOUT, signal: externalSignal, abortAfterHeaders = false, headers, ...rest } = init;
   const safeTimeout = Math.max(1000, Math.min(timeout, 300000));
 
   const controller = new AbortController();
@@ -89,6 +92,7 @@ async function apiFetch(endpoint, init = {}) {
   }
   const onExternalAbort = () => controller.abort();
   externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+  const detachExternal = () => externalSignal?.removeEventListener('abort', onExternalAbort);
 
   try {
     const res = await fetch(`${BASE_URL}${endpoint}`, {
@@ -115,8 +119,10 @@ async function apiFetch(endpoint, init = {}) {
       apiLogger.info('core connection restored');
     }
 
+    if (!abortAfterHeaders) detachExternal();
     return res;
   } catch (err) {
+    detachExternal();
     if (err instanceof ApiError) throw err;
 
     const error = /** @type {Error} */ (err);
@@ -142,7 +148,6 @@ async function apiFetch(endpoint, init = {}) {
     );
   } finally {
     clearTimeout(timer);
-    externalSignal?.removeEventListener('abort', onExternalAbort);
   }
 }
 
@@ -606,12 +611,319 @@ export async function getProxiesMerged(existingData) {
  * 切换代理组中的选中节点，并带回这一次被拒绝的原因
  * @param {string} group - 代理组名称
  * @param {string} name  - 目标节点名称
- * @returns {Promise<{ ok: boolean, reason: unknown, error?: ApiError }>} reason is
- *   the backend's rejection for this request (null when it succeeded or gave none);
- *   error is the HTTP refusal itself when the core answered non-2xx
+ * @param {{ prepare?: () => Promise<any>, canSend?: () => boolean }} [options]
+ *   prepare: run in the switch's turn, right before it is sent (a click
+ *   reads the profile it files the node under there, so its read cannot let
+ *   a later click go out first); its value comes back as `prepared`.
+ *   canSend: checked right before sending; false drops the switch unsent
+ *   with reason SWITCH_BUSY (a profile, mode or TUN change began), as is
+ *   one whose turn comes after a core restart began.
+ * @returns {Promise<{ ok: boolean, reason: unknown, error?: ApiError, maybeApplied?: boolean, prepared?: any, seq?: number }>}
+ *   reason is the backend's rejection for this request (null when it
+ *   succeeded or gave none); error is the HTTP refusal itself when the core
+ *   answered non-2xx; maybeApplied: a GLOBAL switch reached the core and
+ *   went unanswered; seq numbers this switch for isLatestSwitch
  * @throws {ApiError}
  */
-export async function switchProxyResult(group, name) {
+export async function switchProxyResult(group, name, options = {}) {
+  proxySwitchStarts += 1;
+  const seq = proxySwitchStarts;
+  proxySwitchesInFlight += 1;
+  unansweredSwitches.add(seq);
+  /** @type {() => void} */
+  let finished = () => {};
+  const done = new Promise((/** @type {(v?: unknown) => void} */ resolve) => { finished = resolve; });
+  runningSwitches.add(done);
+  // Switches of one group go out one at a time, in the order they were
+  // made: the core then ends on the last one made (the one a user click
+  // records), whatever order it would answer overlapping requests in.
+  const before = switchQueues.get(group) ?? Promise.resolve();
+  // A switch still waiting when the core restarts (a profile switch, a
+  // restart after resume) was made for the core before: its same-named
+  // group in the new one is another group, so it is not sent. The
+  // generation is the one at the time it was made, also when `prepare`
+  // still runs.
+  const generation = coreGeneration;
+  const outdated = () => generation !== coreGeneration || restartsRunning > 0;
+  // Whether the request went out: one that failed after that (no answer)
+  // may still have been applied by the core.
+  let sent = false;
+  const mine = before.then(async () => {
+    if (outdated()) return { ok: false, reason: SWITCH_BUSY };
+    if (!options.prepare && !options.canSend) {
+      sent = true;
+      return sendProxySwitch(group, name);
+    }
+    const prepared = options.prepare ? await options.prepare() : undefined;
+    if (outdated()) return { ok: false, reason: SWITCH_BUSY, prepared };
+    if (options.canSend && !options.canSend()) return { ok: false, reason: SWITCH_BUSY, prepared };
+    sent = true;
+    return { ...(await sendProxySwitch(group, name)), prepared };
+  });
+  /** @type {Promise<unknown>} */
+  const settled = mine.catch(() => undefined);
+  switchQueues.set(group, settled);
+  try {
+    /** @type {Awaited<typeof mine>} */
+    let result;
+    try {
+      result = await mine;
+    } catch (error) {
+      // `prepare` threw before anything went out: nothing changed on the
+      // core. A request sent without an answer may have been applied, so it
+      // is not filed as refused: callers asking for landed switches count
+      // it, and read the core's selection instead of trusting an older one.
+      if (!sent) noteRefusedSwitch(seq);
+      // Sent with no answer: the core may run it, so an earlier switch is
+      // no longer the newest it took (isLatestSwitch), and is not saved
+      // over it.
+      else noteAcceptedSwitch(group, seq, generation);
+      throw error;
+    }
+    // One the core may have applied without confirming counts as landed, as
+    // a sent switch with no answer does above.
+    if (result.ok || ('maybeApplied' in result && result.maybeApplied)) noteAcceptedSwitch(group, seq, generation);
+    else noteRefusedSwitch(seq);
+    return { ...result, seq };
+  } finally {
+    proxySwitchesInFlight -= 1;
+    unansweredSwitches.delete(seq);
+    if (switchQueues.get(group) === settled) switchQueues.delete(group);
+    runningSwitches.delete(done);
+    finished();
+  }
+}
+
+/**
+ * Node switches started and not finished yet, each resolving once its
+ * answer is in (or it was dropped unsent).
+ * @type {Set<Promise<unknown>>}
+ */
+const runningSwitches = new Set();
+
+/**
+ * Wait until the node switches started so far have their answers (or were
+ * dropped unsent), at most `timeoutMs`: the core's selection read after
+ * that is the one they left. A profile switch saves the node the core runs
+ * after them, before its restart drops the ones still queued.
+ * @param {number} timeoutMs
+ * @returns {Promise<boolean>} false when some were still running at the timeout
+ */
+export async function settleProxySwitches(timeoutMs) {
+  const pending = [...runningSwitches];
+  if (pending.length === 0) return true;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); });
+  try {
+    return await Promise.race([Promise.all(pending).then(() => true), timeout]) === true;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The reason a switch was not sent: a profile, mode or TUN change, or a
+ * core restart, began before its turn. Every surface reports it as a busy
+ * moment to try again after, not as a failed switch.
+ */
+export const SWITCH_BUSY = 'a profile, mode or TUN change began before this switch was sent';
+
+/**
+ * Bumped when a restart through restartCore begins and ends, and when the
+ * backend replaced the core itself (noteCoreReplaced): a switch queued
+ * before is dropped.
+ */
+let coreGeneration = 0;
+
+/**
+ * A core this module did not start replaced the one it talks to (the
+ * backend restarted it after resume, or a core update did): switches made
+ * for the old core and not sent yet are dropped, as after restartCore.
+ */
+export function noteCoreReplaced() {
+  coreGeneration += 1;
+}
+
+/**
+ * How many core replacements began so far: a value read before an await
+ * that differs after it means what was read came from the core before.
+ */
+export function coreReplacements() {
+  return coreGeneration;
+}
+
+/**
+ * Restarts through restartCore still running: a switch whose turn comes
+ * then would reach the core being replaced, so it is not sent.
+ */
+let restartsRunning = 0;
+
+/** Node switches started so far, and the ones not answered yet. */
+let proxySwitchStarts = 0;
+let proxySwitchesInFlight = 0;
+/**
+ * Recent switches the core refused (or that were dropped unsent), by their
+ * start number: they changed nothing on the core.
+ * @type {number[]}
+ */
+const refusedSwitches = [];
+const MAX_REFUSED_SWITCHES = 256;
+
+/**
+ * The recent switches the core accepted: start number to the core
+ * replacement count it was sent under.
+ * @type {Map<number, number>}
+ */
+const acceptedSwitches = new Map();
+const MAX_ACCEPTED_SWITCHES = 256;
+
+/**
+ * The newest switch the core accepted for each group, with the core
+ * replacement count it was sent under. Kept apart from the bounded
+ * histories above, so trimming them never makes an older switch look
+ * like the newest.
+ * @type {Map<string, { seq: number, generation: number }>}
+ */
+const latestAcceptedSwitch = new Map();
+const MAX_LATEST_ACCEPTED_GROUPS = 1024;
+/**
+ * The newest switch the core accepted in any group. A profile keeps one
+ * saved selection, whichever group it is in, so a later choice in another
+ * group also makes an older one stale for that record.
+ * @type {{ seq: number, generation: number } | null}
+ */
+let latestAcceptedAny = null;
+
+/**
+ * @param {string} group
+ * @param {number} seq
+ * @param {number} generation
+ */
+function noteAcceptedSwitch(group, seq, generation) {
+  const latest = latestAcceptedSwitch.get(group);
+  if (!latest || latest.seq < seq) {
+    latestAcceptedSwitch.delete(group);
+    latestAcceptedSwitch.set(group, { seq, generation });
+    if (latestAcceptedSwitch.size > MAX_LATEST_ACCEPTED_GROUPS) {
+      const oldest = latestAcceptedSwitch.keys().next().value;
+      if (oldest !== undefined) latestAcceptedSwitch.delete(oldest);
+    }
+  }
+  if (!latestAcceptedAny || latestAcceptedAny.seq < seq) latestAcceptedAny = { seq, generation };
+  acceptedSwitches.set(seq, generation);
+  if (acceptedSwitches.size > MAX_ACCEPTED_SWITCHES) {
+    const oldest = acceptedSwitches.keys().next().value;
+    if (oldest !== undefined) acceptedSwitches.delete(oldest);
+  }
+}
+
+/**
+ * Whether switch `seq` of `group` is still the newest accepted one,
+ * whichever surface made it (a node card, the wheel, the home picker): the
+ * core accepted no later switch of the group. A later one still waiting for
+ * its answer does not count: if the core takes it, its own caller records
+ * it after this one (switches of a group are answered in order); if not,
+ * this one is what the core runs and must be recorded. False too once
+ * the core was replaced after it was sent, and once the same core accepted
+ * a later switch in another group: the profile keeps one saved selection,
+ * and the later choice is the one it must keep.
+ * @param {string} group
+ * @param {number | undefined} seq the `seq` switchProxyResult returned
+ */
+export function isLatestSwitch(group, seq) {
+  if (seq === undefined) return true;
+  // A core replaced since runs its own selection, not this switch.
+  const sentUnder = acceptedSwitches.get(seq);
+  if (sentUnder !== undefined && sentUnder !== coreGeneration) return false;
+  if (latestAcceptedAny && latestAcceptedAny.seq > seq
+    && latestAcceptedAny.generation === coreGeneration) return false;
+  const latest = latestAcceptedSwitch.get(group);
+  if (!latest) return true;
+  if (latest.seq === seq) return latest.generation === coreGeneration;
+  return latest.seq < seq;
+}
+
+/** @param {number} seq */
+function noteRefusedSwitch(seq) {
+  refusedSwitches.push(seq);
+  if (refusedSwitches.length > MAX_REFUSED_SWITCHES) refusedSwitches.shift();
+}
+
+/**
+ * The last switch sent or waiting for each group (settles, never rejects).
+ * @type {Map<string, Promise<unknown>>}
+ */
+const switchQueues = new Map();
+
+/**
+ * How many node switches were started so far: one that differs from a
+ * count taken right before a switch call, by more than that one switch,
+ * means another switch was started meanwhile.
+ * @returns {number}
+ */
+export function proxySwitchStartCount() {
+  return proxySwitchStarts;
+}
+
+/**
+ * Where an automatic switch (failover, a carried node) starts: pass it to
+ * proxySwitchedSince right before sending its own switch.
+ * @returns {number}
+ */
+export function proxySwitchMark() {
+  // A switch still waiting for its answer counts as one made after the
+  // mark: it can land, and its caller record its node, after the mark was
+  // taken, so a check against this mark sees it also once it is answered.
+  let oldest = proxySwitchStarts + 1;
+  for (const seq of unansweredSwitches) oldest = Math.min(oldest, seq);
+  return oldest - 1;
+}
+
+/** Numbers of the switches not answered yet. @type {Set<number>} */
+const unansweredSwitches = new Set();
+
+/**
+ * Whether a node switch started after `mark` was taken, or one is still
+ * waiting for the core's answer: a choice the user sent may then land after
+ * (or not be visible yet to) a check of the live selection, and an automatic
+ * switch sent now could replace it.
+ * @param {number} mark proxySwitchMark() from before
+ * @param {number} [own] switches the caller itself sent since `mark` and
+ *   saw answered: they do not count
+ * @param {{ landedOnly?: boolean, ownInFlight?: number }} [options]
+ *   landedOnly: switches the core refused do not count either (they changed
+ *   nothing on it); only when the refusals since `mark` are still
+ *   remembered. ownInFlight: switches of the caller's own that are still
+ *   running (counted in `own` too), as in a canSend check of its own switch
+ * @returns {boolean}
+ */
+export function proxySwitchedSince(mark, own = 0, options = {}) {
+  if (proxySwitchesInFlight - (options.ownInFlight ?? 0) > 0) return true;
+  let started = proxySwitchStarts - mark;
+  if (options.landedOnly && started > 0) {
+    const refused = refusedSwitches.filter((seq) => seq > mark).length;
+    // Older refusals already forgotten: count what is not known as refused.
+    const known = refusedSwitches.length < MAX_REFUSED_SWITCHES
+      || (refusedSwitches[0] ?? Infinity) <= mark + 1;
+    if (known) started -= refused;
+  }
+  return started - own !== 0;
+}
+
+/**
+ * The start of the backend's message when a GLOBAL switch was not confirmed by
+ * the core (`GLOBAL_SWITCH_UNCONFIRMED` in core/subscription.rs): keep the two
+ * in step.
+ */
+const GLOBAL_SWITCH_UNCONFIRMED = 'Failed to switch GLOBAL proxy group';
+
+/**
+ * @param {string} group
+ * @param {string} name
+ * @returns {Promise<{ ok: boolean, reason: unknown, error?: ApiError, maybeApplied?: boolean }>}
+ */
+async function sendProxySwitch(group, name) {
   try {
     // GLOBAL switches go through the backend so the user-change generation is
     // bumped under the restore lock; otherwise an in-flight fallback restore
@@ -642,7 +954,12 @@ export async function switchProxyResult(group, name) {
     // "Subscription update in progress, please try again", "GLOBAL proxy group
     // no longer contains node '<name>'").
     apiLogger.warn(`switchProxy('${group}', '${name}') rejected:`, err);
-    return { ok: false, reason: err };
+    // The backend says when a request reached the core but got no answer (a
+    // timeout, a lost reply): the core may have switched, so the switch is
+    // reported failed but not filed as refused. No core, a failed
+    // connection or an error answer changed nothing.
+    const maybeApplied = String(/** @type {any} */ (err)?.message ?? err).startsWith(GLOBAL_SWITCH_UNCONFIRMED);
+    return { ok: false, reason: err, maybeApplied };
   }
 }
 
@@ -724,8 +1041,41 @@ export async function closeAllConnections() {
  * @throws {ApiError}
  */
 export async function getConnections() {
-  const res = await apiFetch('/connections');
-  return res.json();
+  // apiFetch's timeout ends with the headers: a body that never completes
+  // would leave this pending (and the page's refresh waiting on it) forever.
+  // The request stays tied to this controller until the body is read, so a
+  // body timeout aborts the fetch itself rather than only giving up on it.
+  const request = new AbortController();
+  const res = await apiFetch('/connections', { signal: request.signal, abortAfterHeaders: true });
+  return readJsonWithin(res, DEFAULT_TIMEOUT, '/connections', () => request.abort());
+}
+
+/**
+ * `res.json()`, failing with an {@link ApiError} when the body has not
+ * arrived within `ms`. `abort` then aborts the request the body belongs to
+ * (a body that `res.json()` is reading is locked and cannot be cancelled).
+ * @param {Response} res
+ * @param {number} ms
+ * @param {string} endpoint
+ * @param {() => void} abort
+ * @returns {Promise<any>}
+ */
+async function readJsonWithin(res, ms, endpoint, abort) {
+  /** @type {ReturnType<typeof setTimeout>|undefined} */
+  let timer;
+  const body = res.json();
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      body.catch(() => { /* aborted below */ });
+      abort();
+      reject(new ApiError(`Request timeout (${ms}ms): ${endpoint}`, { endpoint }));
+    }, ms);
+  });
+  try {
+    return await Promise.race([body, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -806,9 +1156,13 @@ export async function testProxy(name, customTimeout = 5000) {
     const testUrl = 'https://www.gstatic.com/generate_204';
     const apiUrl = `/proxies/${encodeURIComponent(name)}/delay?timeout=${customTimeout}&url=${encodeURIComponent(testUrl)}`;
 
+    // The test's own timeout and Stop keep aborting the request while the
+    // body is read: a body that stalls after the headers would otherwise
+    // leave the test pending.
     const res = await apiFetch(apiUrl, {
       signal: localController.signal,
       timeout: customTimeout + 2000,
+      abortAfterHeaders: true,
     });
 
     if (res.ok) {
@@ -929,11 +1283,22 @@ export async function openPrismFolder() {
 export async function restartCore(configPath, customArgs = []) {
   // eslint-disable-next-line no-console
   console.log(`[API] restartCore called (config=${configPath})`);
-  const coreResult = await invoke(COMMANDS.START_CORE, {
-    configPath,
-    customArgs,
-    force: true,
-  });
+  // Counted when the restart begins too: a switch queued before it and sent
+  // while it runs would reach the core being replaced (or the address it
+  // had), and one made while it runs was made for that core.
+  coreGeneration += 1;
+  restartsRunning += 1;
+  let coreResult;
+  try {
+    coreResult = await invoke(COMMANDS.START_CORE, {
+      configPath,
+      customArgs,
+      force: true,
+    });
+  } finally {
+    restartsRunning -= 1;
+    coreGeneration += 1;
+  }
   setBaseUrl(`http://127.0.0.1:${coreResult.port}`);
   setSecret(coreResult.secret);
   setWsBaseUrl(`ws://127.0.0.1:${coreResult.port}`);
