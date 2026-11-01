@@ -14,6 +14,8 @@ import { modesLogger } from '../utils/logger.js';
 import { toError } from '../types/guards.js';
 import { appStore } from './state.js';
 import { COMMANDS } from '@zephyr/shared';
+import { readRunningProfile } from './running-profile.js';
+import { noteKnownSelection, knownSelectionRevision, knownSelectionChangedSince } from './known-selection.js';
 
 export function initModeSelector() {
     const buttons = document.querySelectorAll('[data-mode]');
@@ -48,6 +50,10 @@ export async function applyMode(mode, { silent = false } = {}) {
     if (container) container.classList.add('opacity-50', 'cursor-not-allowed');
 
     try {
+        // A choice recorded from here on (the user picking a node while the
+        // node is read, the mode switches or the groups load) is newer than
+        // the carried node and stays.
+        const revisionBefore = knownSelectionRevision();
         // 1. Capture current node for inheritance
         let nodeToInherit = null;
         try {
@@ -98,7 +104,7 @@ export async function applyMode(mode, { silent = false } = {}) {
 
         // 4. Inherit node in target mode. The mode switch already succeeded,
         // so a failed inheritance must not fail the whole action.
-        const inherited = await carryNodeOver(nodeToInherit, mode);
+        const inherited = await carryNodeOver(nodeToInherit, mode, revisionBefore);
 
         import('./proxies.js').then(m => m.refreshProxies()).catch(() => {});
         if (!inherited && !silent) {
@@ -119,15 +125,18 @@ export async function applyMode(mode, { silent = false } = {}) {
  * Carry the previously selected node into the group the new mode exposes.
  * @param {string|null} nodeToInherit
  * @param {string} mode
+ * @param {number} revisionBefore knownSelectionRevision() before the node was read
  * @returns {Promise<boolean>} false when the node could not be carried over
  */
-async function carryNodeOver(nodeToInherit, mode) {
+async function carryNodeOver(nodeToInherit, mode, revisionBefore) {
     // A built-in selection (GLOBAL's default DIRECT, say) is not a node the
     // user picked, so there is nothing to carry over or to report as lost.
     if (!nodeToInherit || mode === 'direct'
         || SPECIAL_PROXY_NAMES.has(String(nodeToInherit).toUpperCase())) return true;
     try {
-        const preferredGroupName = appStore.get('uiGroupName') || null;
+        // The group open now: one the user opens from here on stays open.
+        const groupBefore = appStore.get('uiGroupName');
+        const preferredGroupName = groupBefore || null;
         const resultAfter = await fetchProxyGroups({ preferredGroupName });
         // No group could be read, so the node was not carried over.
         if (!resultAfter) return false;
@@ -135,13 +144,7 @@ async function carryNodeOver(nodeToInherit, mode) {
             // Use uiGroupName from resolver for accurate group targeting
             const targetGroup = resultAfter.uiGroupName || resultAfter.mainGroup;
             if (!targetGroup) return true;
-            // Both shapes mean "not applied": a `false` result is the
-            // reserved GLOBAL selection being rejected by the backend,
-            // while a plain (non-reserved) group PUT raises ApiError.
-            const applied = await switchProxy(targetGroup, nodeToInherit);
-            if (applied) appStore.set('uiGroupName', targetGroup);
-            else modesLogger.warn('Node inheritance switch was not applied');
-            return applied;
+            return await switchCarriedNode(targetGroup, nodeToInherit, { groupBefore, revisionBefore });
         }
         // The previous node is not present in the target group, so it cannot
         // carry over and the group keeps its default selection. (When the group
@@ -153,6 +156,41 @@ async function carryNodeOver(nodeToInherit, mode) {
         modesLogger.warn("Failed to carry the node over", e);
         return false;
     }
+}
+
+/**
+ * Switch the target group to the carried node, open that group unless the
+ * user opened another one since `groupBefore`, and record the node as known.
+ * Nothing is switched when a newer choice was recorded for the profile.
+ * @param {string} targetGroup
+ * @param {string} node
+ * @param {{ groupBefore: any, revisionBefore: number }} before what was open
+ *   and known when the carry started
+ * @returns {Promise<boolean>} whether the core took the switch
+ */
+async function switchCarriedNode(targetGroup, node, { groupBefore, revisionBefore }) {
+    const profile = await readRunningProfile();
+    // The user picked a node since the carried one was read: theirs stays,
+    // and nothing was lost.
+    if (profile && knownSelectionChangedSince(revisionBefore, profile)) return true;
+    // Both shapes mean "not applied": a `false` result is the reserved
+    // GLOBAL selection being rejected by the backend, while a plain
+    // (non-reserved) group PUT raises ApiError.
+    const applied = await switchProxy(targetGroup, node);
+    if (!applied) {
+        modesLogger.warn('Node inheritance switch was not applied');
+        return false;
+    }
+    // A group the user opened since the carry started stays open.
+    if (appStore.get('uiGroupName') === groupBefore) appStore.set('uiGroupName', targetGroup);
+    // Known like any other choice, so a profile switch whose read of the
+    // live selection times out saves this node. Only when the same profile
+    // still runs and no newer choice came in for it.
+    if (profile && await readRunningProfile() === profile
+        && !knownSelectionChangedSince(revisionBefore, profile)) {
+        noteKnownSelection(profile, { group: targetGroup, node });
+    }
+    return true;
 }
 
 /** Outbound modes in selector order. */

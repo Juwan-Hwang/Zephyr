@@ -195,6 +195,12 @@ pub fn update_config_core<I: ConfigIo>(
     run_config_path: &std::path::Path,
     patch: &JsonValue,
 ) -> Result<(YamlValue, String), String> {
+    // A patch sets config keys. Anything but an object would replace the
+    // whole config instead of merging into it.
+    if !patch.is_object() {
+        return Err("Config patch must be an object of config keys".to_owned());
+    }
+
     // 1. Read existing config
     let mut current_yaml: YamlValue = if io.path_exists(run_config_path) {
         let content = io.read_to_string(run_config_path)?;
@@ -484,6 +490,26 @@ mod tests {
                 !written.contains(&format!("{key}:")),
                 "{key} written to disk"
             );
+        }
+    }
+
+    #[test]
+    fn test_update_config_core_refuses_a_patch_that_is_not_an_object() {
+        let original = "mode: rule\nmixed-port: 7890\n";
+        for patch in [
+            serde_json::json!(["mode", "global"]),
+            serde_json::json!("mode: global"),
+            serde_json::json!(7),
+            serde_json::json!(null),
+        ] {
+            let io = MemIo {
+                content: std::cell::RefCell::new(Some(original.to_owned())),
+            };
+            assert!(
+                update_config_core(&io, std::path::Path::new("run_config.yaml"), &patch).is_err(),
+                "{patch} must be refused"
+            );
+            assert_eq!(io.content.borrow().as_deref(), Some(original));
         }
     }
 

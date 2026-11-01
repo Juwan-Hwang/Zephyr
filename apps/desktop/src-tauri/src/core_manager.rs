@@ -65,7 +65,7 @@ pub use core::{
     MihomoState,
     ReadLogResult,
     // Constants
-    CORE_STARTING,
+    CORE_ALREADY_STARTING,
     DEFAULT_MIXED_PORT,
     MAX_RESPONSE_SIZE,
     TUN_MODE_ACTIVE,

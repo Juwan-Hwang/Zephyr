@@ -1416,6 +1416,19 @@ async fn update_core_inner(
     // instead of parking a tokio worker for the whole wait. A panicked blocking
     // task is reported through the same channel as a failed stop, so the
     // extracted binary is cleaned up either way.
+    // The start lock is taken first and held until the new binary runs or
+    // the old one is back: a start still in progress finishes before the
+    // stop, and no start runs between the stop and the restart, when the
+    // binary is missing, being replaced, or failed to start. It waits for a
+    // start in progress rather than giving up, since the update is already
+    // downloaded and checked.
+    let start_guard = core_manager::core::wait_for_start_lock(
+        &core_manager::core::CORE_START_LOCK,
+        core_manager::core::StartLockWait::UntilFree,
+    )
+    .await
+    .ok_or_else(|| core_manager::CORE_ALREADY_STARTING.to_owned())?;
+
     let app_for_stop = app.clone();
     let stop_res = tokio::task::spawn_blocking(move || {
         let stop_state = app_for_stop.state::<MihomoState>();
@@ -1493,24 +1506,6 @@ async fn update_core_inner(
         ));
     }
 
-    let (last_config, last_args, last_secret) = {
-        let lock = state
-            .0
-            .lock()
-            .map_err(|e| format!("Failed to lock state: {e}"))?;
-        let config = lock
-            .last_config_path()
-            .map(String::from)
-            .unwrap_or_else(|| "config.yaml".to_owned());
-        let args = lock.last_custom_args().map(Vec::from).unwrap_or_default();
-        let secret = if lock.last_secret().is_empty() {
-            None
-        } else {
-            Some(lock.last_secret().to_owned())
-        };
-        (config, args, secret)
-    };
-
     emit_download_status_ext(
         &window,
         Some(UpdateComponent::Core),
@@ -1518,47 +1513,83 @@ async fn update_core_inner(
         98,
     );
 
-    let result = core_manager::start_core(
+    // Still holding the start lock: the profile, arguments and secret are
+    // read now, and a failed start is rolled back before any other start can
+    // launch the failed binary.
+    let result = match Box::pin(core_manager::core::core_process::start_core_holding_lock(
         app.clone(),
         state,
-        last_config,
-        last_args,
-        last_secret,
         Some(true),
-    )
-    .await;
-    match result {
-        Ok(r) => {
-            // Step 3: New core started — delete backup
-            let _ = std::fs::remove_file(&backup_path);
-            emit_download_status_ext(&window, Some(UpdateComponent::Core), "Core ready", 100);
-            Ok(r)
-        }
+        None,
+        &start_guard,
+    ))
+    .await
+    {
+        Ok(r) => Ok(r),
+        Err(e) => Err(roll_back_core_binary(&exe_path, &backup_path, &e).await),
+    };
+    drop(start_guard);
+    if let Ok(r) = result {
+        // Step 3: New core started — delete backup
+        let _ = std::fs::remove_file(&backup_path);
+        emit_download_status_ext(&window, Some(UpdateComponent::Core), "Core ready", 100);
+        return Ok(r);
+    }
+    result
+}
+
+/// Step 4 of a core update: the new binary at `exe_path` failed to start
+/// (`error`), so put the backup back. Called with the start lock held.
+/// Returns the error to report.
+///
+/// Not when the failed start left the new core running (macOS: a root TUN
+/// core whose cleanup failed is adopted and tracked): the binary under a
+/// running, tracked core stays, and the backup is kept for a manual restore.
+async fn roll_back_core_binary(
+    exe_path: &std::path::Path,
+    backup_path: &std::path::Path,
+    error: &str,
+) -> String {
+    if error.contains(core_manager::core::tun_manager::ROOT_CORE_STILL_RUNNING) {
+        emit_error!(
+            Updater,
+            UPDATE_DOWNLOAD_FAILED,
+            "New core failed its start checks but is still running: {error}; not rolling back"
+        );
+        return format!(
+            "New core failed its start checks but is still running: {error}. \
+             The previous version was not restored under the running core; \
+             its backup is kept next to it."
+        );
+    }
+    emit_error!(
+        Updater,
+        UPDATE_DOWNLOAD_FAILED,
+        "New core failed to start: {error}, attempting rollback..."
+    );
+    // Give the failed process a moment to let go of its binary first.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    // The backup is renamed over the failed binary in one step, which
+    // replaces it (atomically on Unix). No separate existence check: one
+    // that errors would skip a rollback that can work, and a missing backup
+    // fails the rename and leaves the failed binary in place to report.
+    let rollback_ok = match tokio::fs::rename(backup_path, exe_path).await {
+        Ok(()) => true,
         Err(e) => {
-            // Step 4: Rollback — atomic rename swap
             emit_error!(
                 Updater,
                 UPDATE_DOWNLOAD_FAILED,
-                "New core failed to start: {e}, attempting rollback..."
+                "Rollback to the previous core failed: {e}"
             );
-            let rollback_ok = if backup_path.exists() {
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                // Remove the failed new binary, then rename backup back
-                let _ = std::fs::remove_file(&exe_path);
-                std::fs::rename(&backup_path, &exe_path).is_ok()
-            } else {
-                false
-            };
-            if rollback_ok {
-                Err(format!(
-                    "New core failed to start: {e}. Rolled back to previous version. Please restart the application."
-                ))
-            } else {
-                Err(format!(
-                    "New core failed to start: {e}. Rollback not available — manual repair may be needed."
-                ))
-            }
+            false
         }
+    };
+    if rollback_ok {
+        format!(
+            "New core failed to start: {error}. Rolled back to previous version. Please restart the application."
+        )
+    } else {
+        format!("New core failed to start: {error}. Rollback not available — manual repair may be needed.")
     }
 }
 
@@ -2440,6 +2471,45 @@ async fn update_client_inner(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn rollback_puts_the_backup_binary_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("core-bin");
+        let backup = dir.path().join("core-bin.backup");
+        std::fs::write(&exe, b"new").unwrap();
+        std::fs::write(&backup, b"old").unwrap();
+        let message = roll_back_core_binary(&exe, &backup, "exited").await;
+        assert!(
+            message.contains("Rolled back to previous version"),
+            "{message}"
+        );
+        assert_eq!(std::fs::read(&exe).unwrap(), b"old");
+        assert!(!backup.exists());
+
+        // Nothing to put back: the failed binary stays and the report says so.
+        let message = roll_back_core_binary(&exe, &backup, "exited").await;
+        assert!(message.contains("Rollback not available"), "{message}");
+        assert_eq!(std::fs::read(&exe).unwrap(), b"old");
+    }
+
+    #[tokio::test]
+    async fn rollback_leaves_a_still_running_new_core_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("core-bin");
+        let backup = dir.path().join("core-bin.backup");
+        std::fs::write(&exe, b"new").unwrap();
+        std::fs::write(&backup, b"old").unwrap();
+        let error = format!(
+            "health check failed ({}; stopping the core will clean it up)",
+            core_manager::core::tun_manager::ROOT_CORE_STILL_RUNNING
+        );
+        let message = roll_back_core_binary(&exe, &backup, &error).await;
+        assert!(message.contains("still running"), "{message}");
+        assert!(!message.contains("Rolled back"), "{message}");
+        assert_eq!(std::fs::read(&exe).unwrap(), b"new");
+        assert_eq!(std::fs::read(&backup).unwrap(), b"old");
+    }
 
     #[test]
     fn test_strip_lowercase_v() {
