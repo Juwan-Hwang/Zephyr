@@ -795,21 +795,7 @@ async fn fetch_latest_release(app: Option<&tauri::AppHandle>) -> Result<GithubRe
 }
 
 fn is_trusted_update_url(url: &str) -> bool {
-    if let Ok(parsed) = reqwest::Url::parse(url) {
-        // Enforce HTTPS scheme to prevent MITM attacks on update downloads.
-        if parsed.scheme() != "https" {
-            return false;
-        }
-        if let Some(host) = parsed.host_str() {
-            return TRUSTED_HOSTS.iter().any(|&h| {
-                host == h
-                    || host
-                        .strip_suffix(h)
-                        .is_some_and(|prefix| prefix.ends_with('.'))
-            });
-        }
-    }
-    false
+    zephyr_core::updater::is_trusted_update_url(url)
 }
 
 fn verify_sha256(file_path: &std::path::Path, expected_hash: &str) -> Result<(), String> {
