@@ -269,36 +269,48 @@ pub fn url_decode_complete(input: &str) -> String {
         return input.to_owned();
     }
 
+    // Performance optimization: Percent-decoding never expands byte length
+    // (a 3-byte `%XX` sequence becomes 1 byte, or 1 byte stays 1 byte).
+    // Instead of allocating one reusable secondary `Vec<u8>` before the pass
+    // loop and swapping the two buffers on each pass, decode in-place in a
+    // single vector using a two-pointer read/write traversal (`write <= read`
+    // invariant holds at all times).
     let mut current = input.as_bytes().to_vec();
-    let mut decoded = Vec::with_capacity(current.len());
 
     for _ in 0..5 {
         let mut changed = false;
-        decoded.clear();
-        let mut i = 0;
+        let mut read = 0;
+        let mut write = 0;
+        let len = current.len();
 
-        while let Some(&byte) = current.get(i) {
-            if byte == b'%' {
+        while read < len {
+            if current.get(read) == Some(&b'%') {
                 if let (Some(hi), Some(lo)) = (
-                    current.get(i + 1).and_then(|&byte| decode_hex_digit(byte)),
-                    current.get(i + 2).and_then(|&byte| decode_hex_digit(byte)),
+                    current.get(read + 1).copied().and_then(decode_hex_digit),
+                    current.get(read + 2).copied().and_then(decode_hex_digit),
                 ) {
-                    decoded.push((hi << 4) | lo);
-                    i += 3;
+                    if let Some(target) = current.get_mut(write) {
+                        *target = (hi << 4) | lo;
+                    }
+                    read += 3;
+                    write += 1;
                     changed = true;
                     continue;
                 }
             }
 
-            decoded.push(byte);
-            i += 1;
+            if let Some(&byte) = current.get(read) {
+                if let Some(target) = current.get_mut(write) {
+                    *target = byte;
+                }
+            }
+            read += 1;
+            write += 1;
         }
 
-        std::mem::swap(&mut current, &mut decoded);
-        if !changed {
-            break;
-        }
-        if !current.contains(&b'%') {
+        current.truncate(write);
+
+        if !changed || !current.contains(&b'%') {
             break;
         }
     }
@@ -585,6 +597,21 @@ mod tests {
     fn test_url_decode_double_encoding() {
         assert_eq!(url_decode_complete("%2541"), "A");
         assert_eq!(url_decode_complete("%252541"), "A");
+    }
+
+    #[test]
+    fn test_url_decode_boundaries() {
+        // Malformed and trailing escapes are passed through untouched.
+        assert_eq!(url_decode_complete("abc%"), "abc%");
+        assert_eq!(url_decode_complete("abc%2"), "abc%2");
+        assert_eq!(url_decode_complete("%zz"), "%zz");
+        assert_eq!(url_decode_complete("%2g"), "%2g");
+        // Bytes that are not valid UTF-8 become the replacement character.
+        assert_eq!(url_decode_complete("%FF"), "\u{FFFD}");
+        assert_eq!(url_decode_complete("a%FFb"), "a\u{FFFD}b");
+        // Six layers of encoding need six passes; the loop caps at five,
+        // so one layer must remain.
+        assert_eq!(url_decode_complete("%252525252541"), "%41");
     }
 
     #[test]
