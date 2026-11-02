@@ -29,3 +29,8 @@
 **Vulnerability:** `script_grant_plugin`, `script_revoke_plugin`, and `script_check_plugin_permission` accepted `plugin_id` directly without invoking `validate_plugin_id`, allowing unsanitized plugin IDs (containing path traversal sequences, reserved names, or control characters) into the script sandbox permission configuration.
 **Learning:** Commands in secondary modules that manipulate plugin permissions or settings can easily omit validation routines implemented in the primary plugin module.
 **Prevention:** Always enforce `validate_plugin_id` on every IPC handler accepting a `plugin_id` parameter regardless of module boundary.
+
+## 2026-11-02 - Enforce HTTPS Scheme and Strict Domain Suffix for Core Updaters
+**Vulnerability:** `is_trusted_update_url` and `parse_github_release_info` validated hostname strings against trusted GitHub hosts without verifying `parsed.scheme() == "https"`, allowing plaintext HTTP downloads of updater binaries and opening vectors for on-path adversary MITM attacks. Additionally, host check avoided allocation via suffix stripping with dot delimiter.
+**Learning:** Checking hostname patterns without enforcing encrypted transport protocol schemes permits silent fallback to plaintext traffic in updater workflows.
+**Prevention:** Always enforce `parsed.scheme() == "https"` alongside strict domain/subdomain checks on all URL-evaluating security boundary functions.

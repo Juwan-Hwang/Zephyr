@@ -796,10 +796,14 @@ async fn fetch_latest_release(app: Option<&tauri::AppHandle>) -> Result<GithubRe
 
 fn is_trusted_update_url(url: &str) -> bool {
     if let Ok(parsed) = reqwest::Url::parse(url) {
+        // Enforce HTTPS scheme to prevent MITM attacks on update downloads.
+        if parsed.scheme() != "https" {
+            return false;
+        }
         if let Some(host) = parsed.host_str() {
-            return TRUSTED_HOSTS
-                .iter()
-                .any(|&h| host == h || host.ends_with(&format!(".{h}")));
+            return TRUSTED_HOSTS.iter().any(|&h| {
+                host == h || host.strip_suffix(h).is_some_and(|prefix| prefix.ends_with('.'))
+            });
         }
     }
     false
@@ -1287,8 +1291,8 @@ fn validate_version_format(version: &str) -> bool {
 
 fn parse_github_release_info(url: &str) -> Option<(String, String)> {
     if let Ok(parsed) = reqwest::Url::parse(url) {
-        if parsed.host_str() != Some("github.com") {
-            return None; // Only allow direct github.com URLs
+        if parsed.scheme() != "https" || parsed.host_str() != Some("github.com") {
+            return None; // Only allow direct https://github.com URLs
         }
 
         let segments: Vec<&str> = parsed.path_segments()?.collect();
