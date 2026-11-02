@@ -795,7 +795,14 @@ async fn fetch_latest_release(app: Option<&tauri::AppHandle>) -> Result<GithubRe
 }
 
 fn is_trusted_update_url(url: &str) -> bool {
-    zephyr_core::updater::is_trusted_update_url(url)
+    if let Ok(parsed) = reqwest::Url::parse(url) {
+        if let Some(host) = parsed.host_str() {
+            return TRUSTED_HOSTS
+                .iter()
+                .any(|&h| host == h || host.ends_with(&format!(".{h}")));
+        }
+    }
+    false
 }
 
 fn verify_sha256(file_path: &std::path::Path, expected_hash: &str) -> Result<(), String> {
@@ -1280,8 +1287,8 @@ fn validate_version_format(version: &str) -> bool {
 
 fn parse_github_release_info(url: &str) -> Option<(String, String)> {
     if let Ok(parsed) = reqwest::Url::parse(url) {
-        if parsed.scheme() != "https" || parsed.host_str() != Some("github.com") {
-            return None; // Only allow direct https://github.com URLs
+        if parsed.host_str() != Some("github.com") {
+            return None; // Only allow direct github.com URLs
         }
 
         let segments: Vec<&str> = parsed.path_segments()?.collect();
