@@ -802,7 +802,10 @@ fn is_trusted_update_url(url: &str) -> bool {
         }
         if let Some(host) = parsed.host_str() {
             return TRUSTED_HOSTS.iter().any(|&h| {
-                host == h || host.strip_suffix(h).is_some_and(|prefix| prefix.ends_with('.'))
+                host == h
+                    || host
+                        .strip_suffix(h)
+                        .is_some_and(|prefix| prefix.ends_with('.'))
             });
         }
     }

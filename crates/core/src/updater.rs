@@ -137,7 +137,10 @@ pub fn is_trusted_update_url(url: &str) -> bool {
         }
         if let Some(host) = parsed.host_str() {
             return TRUSTED_HOSTS.iter().any(|&h| {
-                host == h || host.strip_suffix(h).is_some_and(|prefix| prefix.ends_with('.'))
+                host == h
+                    || host
+                        .strip_suffix(h)
+                        .is_some_and(|prefix| prefix.ends_with('.'))
             });
         }
     }
@@ -381,9 +384,7 @@ mod tests {
         assert!(is_trusted_update_url(
             "https://objects.githubusercontent.com/asset.zip"
         ));
-        assert!(is_trusted_update_url(
-            "https://sub.github.com/test"
-        ));
+        assert!(is_trusted_update_url("https://sub.github.com/test"));
     }
 
     #[test]
@@ -394,7 +395,9 @@ mod tests {
         // Domain suffix attacks: must not match attacker domains ending with github.com
         assert!(!is_trusted_update_url("https://evilgithub.com/malware"));
         assert!(!is_trusted_update_url("https://not-github.com/malware"));
-        assert!(!is_trusted_update_url("https://fakegithubusercontent.com/x"));
+        assert!(!is_trusted_update_url(
+            "https://fakegithubusercontent.com/x"
+        ));
         // Untrusted hosts and invalid schemes
         assert!(!is_trusted_update_url("https://evil.com/malware"));
         assert!(!is_trusted_update_url("ftp://github.com/release.zip"));
@@ -404,12 +407,14 @@ mod tests {
 
     #[test]
     fn test_parse_github_release_info_https_enforced() {
-        let https_url = "https://github.com/MetaCubeX/mihomo/releases/download/v1.18.0/mihomo-linux-amd64.gz";
+        let https_url =
+            "https://github.com/MetaCubeX/mihomo/releases/download/v1.18.0/mihomo-linux-amd64.gz";
         let info = parse_github_release_info(https_url).unwrap();
         assert_eq!(info, vec!["v1.18.0", "mihomo-linux-amd64.gz"]);
 
         // Reject plaintext HTTP
-        let http_url = "http://github.com/MetaCubeX/mihomo/releases/download/v1.18.0/mihomo-linux-amd64.gz";
+        let http_url =
+            "http://github.com/MetaCubeX/mihomo/releases/download/v1.18.0/mihomo-linux-amd64.gz";
         assert_eq!(parse_github_release_info(http_url), None);
 
         // Reject spoofed domain
