@@ -950,7 +950,23 @@ fn is_unsafe_destination_v4(bits: u32) -> bool {
         || v4_in_cidr(bits, 0xf000_0000, 4)
 }
 
+/// Zero-allocation check whether `s` ends with `suffix` (ASCII case-insensitively).
+#[inline]
+fn ends_with_ignore_ascii_case(s: &str, suffix: &str) -> bool {
+    let s_bytes = s.as_bytes();
+    let suffix_bytes = suffix.as_bytes();
+    s_bytes
+        .len()
+        .checked_sub(suffix_bytes.len())
+        .and_then(|start| s_bytes.get(start..))
+        .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix_bytes))
+}
+
 /// Check if a host is a private or local address (SSRF protection)
+///
+/// Optimization:
+/// - Uses zero-allocation ASCII case-insensitive comparisons instead of allocating `host.to_lowercase()`.
+/// - Drops heap allocations on the SSRF validation hot path to zero.
 #[must_use]
 pub fn is_private_host(host: &str) -> bool {
     let trimmed = host.trim();
@@ -961,19 +977,18 @@ pub fn is_private_host(host: &str) -> bool {
     if normalized.is_empty() {
         return false;
     }
-    let host_lower = normalized.to_lowercase();
 
-    if host_lower == "localhost"
-        || host_lower.ends_with(".localhost")
-        || host_lower.ends_with(".local")
-        || host_lower.ends_with(".internal")
-        || host_lower.ends_with(".intranet")
-        || host_lower.ends_with(".private")
-        || host_lower.ends_with(".lan")
-        || host_lower == "home.arpa"
-        || host_lower.ends_with(".home.arpa")
-        || host_lower.ends_with(".home")
-        || host_lower.ends_with(".corp")
+    if normalized.eq_ignore_ascii_case("localhost")
+        || ends_with_ignore_ascii_case(normalized, ".localhost")
+        || ends_with_ignore_ascii_case(normalized, ".local")
+        || ends_with_ignore_ascii_case(normalized, ".internal")
+        || ends_with_ignore_ascii_case(normalized, ".intranet")
+        || ends_with_ignore_ascii_case(normalized, ".private")
+        || ends_with_ignore_ascii_case(normalized, ".lan")
+        || normalized.eq_ignore_ascii_case("home.arpa")
+        || ends_with_ignore_ascii_case(normalized, ".home.arpa")
+        || ends_with_ignore_ascii_case(normalized, ".home")
+        || ends_with_ignore_ascii_case(normalized, ".corp")
     {
         return true;
     }
@@ -1007,6 +1022,9 @@ pub fn is_single_label_host(host: &str) -> bool {
 /// Unlike `is_private_host`, this returns false for private domain name suffixes
 /// (.internal, .lan, etc.) so domain names are still subject to DNS resolution and
 /// destination IP validation rather than being treated as pre-trusted addresses.
+///
+/// Optimization:
+/// - Replaces heap allocation `host.to_lowercase()` with zero-allocation ASCII case-insensitive checks.
 #[must_use]
 pub fn is_literal_private_host(host: &str) -> bool {
     let trimmed = host.trim();
@@ -1017,9 +1035,10 @@ pub fn is_literal_private_host(host: &str) -> bool {
     if normalized.is_empty() {
         return false;
     }
-    let host_lower = normalized.to_lowercase();
 
-    if host_lower == "localhost" || host_lower.ends_with(".localhost") {
+    if normalized.eq_ignore_ascii_case("localhost")
+        || ends_with_ignore_ascii_case(normalized, ".localhost")
+    {
         return true;
     }
 
