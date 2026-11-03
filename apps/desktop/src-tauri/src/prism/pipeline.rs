@@ -1,5 +1,6 @@
 //! Shared pipeline for executing scripts with config write-back and hot-reload.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -19,6 +20,43 @@ use crate::MihomoState;
 /// This prevents "lost update" race conditions when multiple override executions
 /// or profile switches occur concurrently.
 pub(crate) static RUN_CONFIG_LOCK: Mutex<()> = Mutex::new(());
+
+/// Number of core starts currently in progress (see [`CoreStartGuard`]).
+/// A Prism write that lands while a start is replacing `run_config.yaml`
+/// would re-write the file with the previous run's port/secret and fail
+/// the startup health check — the new core reads the old secret while
+/// the check presents the new one. Both `hot_reload_target` and the
+/// Prism host's apply path fail closed while this is non-zero; the
+/// caller retries once the start has published the new child. A
+/// counter (not a bool) so two overlapping starts cannot clear each
+/// other's flag.
+static CORE_START_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Whether a core start/restart is currently in progress.
+pub(crate) fn core_start_in_progress() -> bool {
+    CORE_START_COUNT.load(Ordering::SeqCst) > 0
+}
+
+/// RAII guard: mark a core start in progress from `select_runtime_config`
+/// writing the new `run_config.yaml` until the new child is published in
+/// core state. Cleared on drop, so every failure path releases it too.
+/// The guard only gates `hot_reload_target` and the Prism host's apply
+/// path — a refused reload errors and its caller retries.
+#[must_use]
+pub(crate) struct CoreStartGuard;
+
+impl CoreStartGuard {
+    pub(crate) fn acquire() -> Self {
+        CORE_START_COUNT.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for CoreStartGuard {
+    fn drop(&mut self) {
+        CORE_START_COUNT.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 /// Serializes one reload-and-reconcile sequence against the next.
 ///
@@ -83,19 +121,45 @@ pub struct PatchInfo {
     pub path: String,
 }
 
+/// The running core's controller endpoint (port and secret), if a core
+/// is currently running: `None` when it is stopped. Still refuses
+/// while a core start is in progress, for the same reason as
+/// `hot_reload_target` — the start is replacing `run_config.yaml`
+/// with fresh credentials, and writing the previous run's port/secret
+/// would fail the startup health check. Unlike `hot_reload_target`,
+/// a stopped core is not an error here: callers that only need the
+/// endpoint to re-inject credentials (like `write_running_config`)
+/// skip the injection instead, and the next start writes fresh
+/// credentials.
+fn running_core_endpoint(app: &AppHandle) -> Result<Option<(u16, String)>, String> {
+    // Fail closed while a core start is in progress: the start is
+    // replacing `run_config.yaml` with fresh credentials (see
+    // `CORE_START_COUNT`) — a write here would re-write the file with
+    // the previous run's port/secret and fail the startup health check.
+    if core_start_in_progress() {
+        return Err("Hot reload refused: a core start is in progress".to_owned());
+    }
+    let mihomo_state = app.state::<MihomoState>();
+    let lock = mihomo_state
+        .0
+        .lock()
+        .map_err(|e| format!("Lock failed: {e}"))?;
+    Ok(lock
+        .last_port()
+        .map(|port| (port, lock.last_secret().to_owned())))
+}
+
 /// The endpoint a hot reload talks to: the running core's port and secret,
 /// plus the `run_config.yaml` path the reload asks it to load.
 fn hot_reload_target(app: &AppHandle) -> Result<(u16, String, String), String> {
-    let (port, secret) = {
-        let mihomo_state = app.state::<MihomoState>();
-        let lock = mihomo_state
-            .0
-            .lock()
-            .map_err(|e| format!("Lock failed: {e}"))?;
-        let port = lock.last_port().unwrap_or(9090);
-        let secret = lock.last_secret().to_owned();
-        drop(lock);
-        (port, secret)
+    // Fail closed while the core has not published its controller
+    // yet (first start, before the health check passes): falling
+    // back to 9090 / a stale secret here would write the prepared
+    // credentials away and fail the startup health check.
+    let Some((port, secret)) = running_core_endpoint(app)? else {
+        return Err(
+            "Hot reload refused: the core has not published its controller port yet".to_owned(),
+        );
     };
 
     let paths = ensure_app_storage(app)?;
@@ -221,6 +285,30 @@ pub(crate) fn confirmed_tun_enabled(port: u16, secret: &str) -> Option<bool> {
 /// reports. The reconciliation only updates the in-memory live state;
 /// the saved `tun_enabled` preference is the user's own choice, and an
 /// override never rewrites it.
+/// Why a hot reload must be skipped after a successful write, if it
+/// must: with the core stopped there is no endpoint to reload, and
+/// with a start in progress the core is not up yet — in both cases
+/// the written config is still saved, and the reload is skipped
+/// instead of failing the whole pipeline (and dropping its result)
+/// after the write already succeeded. The start-in-progress case is
+/// also what `running_core_endpoint` reports as an error; a lock
+/// failure would report the same way, but the write above already
+/// read the endpoint successfully, so a failure here means a start
+/// began in between. Returns the log line to record when the reload
+/// is skipped, or `None` when it should run. `hot_reload_target`
+/// itself stays fail-closed: this only gates the call.
+fn skipped_reload_reason(state: &PrismState) -> Option<&'static str> {
+    match running_core_endpoint(&state.app) {
+        Ok(Some(_)) => None,
+        Ok(None) => Some(
+            "Core is stopped: config saved, not reloaded. It takes effect at the next core start.",
+        ),
+        Err(_) => {
+            Some("Core start in progress: config saved, not reloaded. The starting core loads it.")
+        }
+    }
+}
+
 pub fn trigger_hot_reload_and_reconcile_tun(state: &PrismState) -> Result<(), String> {
     // Read here to report a missing target to the caller; read again under
     // the sequence lock, since a core restart while queued changes them.
@@ -321,12 +409,177 @@ fn read_running_config(state: &PrismState) -> Result<serde_json::Value, String> 
         .map_err(|e| format!("Failed to parse running config as YAML: {e}"))
 }
 
+/// Restore provider `path` / `script-path` entries the script did not
+/// change. The sanitizer above strips them from every provider — it
+/// cannot tell a script-added path from one already in the running
+/// config — but `prepare_runtime_config` only strips control-plane
+/// keys, so a `type: file` provider placed by hand, or copied in by
+/// a legacy migration, legitimately carries its path in
+/// `run_config.yaml`. A script run must not delete it: the provider
+/// would fail on the next hot reload, until a restart regenerates the
+/// config from the profile. Compared per key, merge-aware: a provider
+/// the script touched elsewhere (its interval, say) still gets its
+/// untouched `path` back, while a path the script added, changed,
+/// removed, or repointed through a merge source stays stripped,
+/// because that path is then the script's doing. The section lookup is
+/// merge-aware too: a whole `proxy-providers` section may live in a
+/// root `<<` merge source, and the restore writes back into the
+/// mapping the section actually lives in, not a flat copy at the root.
+fn restore_unchanged_provider_paths(
+    stripped: &mut serde_json::Value,
+    modified: &serde_json::Value,
+    before: &serde_json::Value,
+) {
+    for section in ["proxy-providers", "rule-providers"] {
+        let Some(stripped_providers) = stripped
+            .as_object_mut()
+            .and_then(|root| {
+                zephyr_core::config::sanitizer::merged_json_mapping_get_mut(root, section, 0)
+            })
+            .and_then(serde_json::Value::as_object_mut)
+        else {
+            continue;
+        };
+        let Some(before_providers) = before
+            .as_object()
+            .and_then(|root| {
+                zephyr_core::config::sanitizer::merged_json_mapping_get(root, section, 0)
+            })
+            .and_then(serde_json::Value::as_object)
+        else {
+            continue;
+        };
+        let Some(modified_providers) = modified
+            .as_object()
+            .and_then(|root| {
+                zephyr_core::config::sanitizer::merged_json_mapping_get(root, section, 0)
+            })
+            .and_then(serde_json::Value::as_object)
+        else {
+            continue;
+        };
+        // Enumerate effective providers, not just direct keys: a
+        // provider may live in the section's `<<` merge source, and
+        // the strip reaches it there — iterating direct keys would
+        // restore nothing for it and silently drop its path. The
+        // lookups below are merge-aware too, so each provider is
+        // compared and written back where it actually lives.
+        for name in zephyr_core::config::sanitizer::merged_json_mapping_keys(stripped_providers) {
+            let Some(provider) = zephyr_core::config::sanitizer::merged_json_mapping_get_mut(
+                stripped_providers,
+                &name,
+                0,
+            ) else {
+                continue;
+            };
+            let Some(before_provider) =
+                zephyr_core::config::sanitizer::merged_json_mapping_get(before_providers, &name, 0)
+            else {
+                continue;
+            };
+            let Some(modified_provider) = zephyr_core::config::sanitizer::merged_json_mapping_get(
+                modified_providers,
+                &name,
+                0,
+            ) else {
+                continue;
+            };
+            let (Some(provider_obj), Some(before_obj), Some(modified_obj)) = (
+                provider.as_object_mut(),
+                before_provider.as_object(),
+                modified_provider.as_object(),
+            ) else {
+                continue;
+            };
+            // Compare per key, merge-aware: the script may change
+            // something else about the provider (its interval, say)
+            // while leaving `path` alone, and whole-provider equality
+            // would then drop a path the script never touched. A key
+            // counts as untouched only when its merged value — direct
+            // or inherited through `<<` — is the same on both sides:
+            // a script that deletes the key, or repoints the merge
+            // source at a different path, does not restore. (`before`
+            // is the running config, so a `script-path` already there
+            // is a pre-existing one, not the script's doing.) The value
+            // is written back flat: mihomo resolves a direct key over
+            // a merge source, so the effective config is unchanged
+            // even though the sanitizer also stripped the inherited
+            // copy out of the merge source.
+            for key in ["path", "script-path"] {
+                if provider_obj.contains_key(key) {
+                    continue;
+                }
+                let Some(before_value) =
+                    zephyr_core::config::sanitizer::merged_json_mapping_get(before_obj, key, 0)
+                else {
+                    continue;
+                };
+                let modified_value =
+                    zephyr_core::config::sanitizer::merged_json_mapping_get(modified_obj, key, 0);
+                if modified_value == Some(before_value) {
+                    provider_obj.insert(key.to_owned(), before_value.clone());
+                }
+            }
+        }
+    }
+}
+
 /// Write the modified config back to `run_config.yaml`, through a temporary
 /// file: a failed write leaves the previous config whole, since the reload
 /// that follows a failed batch (for the Prism patches before it) loads it.
-fn write_running_config(state: &PrismState, config: &serde_json::Value) -> Result<(), String> {
-    let yaml_str = serde_yaml::to_string(config)
+fn write_running_config(
+    state: &PrismState,
+    config: &serde_json::Value,
+    before: &serde_json::Value,
+) -> Result<(), String> {
+    // A script may add an unauthenticated control surface (such as
+    // `external-controller-unix`) to the running config; the strip in
+    // `prepare_runtime_config` never sees script output, so filter it
+    // here, before the config is written back and hot-reloaded. The
+    // strip only removes the unauthenticated surfaces — the TCP
+    // `external-controller` / `secret` are left alone there, because
+    // `prepare_runtime_config` re-injects the managed values right
+    // after. This writer has no such step, so a script that sets
+    // `external-controller` to `0.0.0.0:9090` and clears `secret`
+    // would reach the reload as-is. Restore the managed values here
+    // instead: the written config always carries the controller the
+    // app itself uses, never the script's.
+    let mut stripped = config.clone();
+    zephyr_core::config::sanitizer::remove_control_plane_keys_json(&mut stripped);
+    // Same rule as the `apply_config` path: also strip provider `path`
+    // / `script-path` keys a script may have added, mirroring the
+    // import sanitizer — otherwise a provider path inside the core
+    // directory would be kept and reloaded, and mihomo would load it.
+    zephyr_core::config::sanitizer::remove_dangerous_keys_json(&mut stripped);
+    // A provider path the script did not touch is not the script's to
+    // remove (see above): put back exactly the ones that were already
+    // there, unchanged.
+    restore_unchanged_provider_paths(&mut stripped, config, before);
+    // Re-inject the running core's credentials — unless no core is
+    // running: with the core stopped there is nothing to inject, and
+    // the next start writes fresh credentials, so a stopped core must
+    // not fail the write (scripts run with the core stopped, and the
+    // no-reload paths promise not to reload). A start in progress
+    // still refuses, like the re-check below.
+    if let Some((port, secret)) = running_core_endpoint(&state.app)? {
+        if let Some(obj) = stripped.as_object_mut() {
+            obj.insert(
+                "external-controller".to_owned(),
+                serde_json::json!(format!("127.0.0.1:{port}")),
+            );
+            obj.insert("secret".to_owned(), serde_json::json!(secret));
+        }
+    }
+    let yaml_str = serde_yaml::to_string(&stripped)
         .map_err(|e| format!("Failed to serialize config to YAML: {e}"))?;
+    // Re-check immediately before the write: a start that began during
+    // the strip/serialize above would have its fresh credentials
+    // overwritten by this write (the values above were read before it
+    // began). The endpoint read above is already just before the
+    // injection, so this only covers the serialize step.
+    if core_start_in_progress() {
+        return Err("Hot reload refused: a core start is in progress".to_owned());
+    }
     state.with_ext(|_ext| {
         let paths = ensure_app_storage(&state.app)?;
         let run_config_path = paths.core_dir.join("run_config.yaml");
@@ -406,14 +659,28 @@ pub fn execute_write_pipeline(
     let runtime = ScriptRuntime::with_context(build_script_context());
     let result = runtime.execute_with_write(script, script_name, &config);
 
+    let mut skipped_reload: Option<&'static str> = None;
     if result.success && result.config_modified {
         if let Some(modified) = &result.modified_config {
-            write_running_config(state, modified)?;
-            trigger_hot_reload_and_reconcile_tun(state)?;
+            write_running_config(state, modified, &config)?;
+            // With no core to reload, the write is the whole job:
+            // failing here would report the run as failed and drop
+            // its result even though the config is already on disk.
+            match skipped_reload_reason(state) {
+                Some(reason) => skipped_reload = Some(reason),
+                None => trigger_hot_reload_and_reconcile_tun(state)?,
+            }
         }
     }
 
-    Ok(to_pipeline_result(&result))
+    let mut pipeline_result = to_pipeline_result(&result);
+    if let Some(reason) = skipped_reload {
+        pipeline_result.logs.push(LogEntry {
+            level: "Info".to_owned(),
+            message: reason.to_owned(),
+        });
+    }
+    Ok(pipeline_result)
 }
 
 /// Execute a JavaScript script in dry-run mode (no write-back).
@@ -503,7 +770,7 @@ pub fn execute_write_pipeline_no_reload(
 
     if result.success && result.config_modified {
         if let Some(modified) = &result.modified_config {
-            write_running_config(state, modified)?;
+            write_running_config(state, modified, &config)?;
             // No hot-reload here - caller will trigger it once after batch
         }
     }
@@ -535,6 +802,10 @@ pub fn execute_batch_pipeline(
 
     // 1. Load config once
     let mut config = read_running_config(state)?;
+    // The config before any script ran: the write-back restores
+    // provider paths the scripts left untouched against this, not
+    // against the in-memory result of an earlier script.
+    let before = config.clone();
     let mut any_modified = false;
     let mut results = Vec::with_capacity(scripts.len());
 
@@ -554,11 +825,208 @@ pub fn execute_batch_pipeline(
 
     // 3. Write back once if any script modified the config
     if any_modified {
-        write_running_config(state, &config)?;
+        write_running_config(state, &config, &before)?;
         if hot_reload {
-            trigger_hot_reload_and_reconcile_tun(state)?;
+            // With no core to reload, the write is the whole job:
+            // failing here would report the run as failed and drop
+            // its results even though the config is already on disk.
+            // The note goes on the last script's result, which is
+            // the one the write-back belongs to.
+            match skipped_reload_reason(state) {
+                Some(reason) => {
+                    if let Some(last) = results.last_mut() {
+                        last.logs.push(LogEntry {
+                            level: "Info".to_owned(),
+                            message: reason.to_owned(),
+                        });
+                    }
+                }
+                None => trigger_hot_reload_and_reconcile_tun(state)?,
+            }
         }
     }
 
     Ok(results)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn file_provider(path: &str) -> serde_json::Value {
+        json!({ "type": "file", "path": path, "interval": 3600 })
+    }
+
+    #[test]
+    fn restore_unchanged_provider_paths_restores_untouched_path() {
+        let before =
+            json!({ "proxy-providers": { "local": file_provider("/profiles/local.yaml") } });
+        let modified = before.clone();
+        let mut stripped = modified.clone();
+        stripped["proxy-providers"]["local"]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+        restore_unchanged_provider_paths(&mut stripped, &modified, &before);
+        assert_eq!(
+            stripped["proxy-providers"]["local"]["path"],
+            json!("/profiles/local.yaml")
+        );
+    }
+
+    #[test]
+    fn restore_unchanged_provider_paths_ignores_script_added_path() {
+        let before = json!({ "proxy-providers": { "local": { "type": "http", "url": "https://example.com/list.yaml", "interval": 3600 } } });
+        let mut modified = before.clone();
+        modified["proxy-providers"]["local"]["path"] = json!("/tmp/evil.yaml");
+        let mut stripped = modified.clone();
+        stripped["proxy-providers"]["local"]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+        restore_unchanged_provider_paths(&mut stripped, &modified, &before);
+        assert!(stripped["proxy-providers"]["local"].get("path").is_none());
+    }
+
+    #[test]
+    fn restore_unchanged_provider_paths_ignores_changed_provider() {
+        let before =
+            json!({ "proxy-providers": { "local": file_provider("/profiles/local.yaml") } });
+        let mut modified = before.clone();
+        modified["proxy-providers"]["local"]["path"] = json!("/profiles/other.yaml");
+        let mut stripped = modified.clone();
+        stripped["proxy-providers"]["local"]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+        restore_unchanged_provider_paths(&mut stripped, &modified, &before);
+        assert!(stripped["proxy-providers"]["local"].get("path").is_none());
+    }
+
+    #[test]
+    fn restore_unchanged_provider_paths_keeps_script_removed_path_removed() {
+        let before =
+            json!({ "proxy-providers": { "local": file_provider("/profiles/local.yaml") } });
+        let mut modified = before.clone();
+        modified["proxy-providers"]["local"]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+        let mut stripped = modified.clone();
+        restore_unchanged_provider_paths(&mut stripped, &modified, &before);
+        assert!(stripped["proxy-providers"]["local"].get("path").is_none());
+    }
+
+    #[test]
+    fn restore_unchanged_provider_paths_restores_path_when_only_interval_changed() {
+        // The script changed the interval but left `path` alone: the
+        // old whole-provider comparison dropped the path, and the next
+        // reload failed to load the file provider.
+        let before =
+            json!({ "proxy-providers": { "local": file_provider("/profiles/local.yaml") } });
+        let mut modified = before.clone();
+        modified["proxy-providers"]["local"]["interval"] = json!(7200);
+        let mut stripped = modified.clone();
+        stripped["proxy-providers"]["local"]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+        restore_unchanged_provider_paths(&mut stripped, &modified, &before);
+        assert_eq!(
+            stripped["proxy-providers"]["local"]["path"],
+            json!("/profiles/local.yaml")
+        );
+    }
+
+    #[test]
+    fn restore_unchanged_provider_paths_restores_merged_path() {
+        // The path is inherited through `<<`: the sanitizer strips it
+        // out of the merge source, so the restore must find it there —
+        // a direct-key lookup alone never sees it.
+        let before = json!({ "proxy-providers": { "local": { "type": "file", "<<": { "path": "/profiles/local.yaml" }, "interval": 3600 } } });
+        let modified = before.clone();
+        let mut stripped = modified.clone();
+        stripped["proxy-providers"]["local"]["<<"]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+        restore_unchanged_provider_paths(&mut stripped, &modified, &before);
+        assert_eq!(
+            stripped["proxy-providers"]["local"]["path"],
+            json!("/profiles/local.yaml")
+        );
+    }
+
+    #[test]
+    fn restore_unchanged_provider_paths_restores_root_merged_section() {
+        // The whole `proxy-providers` section lives in a root `<<`
+        // merge source: a direct-key section lookup never sees it, so
+        // the untouched path would stay stripped and the provider would
+        // fail on the next hot reload. The restore must find the section
+        // through the merge and write the path back into the merge
+        // source — not flat at the root.
+        let before = json!({ "<<": { "proxy-providers": { "local": { "type": "file", "path": "/profiles/local.yaml", "interval": 3600 } } } });
+        let modified = before.clone();
+        let mut stripped = modified.clone();
+        stripped["<<"]["proxy-providers"]["local"]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+        restore_unchanged_provider_paths(&mut stripped, &modified, &before);
+        assert_eq!(
+            stripped["<<"]["proxy-providers"]["local"]["path"],
+            json!("/profiles/local.yaml")
+        );
+        assert!(stripped.get("proxy-providers").is_none());
+        assert!(stripped.get("path").is_none());
+    }
+
+    #[test]
+    fn restore_unchanged_provider_paths_restores_provider_in_section_merge() {
+        // The provider itself lives in the section's `<<` merge source:
+        // the sanitizer strips its path out of there, so a restore that
+        // only iterates direct provider keys never sees it and the
+        // provider would fail on the next hot reload. The restore must
+        // enumerate effective providers and write the path back into the
+        // merge source — not flat at the section level.
+        let before = json!({ "proxy-providers": { "<<": { "inherited": file_provider("/profiles/inherited.yaml") }, "direct": file_provider("/profiles/direct.yaml") } });
+        let modified = before.clone();
+        let mut stripped = modified.clone();
+        stripped["proxy-providers"]["<<"]["inherited"]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+        stripped["proxy-providers"]["direct"]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+        restore_unchanged_provider_paths(&mut stripped, &modified, &before);
+        assert_eq!(
+            stripped["proxy-providers"]["<<"]["inherited"]["path"],
+            json!("/profiles/inherited.yaml")
+        );
+        assert_eq!(
+            stripped["proxy-providers"]["direct"]["path"],
+            json!("/profiles/direct.yaml")
+        );
+        assert!(stripped["proxy-providers"].get("inherited").is_none());
+    }
+
+    #[test]
+    fn restore_unchanged_provider_paths_ignores_repointed_merged_path() {
+        // The script repointed the merge source at a different path:
+        // the merged value changed, so nothing is restored.
+        let before = json!({ "proxy-providers": { "local": { "type": "file", "<<": { "path": "/profiles/local.yaml" }, "interval": 3600 } } });
+        let mut modified = before.clone();
+        modified["proxy-providers"]["local"]["<<"]["path"] = json!("/profiles/other.yaml");
+        let mut stripped = modified.clone();
+        stripped["proxy-providers"]["local"]["<<"]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+        restore_unchanged_provider_paths(&mut stripped, &modified, &before);
+        assert!(stripped["proxy-providers"]["local"].get("path").is_none());
+    }
 }

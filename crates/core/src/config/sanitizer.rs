@@ -2,7 +2,7 @@
 //!
 //! Migrated from `src-tauri/src/core/config_sanitizer.rs` for cross-platform reuse.
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf, Prefix};
 
 /// Maximum recursion depth for YAML processing to prevent stack overflow attacks.
 const MAX_YAML_DEPTH: usize = 100;
@@ -105,12 +105,364 @@ pub fn remove_control_plane_keys(value: &mut serde_yaml::Value) {
     }
 }
 
+/// JSON counterpart of [`remove_control_plane_keys`]: the Prism pipeline
+/// works with `serde_json::Value`, and a script may add an unauthenticated
+/// control surface to the running config that the YAML-side strip in
+/// `prepare_runtime_config` never sees. Same scope: only the root object
+/// (and any `<<` merge sources attached to it) is touched, and
+/// `external-controller` / `secret` are left alone.
+pub fn remove_control_plane_keys_json(value: &mut serde_json::Value) {
+    remove_control_plane_keys_json_inner(value, 0);
+}
+
+fn remove_control_plane_keys_json_inner(value: &mut serde_json::Value, depth: usize) {
+    if depth > MAX_YAML_DEPTH {
+        // Mirror the YAML side (`strip_control_plane_merge_source`):
+        // a merge source deeper than the cap is dropped, not left in
+        // place — mihomo resolves nested `<<` chains, so keys hiding
+        // below the cap would otherwise merge their way up to the root.
+        *value = serde_json::Value::Null;
+        return;
+    }
+    #[allow(clippy::wildcard_enum_match_arm)]
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in CONTROL_PLANE_KEYS {
+                map.remove(*key);
+            }
+            // A `<<` merge source is part of this same logical mapping
+            // once mihomo resolves it, so a control-plane key hiding
+            // there counts as a top-level one.
+            if let Some(source) = map.get_mut(YAML_MERGE_KEY) {
+                remove_control_plane_keys_json_inner(source, depth + 1);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                remove_control_plane_keys_json_inner(item, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The merged value of `name` in a JSON object once `<<` merge keys are
+/// resolved the way mihomo resolves them: a direct key wins over an
+/// inherited one, and merge sources may be a single object or an array
+/// of objects (earlier sources win), themselves carrying `<<`. Returns
+/// `None` when neither the mapping nor its merge sources carry the key.
+/// The counterpart of `merged_json_mapping_has_key` for callers that
+/// need the value, not just its presence — the Prism restore paths
+/// compare a provider's `path` before and after a script ran, and the
+/// path may live in a merge source on either side.
+#[must_use]
+pub fn merged_json_mapping_get<'a>(
+    map: &'a serde_json::Map<String, serde_json::Value>,
+    name: &str,
+    depth: usize,
+) -> Option<&'a serde_json::Value> {
+    if let Some(value) = map.get(name) {
+        return Some(value);
+    }
+    if depth > MAX_YAML_DEPTH {
+        return None;
+    }
+    match map.get(YAML_MERGE_KEY) {
+        Some(source) => merged_json_get(source, name, depth + 1),
+        None => None,
+    }
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn merged_json_get<'a>(
+    value: &'a serde_json::Value,
+    name: &str,
+    depth: usize,
+) -> Option<&'a serde_json::Value> {
+    if depth > MAX_YAML_DEPTH {
+        return None;
+    }
+    match value {
+        serde_json::Value::Object(map) => merged_json_mapping_get(map, name, depth),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .find_map(|item| merged_json_get(item, name, depth + 1)),
+        _ => None,
+    }
+}
+
+/// Whether `name` appears in a JSON object once `<<` merge keys are
+/// resolved the way mihomo resolves them: a key inherited through `<<`
+/// counts, whether the merge source is a single object or an array of
+/// objects, and merge sources may themselves carry `<<`.
+fn merged_json_mapping_has_key(
+    map: &serde_json::Map<String, serde_json::Value>,
+    name: &str,
+    depth: usize,
+) -> bool {
+    if map.contains_key(name) {
+        return true;
+    }
+    if depth > MAX_YAML_DEPTH {
+        return false;
+    }
+    match map.get(YAML_MERGE_KEY) {
+        Some(source) => merged_json_has_key(source, name, depth + 1),
+        None => false,
+    }
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn merged_json_has_key(value: &serde_json::Value, name: &str, depth: usize) -> bool {
+    if depth > MAX_YAML_DEPTH {
+        return false;
+    }
+    match value {
+        serde_json::Value::Object(map) => merged_json_mapping_has_key(map, name, depth),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .any(|item| merged_json_has_key(item, name, depth + 1)),
+        _ => false,
+    }
+}
+
+/// Mutable counterpart of [`merged_json_mapping_get`]: the merged value
+/// of `name`, returned where it actually lives — direct, or inside a
+/// merge source — so a caller restoring a stripped key writes it back
+/// into the mapping the strip removed it from, not a flat copy at the
+/// top level. Same resolution as the immutable one: a direct key wins,
+/// merge sources may be a single object or an array of objects
+/// (earlier sources win), themselves carrying `<<`.
+#[must_use]
+pub fn merged_json_mapping_get_mut<'a>(
+    map: &'a mut serde_json::Map<String, serde_json::Value>,
+    name: &str,
+    depth: usize,
+) -> Option<&'a mut serde_json::Value> {
+    if map.contains_key(name) {
+        return map.get_mut(name);
+    }
+    if depth > MAX_YAML_DEPTH {
+        return None;
+    }
+    match map.get_mut(YAML_MERGE_KEY) {
+        Some(source) => merged_json_get_mut(source, name, depth + 1),
+        None => None,
+    }
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn merged_json_get_mut<'a>(
+    value: &'a mut serde_json::Value,
+    name: &str,
+    depth: usize,
+) -> Option<&'a mut serde_json::Value> {
+    if depth > MAX_YAML_DEPTH {
+        return None;
+    }
+    match value {
+        serde_json::Value::Object(map) => merged_json_mapping_get_mut(map, name, depth),
+        serde_json::Value::Array(items) => items
+            .iter_mut()
+            .find_map(|item| merged_json_get_mut(item, name, depth + 1)),
+        _ => None,
+    }
+}
+
+/// Effective keys of a JSON mapping once `<<` merge keys are resolved
+/// the way mihomo resolves them: direct keys first, then keys inherited
+/// through merge sources (a single object or an array of objects,
+/// earlier sources first), each key once, `<<` itself excluded. Merge
+/// sources may themselves carry `<<`. Use this to enumerate entries
+/// (e.g. providers) rather than iterating direct keys, which misses
+/// entries that only exist in a merge source.
+#[must_use]
+pub fn merged_json_mapping_keys(map: &serde_json::Map<String, serde_json::Value>) -> Vec<String> {
+    let mut keys = Vec::new();
+    collect_json_mapping_keys(map, &mut keys, 0);
+    keys
+}
+
+fn collect_json_mapping_keys(
+    map: &serde_json::Map<String, serde_json::Value>,
+    keys: &mut Vec<String>,
+    depth: usize,
+) {
+    if depth > MAX_YAML_DEPTH {
+        return;
+    }
+    for key in map.keys() {
+        if key != YAML_MERGE_KEY && !keys.contains(key) {
+            keys.push(key.clone());
+        }
+    }
+    if let Some(source) = map.get(YAML_MERGE_KEY) {
+        collect_json_value_keys(source, keys, depth + 1);
+    }
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn collect_json_value_keys(value: &serde_json::Value, keys: &mut Vec<String>, depth: usize) {
+    if depth > MAX_YAML_DEPTH {
+        return;
+    }
+    match value {
+        // The object is the merge source itself, not a deeper nesting
+        // level: keep the depth the caller already accounted for, so
+        // this advances exactly like `merged_json_get` (one level per
+        // merge hop).
+        serde_json::Value::Object(map) => collect_json_mapping_keys(map, keys, depth),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_json_value_keys(item, keys, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// JSON counterpart of the provider-path strip in
+/// [`remove_dangerous_keys_internal`]: the Prism pipeline works with
+/// `serde_json::Value`, and a script may add a provider `path` (or a
+/// `script` / `script-path`) to the running config that the strip in
+/// `prepare_runtime_config` never sees. Same rule as the import
+/// sanitizer: `script` and `script-path` are removed everywhere, the
+/// six Clash-for-Windows legacy keys are removed from every mapping,
+/// and `path` is removed from mappings that look like providers (`type`
+/// plus `url` or `path`, counting keys inherited through a `<<` merge
+/// source). A `path` anywhere else — a log path, for example — is
+/// left alone.
+pub fn remove_dangerous_keys_json(value: &mut serde_json::Value) {
+    remove_dangerous_keys_json_inner(value, false, 0);
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn remove_dangerous_keys_json_inner(
+    value: &mut serde_json::Value,
+    in_provider_context: bool,
+    depth: usize,
+) {
+    // Prevent stack overflow from deeply nested structures. Clear the
+    // value entirely to prevent dangerous keys from surviving at the
+    // depth limit.
+    if depth > MAX_YAML_DEPTH {
+        *value = serde_json::Value::Null;
+        return;
+    }
+
+    match value {
+        serde_json::Value::Object(map) => {
+            // Always remove script-related keys globally: `script` can
+            // execute arbitrary JavaScript, `script-path` can load
+            // external script files.
+            map.remove("script");
+            map.remove("script-path");
+
+            // Clash-for-Windows legacy keys, same as the YAML side:
+            // they have no effect in mihomo, but a script could add
+            // them to the running config and the import sanitizer
+            // would never see them.
+            for key in [
+                "cfw-bypass",
+                "cfw-bypass-domain",
+                "cfw-profiles-path",
+                "cfw-conn-break-strategy",
+                "prepend-proxy-groups",
+                "append-proxy-groups",
+            ] {
+                map.remove(key);
+            }
+
+            // Check if this mapping looks like a provider: providers
+            // have `type` and either `url` or `path` fields (keys
+            // inherited through a `<<` merge key count too).
+            let has_key = |name: &str| merged_json_mapping_has_key(map, name, depth);
+            let is_provider = has_key("type") && (has_key("url") || has_key("path"));
+
+            // Remove `path` only in provider context to prevent path
+            // traversal while allowing legitimate `path` fields
+            // elsewhere.
+            if in_provider_context || is_provider {
+                map.remove("path");
+            }
+
+            // Recursively process all values in the mapping. A `<<`
+            // merge source is part of this same logical mapping once
+            // mihomo resolves it, so it inherits the provider context
+            // this mapping was itself visited with.
+            for (k, v) in map.iter_mut() {
+                let is_merge_source = k == YAML_MERGE_KEY;
+                let child_in_provider_context = if is_merge_source {
+                    in_provider_context || is_provider
+                } else {
+                    is_provider
+                };
+                remove_dangerous_keys_json_inner(v, child_in_provider_context, depth + 1);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                remove_dangerous_keys_json_inner(item, in_provider_context, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[inline]
 const fn decode_hex_digit(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
         b'a'..=b'f' => Some(byte - b'a' + 10),
         b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// The merged value of `name` in a YAML mapping once `<<` merge keys are
+/// resolved the way mihomo resolves them: a direct key wins over an
+/// inherited one, and merge sources may be a single mapping, a sequence
+/// of mappings, or a tagged version of either, themselves carrying `<<`.
+/// Returns `None` when neither the mapping nor its merge sources carry
+/// the key. The YAML counterpart of `merged_json_mapping_get`.
+#[must_use]
+pub fn merged_mapping_get<'a>(
+    map: &'a serde_yaml::Mapping,
+    name: &str,
+    depth: usize,
+) -> Option<&'a serde_yaml::Value> {
+    for (key, value) in map {
+        if resolved_key_str(key) == Some(name) {
+            return Some(value);
+        }
+    }
+    if depth > MAX_YAML_DEPTH {
+        return None;
+    }
+    map.iter()
+        .filter(|(k, _)| resolved_key_str(k) == Some(YAML_MERGE_KEY))
+        .find_map(|(_, source)| merged_value_get(source, name, depth + 1))
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn merged_value_get<'a>(
+    value: &'a serde_yaml::Value,
+    name: &str,
+    depth: usize,
+) -> Option<&'a serde_yaml::Value> {
+    if depth > MAX_YAML_DEPTH {
+        return None;
+    }
+    match value {
+        // The mapping is the merge source itself, not a deeper nesting
+        // level: keep the depth the caller already accounted for, so this
+        // lookup advances exactly like `merged_value_has_key` (one level
+        // per merge hop).
+        serde_yaml::Value::Mapping(map) => merged_mapping_get(map, name, depth),
+        serde_yaml::Value::Sequence(seq) => seq
+            .iter()
+            .find_map(|item| merged_value_get(item, name, depth + 1)),
+        serde_yaml::Value::Tagged(tagged) => merged_value_get(&tagged.value, name, depth + 1),
         _ => None,
     }
 }
@@ -150,6 +502,127 @@ fn merged_value_has_key(value: &serde_yaml::Value, name: &str, depth: usize) -> 
             .any(|item| merged_value_has_key(item, name, depth + 1)),
         serde_yaml::Value::Tagged(tagged) => merged_value_has_key(&tagged.value, name, depth + 1),
         _ => false,
+    }
+}
+
+/// Mutable counterpart of [`merged_mapping_get`]: the merged value of
+/// `name`, returned where it actually lives — direct, or inside a merge
+/// source — so a caller restoring a stripped key writes it back into
+/// the mapping the strip removed it from, not a flat copy at the top
+/// level. Same resolution as the immutable one, tags included.
+#[must_use]
+pub fn merged_mapping_get_mut<'a>(
+    map: &'a mut serde_yaml::Mapping,
+    name: &str,
+    depth: usize,
+) -> Option<&'a mut serde_yaml::Value> {
+    // Direct key first — but check immutably, and borrow mutably only
+    // inside the branch that returns: a borrow taken before the branch
+    // would have to live across the merge scan below, which the borrow
+    // checker rejects. Same shape as `merged_json_mapping_get_mut`.
+    if map.iter().any(|(k, _)| resolved_key_str(k) == Some(name)) {
+        return map
+            .iter_mut()
+            .find_map(|(key, value)| (resolved_key_str(key) == Some(name)).then_some(value));
+    }
+    if depth > MAX_YAML_DEPTH {
+        return None;
+    }
+    merge_mapping_get_mut(map, name, depth)
+}
+
+/// The merge-source half of [`merged_mapping_get_mut`]: the first
+/// `<<` source carrying the key, earliest first like the immutable
+/// lookup.
+fn merge_mapping_get_mut<'a>(
+    map: &'a mut serde_yaml::Mapping,
+    name: &str,
+    depth: usize,
+) -> Option<&'a mut serde_yaml::Value> {
+    map.iter_mut().find_map(|(key, source)| {
+        if resolved_key_str(key) == Some(YAML_MERGE_KEY) {
+            merged_value_get_mut(source, name, depth + 1)
+        } else {
+            None
+        }
+    })
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn merged_value_get_mut<'a>(
+    value: &'a mut serde_yaml::Value,
+    name: &str,
+    depth: usize,
+) -> Option<&'a mut serde_yaml::Value> {
+    if depth > MAX_YAML_DEPTH {
+        return None;
+    }
+    match value {
+        // The mapping is the merge source itself, not a deeper nesting
+        // level: keep the depth the caller already accounted for, so
+        // this lookup advances exactly like `merged_value_get`.
+        serde_yaml::Value::Mapping(map) => merged_mapping_get_mut(map, name, depth),
+        serde_yaml::Value::Sequence(seq) => seq
+            .iter_mut()
+            .find_map(|item| merged_value_get_mut(item, name, depth + 1)),
+        serde_yaml::Value::Tagged(tagged) => {
+            merged_value_get_mut(&mut tagged.value, name, depth + 1)
+        }
+        _ => None,
+    }
+}
+
+/// YAML counterpart of [`merged_json_mapping_keys`]: effective string
+/// keys of a mapping once `<<` merge keys are resolved the way mihomo
+/// resolves them — direct keys first, then keys inherited through merge
+/// sources (a single mapping, a sequence of mappings, or a tagged
+/// version of either), each key once, `<<` itself excluded. Merge
+/// sources may themselves carry `<<`. Non-string keys are skipped:
+/// provider names are strings.
+#[must_use]
+pub fn merged_mapping_keys(map: &serde_yaml::Mapping) -> Vec<String> {
+    let mut keys = Vec::new();
+    collect_mapping_keys(map, &mut keys, 0);
+    keys
+}
+
+fn collect_mapping_keys(map: &serde_yaml::Mapping, keys: &mut Vec<String>, depth: usize) {
+    if depth > MAX_YAML_DEPTH {
+        return;
+    }
+    for key in map.keys() {
+        if let Some(key_str) = resolved_key_str(key) {
+            if key_str != YAML_MERGE_KEY && !keys.iter().any(|k| k == key_str) {
+                keys.push(key_str.to_owned());
+            }
+        }
+    }
+    for (key, source) in map {
+        if resolved_key_str(key) == Some(YAML_MERGE_KEY) {
+            collect_mapping_value_keys(source, keys, depth + 1);
+        }
+    }
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn collect_mapping_value_keys(value: &serde_yaml::Value, keys: &mut Vec<String>, depth: usize) {
+    if depth > MAX_YAML_DEPTH {
+        return;
+    }
+    match value {
+        // The mapping is the merge source itself, not a deeper nesting
+        // level: keep the depth the caller already accounted for, like
+        // `merged_value_get` (one level per merge hop).
+        serde_yaml::Value::Mapping(map) => collect_mapping_keys(map, keys, depth),
+        serde_yaml::Value::Sequence(seq) => {
+            for item in seq {
+                collect_mapping_value_keys(item, keys, depth + 1);
+            }
+        }
+        serde_yaml::Value::Tagged(tagged) => {
+            collect_mapping_value_keys(&tagged.value, keys, depth + 1);
+        }
+        _ => {}
     }
 }
 
@@ -458,12 +931,219 @@ pub fn sanitize_config_file_name(config_path: String) -> Result<String, crate::e
     Ok(config_file_name)
 }
 
+/// Lexically normalize a path to resolve '.', '..', and separators.
+/// A `..` directly under the root is dropped: on a filesystem `/..`
+/// resolves to `/`, so keeping it would falsely reject a path that
+/// actually points inside the base. A `..` after a drive prefix or at
+/// the start of a relative path is kept: it may genuinely escape.
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(..) | Component::RootDir | Component::Normal(..) => {
+                normalized.push(component);
+            }
+            Component::ParentDir => match normalized.components().next_back() {
+                Some(Component::Normal(..)) => {
+                    normalized.pop();
+                }
+                Some(Component::RootDir) => {}
+                _ => {
+                    normalized.push(component);
+                }
+            },
+            Component::CurDir => {}
+        }
+    }
+    normalized
+}
+
+/// Expand symlinks component by component, without requiring the path
+/// to exist. A dangling link is expanded too, since a later write would
+/// follow it. Scanning restarts after each replacement so chained links
+/// are followed; the cap stops symlink loops (a looped path cannot be
+/// written anyway, and any expansion that already left the base is
+/// rejected by the caller).
+fn expand_symlinks(path: &Path) -> Result<PathBuf, crate::error::AppError> {
+    let mut current = path.to_path_buf();
+    for _ in 0..40 {
+        let mut prefix = PathBuf::new();
+        let mut found: Option<(PathBuf, PathBuf)> = None;
+        let mut unreadable_link = false;
+        // Components past a missing component cannot be probed through
+        // the OS: for `/base/missing/../link` every `symlink_metadata`
+        // past `missing` fails, so the `link` symlink is never expanded
+        // — yet a later `create_dir_all` on the parent would make the
+        // path resolve through it. Track the missing run and cancel it
+        // lexically on `..`, so the components after it are probed at
+        // the location they will actually have.
+        let mut missing_depth: usize = 0;
+        let mut components = current.components();
+        for component in components.by_ref() {
+            // A `..` after missing components cancels the last missing
+            // one: the OS cannot resolve `/base/missing/..`, but the
+            // resolved location is `/base`, so keep scanning there.
+            if missing_depth > 0 && matches!(component, Component::ParentDir) {
+                prefix.pop();
+                missing_depth -= 1;
+                continue;
+            }
+            prefix.push(component);
+            // A lone Prefix is a volume root, never a symlink, so
+            // there is nothing to probe here — and probing it can
+            // fail: a verbatim Windows prefix (`\\?\C:`) or a UNC
+            // root (`\\server\share`) is a bare drive reference, not
+            // a file or directory, so the OS may report it as
+            // invalid or inaccessible rather than NotFound, which the
+            // fail-closed branch below would turn into a rejection
+            // of the whole path. The components under the prefix are
+            // still probed normally. (A verbatim prefix reaches here
+            // when `read_link` or `canonicalize` returns a `\\?\`
+            // target and the scan restarts on it.)
+            if matches!(component, Component::Prefix(_)) && prefix.components().count() == 1 {
+                continue;
+            }
+            match prefix.symlink_metadata() {
+                Ok(meta) => {
+                    if meta.file_type().is_symlink() {
+                        if let Ok(target) = std::fs::read_link(&prefix) {
+                            let target_abs = if target.is_absolute() {
+                                target
+                            } else {
+                                prefix
+                                    .parent()
+                                    .unwrap_or_else(|| Path::new("/"))
+                                    .join(target)
+                            };
+                            // The suffix is whatever the iterator has not
+                            // consumed yet. `prefix` is the link's resolved
+                            // location, which need not be a lexical prefix
+                            // of `current` once a `..` cancelled a missing
+                            // component above, so recovering the suffix with
+                            // `strip_prefix` on the raw path can fail and
+                            // silently drop it — and a `..` inside the
+                            // dropped part would then escape unchecked.
+                            // Take it from the iterator instead.
+                            found = Some((target_abs, components.as_path().to_path_buf()));
+                            break;
+                        }
+                        // Fail closed: an unreadable link cannot be
+                        // proven to stay inside the base.
+                        unreadable_link = true;
+                        break;
+                    }
+                }
+                Err(err) => {
+                    // Only a missing component is "missing": any other
+                    // inspection failure (permissions, a loop, a file
+                    // where a directory is expected) must fail closed.
+                    // Treating it as missing would let a `..` after it
+                    // hide a symlink this scan never sees.
+                    if err.kind() == std::io::ErrorKind::NotFound {
+                        missing_depth += 1;
+                    } else {
+                        return Err(crate::error::AppError::ConfigError(format!(
+                            "Path traversal detected: cannot inspect path component: {err}"
+                        )));
+                    }
+                }
+            }
+        }
+        if unreadable_link {
+            return Err(crate::error::AppError::ConfigError(
+                "Path traversal detected: unreadable symlink on path".to_owned(),
+            ));
+        }
+        match found {
+            None => break,
+            Some((target, suffix)) => {
+                current = target.join(suffix);
+            }
+        }
+    }
+    // The loop stops after 40 replacements: a longer chain still holds
+    // an unexpanded link, and returning it unchecked would let a later
+    // write follow that link outside the base. Fail closed instead.
+    // The same missing-component cancellation as the scan above applies:
+    // without it a `missing/../link` tail hides the link from this check,
+    // and the path would be returned as if the link did not exist.
+    let mut prefix = PathBuf::new();
+    let mut missing_depth: usize = 0;
+    for component in current.components() {
+        if missing_depth > 0 && matches!(component, Component::ParentDir) {
+            prefix.pop();
+            missing_depth -= 1;
+            continue;
+        }
+        prefix.push(component);
+        // Same rule as the scan above: a lone Prefix is a volume
+        // root, never a symlink — skip probing it.
+        if matches!(component, Component::Prefix(_)) && prefix.components().count() == 1 {
+            continue;
+        }
+        match prefix.symlink_metadata() {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() {
+                    return Err(crate::error::AppError::ConfigError(
+                        "Path traversal detected: symlink chain too long".to_owned(),
+                    ));
+                }
+            }
+            // Same rule as the scan above: only NotFound is "missing";
+            // any other inspection failure fails closed.
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                missing_depth += 1;
+            }
+            Err(err) => {
+                return Err(crate::error::AppError::ConfigError(format!(
+                    "Path traversal detected: cannot inspect path component: {err}"
+                )));
+            }
+        }
+    }
+    Ok(current)
+}
+
+/// Component-wise prefix check that folds ASCII case on Windows: the
+/// filesystem is case-insensitive there, but `Path::starts_with`
+/// compares components exactly, so a symlink target stored as
+/// `C:\DATA\sub` would otherwise fail against a `C:\Data\sub` base.
+/// Other platforms keep the exact comparison (their filesystems are
+/// case-sensitive, and folding there would admit a differently-cased
+/// sibling directory).
+fn path_starts_with_case_aware(path: &Path, base: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let mut path_components = path.components();
+        base.components().all(|base_component| {
+            path_components.next().is_some_and(|component| {
+                component
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    .eq_ignore_ascii_case(base_component.as_os_str().as_encoded_bytes())
+            })
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        path.starts_with(base)
+    }
+}
+
 /// Validates that the resolved path is within the expected base directory
 pub fn validate_path_within_dir(
     resolved_path: &Path,
     base_dir: &Path,
 ) -> Result<(), crate::error::AppError> {
-    // If the file exists, use canonicalize for definitive check
+    let traversal_err = || {
+        crate::error::AppError::ConfigError(
+            "Path traversal detected: resolved path is outside allowed directory".to_owned(),
+        )
+    };
+
+    // Existing files: canonical comparison is authoritative. It resolves
+    // symlinks and spelling differences (macOS /var vs /private/var,
+    // Windows \\?\ prefixes) that a lexical check would falsely reject.
     if resolved_path.exists() {
         let canonical_resolved = resolved_path.canonicalize().map_err(|e| {
             crate::error::AppError::IoError(format!("Failed to canonicalize resolved path: {e}"))
@@ -471,25 +1151,61 @@ pub fn validate_path_within_dir(
         let canonical_base = base_dir.canonicalize().map_err(|e| {
             crate::error::AppError::IoError(format!("Failed to canonicalize base directory: {e}"))
         })?;
-
         if !canonical_resolved.starts_with(&canonical_base) {
-            return Err(crate::error::AppError::ConfigError(
-                "Path traversal detected: resolved path is outside allowed directory".to_owned(),
-            ));
+            return Err(traversal_err());
         }
-    } else {
-        // File doesn't exist yet, do string-level validation
-        let resolved_str = resolved_path.to_string_lossy();
-        let base_str = base_dir.to_string_lossy();
+        return Ok(());
+    }
 
-        // Normalize path separators for comparison
-        let resolved_normalized = resolved_str.replace('\\', "/");
-        let base_normalized = base_str.replace('\\', "/");
-
-        if !resolved_normalized.starts_with(&*base_normalized) {
-            return Err(crate::error::AppError::ConfigError(
-                "Path traversal detected: resolved path is outside allowed directory".to_owned(),
-            ));
+    // Not (yet) on disk: canonicalization is impossible, so validate
+    // lexically on the symlink-expanded path. exists() follows links,
+    // so without expansion a dangling leaf symlink would be skipped and
+    // a later write would follow it outside the base.
+    // Both sides must use the same spelling: expanding only the child
+    // rejects every new file under a symlinked base (for example a
+    // macOS temp dir below /var, which is a link to /private/var),
+    // because the expanded child no longer starts with the raw base.
+    let norm_base = normalize_path(&expand_symlinks(base_dir)?);
+    let expanded = normalize_path(&expand_symlinks(resolved_path)?);
+    // An empty normalized base (base_dir "." or "") matches every
+    // path with starts_with, so a traversal target would pass.
+    // Fail closed: no current caller passes such a base, and a
+    // security validator must not silently accept everything.
+    if norm_base.as_os_str().is_empty() {
+        return Err(traversal_err());
+    }
+    // A base that normalizes to a leading `..` (base_dir `..` or
+    // `../profiles`) escapes whatever it is relative to: the
+    // normalized target `../../outside.yaml` starts with it, so the
+    // check would pass an escaping path. Fail closed like the empty
+    // base above; no current caller passes a relative base.
+    // Skip an optional drive prefix first: `C:..` is a drive-relative
+    // base, and a missing `C:..\..\outside.yaml` would otherwise pass
+    // the starts_with check against it while resolving outside the
+    // base. A bare prefix (`C:`) names no directory at all and would
+    // match every path on that drive.
+    let first_dir_component = norm_base
+        .components()
+        .find(|c| !matches!(c, Component::Prefix(_)));
+    // A bare UNC root (`\\server\share`) has no non-prefix component —
+    // it IS the directory root, not a missing one. A bare drive prefix
+    // (`C:`, `\\?\C:`) names no directory and still fails closed.
+    let is_unc_root = matches!(
+        norm_base.components().next(),
+        Some(Component::Prefix(prefix))
+            if matches!(prefix.kind(), Prefix::UNC(..) | Prefix::VerbatimUNC(..))
+    );
+    if matches!(first_dir_component, Some(Component::ParentDir) | None) && !is_unc_root {
+        return Err(traversal_err());
+    }
+    if !path_starts_with_case_aware(&expanded, &norm_base) {
+        return Err(traversal_err());
+    }
+    if let Ok(canonical_base) = base_dir.canonicalize() {
+        if let Ok(canonical_expanded) = expanded.canonicalize() {
+            if !canonical_expanded.starts_with(&canonical_base) {
+                return Err(traversal_err());
+            }
         }
     }
     Ok(())
@@ -964,5 +1680,757 @@ proxies:
         let mut value = serde_yaml::Value::String("external-ui".to_owned());
         remove_control_plane_keys(&mut value);
         assert_eq!(value.as_str().unwrap(), "external-ui");
+    }
+
+    #[test]
+    fn test_remove_control_plane_keys_json_strips_top_level() {
+        let mut value = serde_json::json!({
+            "mixed-port": 7890,
+            "external-controller-unix": "/tmp/a.sock",
+            "external-ui": "/tmp/ui",
+            "external-controller": "127.0.0.1:9090",
+            "secret": "s3cr3t",
+            "proxies": [{ "name": "p", "external-ui": "keep-me" }],
+        });
+        remove_control_plane_keys_json(&mut value);
+        let obj = value.as_object().unwrap();
+        assert!(!obj.contains_key("external-controller-unix"));
+        assert!(!obj.contains_key("external-ui"));
+        assert_eq!(obj.get("mixed-port").unwrap(), 7890);
+        assert_eq!(obj.get("external-controller").unwrap(), "127.0.0.1:9090");
+        assert_eq!(obj.get("secret").unwrap(), "s3cr3t");
+        assert_eq!(
+            obj.get("proxies")
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .get("external-ui")
+                .unwrap(),
+            "keep-me"
+        );
+    }
+
+    #[test]
+    fn test_remove_control_plane_keys_json_strips_merge_sources() {
+        let mut value = serde_json::json!({
+            "mixed-port": 7890,
+            "<<": {
+                "external-controller-unix": "/tmp/a.sock",
+                "log-level": "info",
+            },
+        });
+        remove_control_plane_keys_json(&mut value);
+        let merged = value.get("<<").unwrap().as_object().unwrap();
+        assert!(!merged.contains_key("external-controller-unix"));
+        assert_eq!(merged.get("log-level").unwrap(), "info");
+    }
+
+    #[test]
+    fn test_remove_control_plane_keys_json_ignores_non_object_root() {
+        let mut value = serde_json::json!("external-ui");
+        remove_control_plane_keys_json(&mut value);
+        assert_eq!(value.as_str().unwrap(), "external-ui");
+    }
+
+    #[test]
+    fn test_remove_dangerous_keys_json_strips_provider_paths() {
+        let mut value = serde_json::json!({
+            "mixed-port": 7890,
+            "script-path": "/tmp/evil.js",
+            "proxy-providers": {
+                "rules": { "type": "http", "url": "https://example.com/rules.yaml", "path": "./rules.yaml", "interval": 3600 },
+                "local": { "type": "file", "path": "./local.yaml" },
+            },
+            "rule-providers": {
+                "ads": { "type": "http", "url": "https://example.com/ads.yaml", "path": "./ads.yaml", "behavior": "domain" },
+            },
+        });
+        remove_dangerous_keys_json(&mut value);
+        let obj = value.as_object().unwrap();
+        assert!(!obj.contains_key("script-path"));
+        assert_eq!(obj.get("mixed-port").unwrap(), 7890);
+        let rules = obj
+            .get("proxy-providers")
+            .unwrap()
+            .get("rules")
+            .unwrap()
+            .as_object()
+            .unwrap();
+        assert!(!rules.contains_key("path"));
+        assert_eq!(rules.get("url").unwrap(), "https://example.com/rules.yaml");
+        assert_eq!(rules.get("interval").unwrap(), 3600);
+        let local = obj
+            .get("proxy-providers")
+            .unwrap()
+            .get("local")
+            .unwrap()
+            .as_object()
+            .unwrap();
+        assert!(!local.contains_key("path"));
+        assert_eq!(local.get("type").unwrap(), "file");
+        let ads = obj
+            .get("rule-providers")
+            .unwrap()
+            .get("ads")
+            .unwrap()
+            .as_object()
+            .unwrap();
+        assert!(!ads.contains_key("path"));
+        assert_eq!(ads.get("behavior").unwrap(), "domain");
+    }
+
+    #[test]
+    fn test_remove_dangerous_keys_json_keeps_non_provider_paths() {
+        // A `path` outside a provider (a log path, for example) is
+        // not a provider path and must survive.
+        let mut value = serde_json::json!({
+            "log": { "path": "/var/log/mihomo.log" },
+            "tun": { "enable": true },
+            "dns": { "nameserver": ["8.8.8.8"] },
+        });
+        remove_dangerous_keys_json(&mut value);
+        assert_eq!(
+            value.get("log").unwrap().get("path").unwrap(),
+            "/var/log/mihomo.log"
+        );
+    }
+
+    #[test]
+    fn test_remove_dangerous_keys_json_strips_merge_inherited_provider_path() {
+        // The provider's `type` comes from a `<<` merge source while
+        // `path` is local: still a provider, still stripped.
+        let mut value = serde_json::json!({
+            "proxy-providers": {
+                "rules": {
+                    "<<": { "type": "http", "url": "https://example.com/rules.yaml" },
+                    "path": "./rules.yaml",
+                    "interval": 3600,
+                },
+            },
+        });
+        remove_dangerous_keys_json(&mut value);
+        let rules = value
+            .get("proxy-providers")
+            .unwrap()
+            .get("rules")
+            .unwrap()
+            .as_object()
+            .unwrap();
+        assert!(!rules.contains_key("path"));
+        assert_eq!(rules.get("interval").unwrap(), 3600);
+    }
+
+    #[test]
+    fn test_remove_dangerous_keys_json_strips_cfw_keys() {
+        // The six Clash-for-Windows legacy keys are stripped from
+        // every mapping on the JSON side too, matching the YAML side
+        // — a script could otherwise add them to the running config
+        // where the import sanitizer never sees them.
+        let mut value = serde_json::json!({
+            "cfw-bypass": ["example.com"],
+            "prepend-proxy-groups": ["PROXY"],
+            "mixed-port": 7890,
+            "tun": { "cfw-conn-break-strategy": "always", "enable": true },
+        });
+        remove_dangerous_keys_json(&mut value);
+        let obj = value.as_object().unwrap();
+        assert!(!obj.contains_key("cfw-bypass"));
+        assert!(!obj.contains_key("prepend-proxy-groups"));
+        assert_eq!(obj.get("mixed-port").unwrap(), 7890);
+        let tun = obj.get("tun").unwrap().as_object().unwrap();
+        assert!(!tun.contains_key("cfw-conn-break-strategy"));
+        assert_eq!(tun.get("enable").unwrap(), true);
+    }
+
+    #[test]
+    fn test_remove_control_plane_keys_json_drops_over_deep_merge_source() {
+        // A `<<` chain nested past MAX_YAML_DEPTH: mihomo resolves nested
+        // merges, so a control-plane key at the bottom would merge its way
+        // up to the root — the over-deep source is dropped instead of left
+        // in place (same rule as the YAML side).
+        fn chain(depth: usize) -> serde_json::Value {
+            let mut value = serde_json::json!({"external-controller-unix": "/tmp/x"});
+            for _ in 0..depth {
+                value = serde_json::json!({"<<": value});
+            }
+            value
+        }
+        fn walk(mut value: &serde_json::Value, depth: usize) -> &serde_json::Value {
+            for _ in 0..depth {
+                value = &value["<<"];
+            }
+            value
+        }
+
+        let mut deep = chain(MAX_YAML_DEPTH + 1);
+        remove_control_plane_keys_json(&mut deep);
+        assert!(
+            walk(&deep, MAX_YAML_DEPTH + 1).is_null(),
+            "over-deep merge source must be dropped, got: {deep}"
+        );
+        assert!(!deep.to_string().contains("external-controller-unix"));
+
+        // At the cap itself the key is stripped and the chain stays.
+        let mut at_cap = chain(MAX_YAML_DEPTH);
+        remove_control_plane_keys_json(&mut at_cap);
+        assert!(!at_cap.to_string().contains("external-controller-unix"));
+        assert!(walk(&at_cap, MAX_YAML_DEPTH).is_object());
+    }
+
+    #[test]
+    fn test_validate_path_within_dir_lexical() {
+        // Controlled paths only: the old `/var/app` base depended on a
+        // system directory being traversable by the test user.
+        let unique = format!("zephyr_test_lexical_{}", std::process::id());
+        let base = std::env::temp_dir().join(&unique).join("profiles");
+        let sibling = |name: &str| base.parent().unwrap().join(name);
+
+        // Valid inside paths
+        assert!(validate_path_within_dir(&base.join("profile.yaml"), &base).is_ok());
+        assert!(validate_path_within_dir(&base.join("sub/profile.yaml"), &base).is_ok());
+        assert!(validate_path_within_dir(&base.join("./profile.yaml"), &base).is_ok());
+        assert!(validate_path_within_dir(&base.join("sub/../profile.yaml"), &base).is_ok());
+
+        // Rejection of sibling prefix collision (e.g. profiles_evil or profiles-bak)
+        assert!(
+            validate_path_within_dir(&sibling("profiles_evil").join("profile.yaml"), &base)
+                .is_err()
+        );
+        assert!(
+            validate_path_within_dir(&sibling("profiles-bak").join("profile.yaml"), &base).is_err()
+        );
+
+        // Rejection of traversal escaping base
+        assert!(validate_path_within_dir(&base.join("../../etc/passwd"), &base).is_err());
+        assert!(validate_path_within_dir(&base.join("sub/../../other.yaml"), &base).is_err());
+        assert!(validate_path_within_dir(&sibling("other.yaml"), &base).is_err());
+    }
+
+    // Windows only: `Path::starts_with` compares components exactly
+    // even there, so a symlink target stored with different casing
+    // than the base must still match. Runs on the Windows CI job.
+    #[test]
+    #[cfg(windows)]
+    fn test_path_starts_with_case_aware_windows() {
+        use std::path::Path;
+        // Same path, different case throughout (drive letter included).
+        assert!(path_starts_with_case_aware(
+            Path::new(r"c:\data\sub\file.yaml"),
+            Path::new(r"C:\Data\Sub"),
+        ));
+        // A differently-cased sibling directory is still outside:
+        // the comparison is component-wise, not a string prefix.
+        assert!(!path_starts_with_case_aware(
+            Path::new(r"C:\Data2\file.yaml"),
+            Path::new(r"C:\Data"),
+        ));
+        assert!(!path_starts_with_case_aware(
+            Path::new(r"C:\Other\file.yaml"),
+            Path::new(r"C:\Data"),
+        ));
+        // A shorter path cannot contain the base.
+        assert!(!path_starts_with_case_aware(
+            Path::new(r"C:\Data"),
+            Path::new(r"C:\Data\Sub"),
+        ));
+    }
+
+    #[test]
+    fn test_validate_path_within_dir_filesystem() {
+        let unique = format!("zephyr_test_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        let profiles_evil = temp_dir.join("profiles_evil");
+        std::fs::create_dir_all(&profiles).unwrap();
+        std::fs::create_dir_all(&profiles_evil).unwrap();
+
+        let valid_file = profiles.join("valid.yaml");
+        std::fs::write(&valid_file, "valid").unwrap();
+
+        let nonexistent_valid = profiles.join("new.yaml");
+        let evil_file = profiles_evil.join("evil.yaml");
+        // Actually create the outside file: otherwise the assertions
+        // below only exercise the missing-target branch, and a broken
+        // existing-target branch could still pass.
+        std::fs::write(&evil_file, "evil").unwrap();
+        let traversal_target = profiles.join("../profiles_evil/evil.yaml");
+
+        assert!(validate_path_within_dir(&valid_file, &profiles).is_ok());
+        assert!(validate_path_within_dir(&nonexistent_valid, &profiles).is_ok());
+        assert!(validate_path_within_dir(&evil_file, &profiles).is_err());
+        assert!(validate_path_within_dir(&traversal_target, &profiles).is_err());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_validate_path_within_dir_root_parent() {
+        // `/..` resolves to `/`, so root-level `..` components must not
+        // push a genuinely inside path outside the base. A root-level
+        // base keeps this independent of any system directory.
+        let base = Path::new("/profiles");
+        assert!(validate_path_within_dir(Path::new("/../profiles/profile.yaml"), base).is_ok());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_validate_path_within_dir_unc_root_base() {
+        // A bare UNC root (`\\server\share`) is a directory root, not
+        // a missing first component: files under it must validate, and
+        // a sibling share must still be refused. A bare drive prefix
+        // (`C:`) names no directory and stays rejected.
+        let base = Path::new(r"\\server\share");
+        assert!(validate_path_within_dir(Path::new(r"\\server\share\profile.yaml"), base).is_ok());
+        assert!(validate_path_within_dir(Path::new(r"\\server\other\profile.yaml"), base).is_err());
+        assert!(validate_path_within_dir(Path::new(r"C:\profile.yaml"), Path::new("C:")).is_err());
+    }
+
+    #[test]
+    fn test_validate_path_within_dir_relative_parent_base_rejected() {
+        // A base that normalizes to a leading `..` escapes whatever it
+        // is relative to: `../../outside.yaml` starts with `..`, so
+        // without this check the validator would pass an escaping path.
+        assert!(
+            validate_path_within_dir(Path::new("../../outside.yaml"), Path::new("..")).is_err()
+        );
+        assert!(validate_path_within_dir(
+            Path::new("../profiles/inside.yaml"),
+            Path::new("../profiles")
+        )
+        .is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_dangling_symlinks() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_symlink_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        std::fs::create_dir_all(&profiles).unwrap();
+
+        // Dangling link pointing outside the base must be rejected even
+        // though exists() follows links and reports it as missing.
+        let link_out = profiles.join("link_out");
+        symlink(temp_dir.join("outside.yaml"), &link_out).unwrap();
+        assert!(validate_path_within_dir(&link_out, &profiles).is_err());
+
+        // Dangling link pointing inside the base stays allowed.
+        let link_in = profiles.join("link_in");
+        symlink(profiles.join("new.yaml"), &link_in).unwrap();
+        assert!(validate_path_within_dir(&link_in, &profiles).is_ok());
+
+        // A dangling link whose target is relative to its own directory
+        // must resolve against the parent, not the process root.
+        assert!(!profiles.join("new.yaml").exists());
+        let link_relative = profiles.join("link_relative");
+        symlink("new.yaml", &link_relative).unwrap();
+        assert!(validate_path_within_dir(&link_relative, &profiles).is_ok());
+
+        // Chained links: an inside link to another link that leaves the
+        // base must still be rejected.
+        let link_mid = profiles.join("link_mid");
+        symlink(&link_out, &link_mid).unwrap();
+        assert!(validate_path_within_dir(&link_mid, &profiles).is_err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_inspection_error_fails_closed() {
+        // A path component that is a regular file, not a directory:
+        // nothing below it can ever resolve, and the inspection error
+        // (ENOTDIR) must fail closed instead of being treated as a
+        // missing component that a later `..` could cancel.
+        // Unix-only: Windows maps this error to NotFound, so the
+        // distinction the validator draws on does not exist there.
+        let unique = format!("zephyr_test_notdir_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        std::fs::create_dir_all(&profiles).unwrap();
+        std::fs::write(profiles.join("blocker"), "not a dir").unwrap();
+        assert!(
+            validate_path_within_dir(&profiles.join("blocker").join("child.yaml"), &profiles)
+                .is_err()
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_symlinked_base_new_file() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_symlink_base_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let real = temp_dir.join("real_profiles");
+        std::fs::create_dir_all(&real).unwrap();
+        // The base itself sits behind a symlink, as a macOS temp dir
+        // does below /var: a not-yet-existing child must still pass.
+        let linked_base = temp_dir.join("linked_profiles");
+        symlink(&real, &linked_base).unwrap();
+        let new_file = linked_base.join("new.yaml");
+        assert!(validate_path_within_dir(&new_file, &linked_base).is_ok());
+        assert!(validate_path_within_dir(&real.join("new.yaml"), &linked_base).is_ok());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_long_symlink_chain_rejected() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_long_chain_{}", std::process::id());
+        // Canonicalize the temp dir first: on macOS it sits below /var,
+        // a link to /private/var, and expanding that prefix would eat
+        // one of the 40 replacements the test is counting.
+        let temp_dir = std::env::temp_dir().canonicalize().unwrap().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        std::fs::create_dir_all(&profiles).unwrap();
+        // 41 links: past the 40-replacement cap, the last link still
+        // points outside the base and must not be returned unchecked.
+        let outside = temp_dir.join("outside.yaml");
+        let mut previous = outside;
+        for i in (0..41).rev() {
+            let link = profiles.join(format!("link{i}"));
+            symlink(&previous, &link).unwrap();
+            previous = link;
+        }
+        assert!(validate_path_within_dir(&previous, &profiles).is_err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_validate_path_within_dir_empty_base_rejects_traversal() {
+        // "." normalizes to an empty path, and every path starts
+        // with an empty prefix: without the fail-closed check above,
+        // a missing "../..." target would pass containment.
+        assert!(validate_path_within_dir(Path::new("../etc/passwd"), Path::new(".")).is_err());
+        assert!(validate_path_within_dir(Path::new("../etc/passwd"), Path::new("")).is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_outside_dir_link_missing_child() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_dir_link_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        let outside = temp_dir.join("outside");
+        std::fs::create_dir_all(&profiles).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        // In-base directory link to an outside directory; the child does not exist.
+        let link_dir = profiles.join("link_dir");
+        symlink(&outside, &link_dir).unwrap();
+        assert!(validate_path_within_dir(&link_dir.join("new.yaml"), &profiles).is_err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_40_link_chain_accepted() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_chain_40_{}", std::process::id());
+        // Canonicalize the temp dir first: on macOS it sits below /var,
+        // a link to /private/var, and expanding that prefix would eat
+        // one of the 40 replacements, so a 40-link chain would fail
+        // there while passing on Linux.
+        let temp_dir = std::env::temp_dir().canonicalize().unwrap().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        std::fs::create_dir_all(&profiles).unwrap();
+        // 40 links: exactly at the 40-replacement cap. The final target is
+        // missing and inside the base, so the chain must be accepted.
+        let inside = profiles.join("new.yaml");
+        let mut previous = inside;
+        for i in (0..40).rev() {
+            let link = profiles.join(format!("link{i}"));
+            symlink(&previous, &link).unwrap();
+            previous = link;
+        }
+        assert!(validate_path_within_dir(&previous, &profiles).is_ok());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_missing_dir_parent_link_escapes() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_missing_parent_link_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        let outside = temp_dir.join("outside");
+        std::fs::create_dir_all(&profiles).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        // The link sits behind a `..` that follows a directory which
+        // does not exist yet: probing the raw path can never see it
+        // (the OS cannot resolve through the missing directory), but
+        // once the directory is created a write would follow the link
+        // out of the base. The `..` must cancel the missing component
+        // lexically, so the link is probed at its real location.
+        let link = profiles.join("link");
+        symlink(&outside, &link).unwrap();
+        let target = profiles
+            .join("missing")
+            .join("..")
+            .join("link")
+            .join("new.yaml");
+        assert!(validate_path_within_dir(&target, &profiles).is_err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_symlink_then_parent_escapes() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_link_parent_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        let outside_deep = temp_dir.join("outside").join("deep");
+        std::fs::create_dir_all(&profiles).unwrap();
+        std::fs::create_dir_all(&outside_deep).unwrap();
+        // In-base link to an outside directory, followed by `..`.
+        // Expanding the link first gives /outside/new.yaml, which leaves the base.
+        let link = profiles.join("link");
+        symlink(&outside_deep, &link).unwrap();
+        assert!(validate_path_within_dir(&link.join("..").join("new.yaml"), &profiles).is_err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_symlink_then_parent_stays_inside() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_link_parent_inside_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        let deep = profiles.join("sub").join("deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        // In-base link to an in-base directory, followed by `..`:
+        // following the link first gives profiles/new.yaml, which is
+        // inside the base — the same path Windows resolves. Lexically
+        // normalizing the `..` first would wrongly reject it.
+        let link = profiles.join("link");
+        symlink("sub/deep", &link).unwrap();
+        assert!(
+            validate_path_within_dir(&link.join("..").join("..").join("new.yaml"), &profiles)
+                .is_ok()
+        );
+        // One more `..` escapes the base and must still be rejected.
+        assert!(validate_path_within_dir(
+            &link.join("..").join("..").join("..").join("new.yaml"),
+            &profiles
+        )
+        .is_err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_validate_path_within_dir_drive_relative_base_rejected() {
+        // A drive-relative base (`C:..`) is not anchored: a missing
+        // `C:..\..\outside.yaml` would otherwise pass the starts_with
+        // check against it while resolving outside the base.
+        let base = std::path::Path::new("C:..");
+        assert!(validate_path_within_dir(
+            std::path::Path::new("C:..\\..\\zephyr-nonexistent-outside.yaml"),
+            base
+        )
+        .is_err());
+        // A bare drive prefix names no directory and would match every
+        // path on the drive.
+        assert!(validate_path_within_dir(
+            std::path::Path::new("C:\\zephyr-nonexistent-12345\\foo.yaml"),
+            std::path::Path::new("C:")
+        )
+        .is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_missing_parent_link_suffix_escapes() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_missing_suffix_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        let sub = profiles.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        // In-base link to an in-base directory, reached through a `..`
+        // that cancels a directory which does not exist yet. The old
+        // expansion recovered the suffix with `strip_prefix` on the raw
+        // path, which fails here (the resolved prefix `/base/link` is not
+        // a lexical prefix of `/base/missing/../link/...`), so the
+        // `../../etc/x` tail was silently dropped and the path accepted —
+        // even though creating `missing` first makes it resolve outside
+        // the base.
+        let link = profiles.join("link");
+        symlink(&sub, &link).unwrap();
+        let escaping = profiles
+            .join("missing")
+            .join("..")
+            .join("link")
+            .join("..")
+            .join("..")
+            .join("etc")
+            .join("x");
+        assert!(validate_path_within_dir(&escaping, &profiles).is_err());
+        // The same shape with a tail that stays inside must still pass:
+        // the fix preserves the suffix instead of rejecting the path.
+        let inside = profiles
+            .join("missing")
+            .join("..")
+            .join("link")
+            .join("new.yaml");
+        assert!(validate_path_within_dir(&inside, &profiles).is_ok());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_long_chain_missing_parent_link_rejected() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_chain_missing_{}", std::process::id());
+        // Canonicalize like the other chain tests: the temp dir sits below
+        // /var on macOS, and expanding that prefix would eat one of the 40
+        // replacements the test is counting.
+        let temp_dir = std::env::temp_dir().canonicalize().unwrap().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        let outside = temp_dir.join("outside");
+        std::fs::create_dir_all(&profiles).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        // A 40-link chain whose last link points at a path with a link
+        // hidden behind `missing/..`: after the 40th replacement the loop
+        // stops, and the final scan must still see through the missing
+        // component to the link — otherwise the path is accepted and
+        // resolves outside once `missing` exists.
+        let escape = profiles.join("escape");
+        symlink(&outside, &escape).unwrap();
+        let tail = profiles
+            .join("missing")
+            .join("..")
+            .join("escape")
+            .join("new.yaml");
+        let mut previous = tail;
+        for i in (0..40).rev() {
+            let link = profiles.join(format!("link{i}"));
+            symlink(&previous, &link).unwrap();
+            previous = link;
+        }
+        assert!(validate_path_within_dir(&previous, &profiles).is_err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn merged_json_mapping_get_mut_writes_into_merge_source() {
+        // The value lives in a `<<` merge source: the mutable lookup
+        // must return the value where it lives, so writing through it
+        // changes the source — not a flat copy at the top level — and
+        // a direct key wins over an inherited one.
+        let mut root = serde_json::json!({
+            "<<": { "proxy-providers": { "local": { "type": "file" } } },
+            "port": 7890
+        });
+        let section =
+            merged_json_mapping_get_mut(root.as_object_mut().unwrap(), "proxy-providers", 0)
+                .unwrap();
+        section
+            .as_object_mut()
+            .unwrap()
+            .insert("extra".to_owned(), serde_json::json!("yes"));
+        assert_eq!(
+            root.get("<<")
+                .and_then(|v| v.get("proxy-providers"))
+                .and_then(|v| v.get("extra")),
+            Some(&serde_json::json!("yes"))
+        );
+        assert!(root.get("proxy-providers").is_none());
+
+        // A direct key wins: the lookup returns the direct value, not
+        // the merge source's.
+        let mut root = serde_json::json!({
+            "<<": { "port": 1111 },
+            "port": 7890
+        });
+        let value = merged_json_mapping_get_mut(root.as_object_mut().unwrap(), "port", 0).unwrap();
+        assert_eq!(*value, serde_json::json!(7890));
+        *value = serde_json::json!(9090);
+        assert_eq!(root.get("port"), Some(&serde_json::json!(9090)));
+        assert_eq!(
+            root.get("<<").and_then(|v| v.get("port")),
+            Some(&serde_json::json!(1111))
+        );
+    }
+
+    #[test]
+    fn merged_mapping_get_mut_writes_into_merge_source() {
+        // Same rule for YAML mappings: the section lives in a `<<`
+        // merge source, and writing through the lookup lands in the
+        // source — not flat at the root.
+        let mut value: serde_yaml::Value =
+            serde_yaml::from_str("<<:\n  proxy-providers:\n    local:\n      type: file\n")
+                .unwrap();
+        let section =
+            merged_mapping_get_mut(value.as_mapping_mut().unwrap(), "proxy-providers", 0).unwrap();
+        section.as_mapping_mut().unwrap().insert(
+            serde_yaml::Value::String("added".to_owned()),
+            serde_yaml::Value::String("yes".to_owned()),
+        );
+        let merged = merged_mapping_get(value.as_mapping().unwrap(), "proxy-providers", 0).unwrap();
+        assert!(merged
+            .as_mapping()
+            .unwrap()
+            .get(serde_yaml::Value::String("added".to_owned()))
+            .is_some());
+        assert!(value
+            .as_mapping()
+            .unwrap()
+            .get(serde_yaml::Value::String("proxy-providers".to_owned()))
+            .is_none());
+    }
+
+    #[test]
+    fn merged_json_mapping_keys_lists_direct_and_merged_keys() {
+        // Direct keys first, then keys inherited through `<<` (a single
+        // object or an array of objects, earlier first), each once,
+        // `<<` itself excluded; merge sources may themselves carry `<<`.
+        let root = serde_json::json!({
+            "direct": 1,
+            "<<": [
+                { "inherited": 2, "direct": 99 },
+                { "second": 3, "<<": { "nested": 4 } }
+            ]
+        });
+        assert_eq!(
+            merged_json_mapping_keys(root.as_object().unwrap()),
+            vec!["direct", "inherited", "second", "nested"]
+        );
+        // No merge source: just the direct keys.
+        let plain = serde_json::json!({ "a": 1, "b": 2 });
+        assert_eq!(
+            merged_json_mapping_keys(plain.as_object().unwrap()),
+            vec!["a", "b"]
+        );
+    }
+
+    #[test]
+    fn merged_mapping_keys_lists_direct_and_merged_keys() {
+        // Same rule for YAML mappings, including a sequence merge
+        // source and a nested `<<`.
+        let value: serde_yaml::Value = serde_yaml::from_str(
+            "direct: 1\n<<:\n  - inherited: 2\n    direct: 99\n  - second: 3\n    <<:\n      nested: 4\n",
+        )
+        .unwrap();
+        assert_eq!(
+            merged_mapping_keys(value.as_mapping().unwrap()),
+            vec!["direct", "inherited", "second", "nested"]
+        );
     }
 }
