@@ -261,49 +261,85 @@ pub fn remove_dangerous_keys_internal_pub(
     remove_control_plane_keys(value);
 }
 
-/// Complete URL decoding for path traversal detection
-/// Handles standard percent-encoding, double encoding, and mixed case
+/// Decode one pass of percent-encoding from `src` into `dest`.
+/// Returns `(changed, has_percent)` indicating if any percent-sequence was
+/// decoded and whether any `%` remains in `dest`.
+fn decode_percent_pass(src: &[u8], dest: &mut Vec<u8>) -> (bool, bool) {
+    dest.clear();
+    let mut changed = false;
+    let mut has_percent = false;
+    let mut i = 0;
+
+    while let Some(&byte) = src.get(i) {
+        if byte == b'%' {
+            if let (Some(hi), Some(lo)) = (
+                src.get(i + 1).and_then(|&b| decode_hex_digit(b)),
+                src.get(i + 2).and_then(|&b| decode_hex_digit(b)),
+            ) {
+                let decoded_byte = (hi << 4) | lo;
+                if decoded_byte == b'%' {
+                    has_percent = true;
+                }
+                dest.push(decoded_byte);
+                i += 3;
+                changed = true;
+                continue;
+            }
+            has_percent = true;
+        }
+        dest.push(byte);
+        i += 1;
+    }
+
+    (changed, has_percent)
+}
+
+/// Complete URL decoding for path traversal detection.
+/// Handles standard percent-encoding, double encoding, and mixed case.
+///
+/// Optimization:
+/// - Fast path skips decoding if `%` is not present.
+/// - Decodes pass 1 directly from `input.as_bytes()` into a single pre-allocated `Vec<u8>`.
+/// - Avoids initial `input.as_bytes().to_vec()` heap clone.
+/// - Lazily allocates a second scratch buffer only when multiple decode passes are actually needed.
+/// - Tracks `has_percent` in single pass during decoding to avoid redundant `.contains(&b'%')` scans.
 #[must_use]
 pub fn url_decode_complete(input: &str) -> String {
     if !input.contains('%') {
         return input.to_owned();
     }
 
-    let mut current = input.as_bytes().to_vec();
-    let mut decoded = Vec::with_capacity(current.len());
+    let input_bytes = input.as_bytes();
+    let mut buf_a = Vec::with_capacity(input_bytes.len());
+    let (changed, has_percent) = decode_percent_pass(input_bytes, &mut buf_a);
 
-    for _ in 0..5 {
-        let mut changed = false;
-        decoded.clear();
-        let mut i = 0;
+    // If nothing changed or no '%' remains, pass 1 finished all decoding.
+    if !changed || !has_percent {
+        return String::from_utf8(buf_a)
+            .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
+    }
 
-        while let Some(&byte) = current.get(i) {
-            if byte == b'%' {
-                if let (Some(hi), Some(lo)) = (
-                    current.get(i + 1).and_then(|&byte| decode_hex_digit(byte)),
-                    current.get(i + 2).and_then(|&byte| decode_hex_digit(byte)),
-                ) {
-                    decoded.push((hi << 4) | lo);
-                    i += 3;
-                    changed = true;
-                    continue;
-                }
-            }
+    // A second scratch buffer is only needed when multiple passes occur (e.g. double encoding).
+    let mut buf_b = Vec::with_capacity(buf_a.len());
+    let mut a_is_active = true;
 
-            decoded.push(byte);
-            i += 1;
-        }
+    for _ in 1..5 {
+        let (src, dest) = if a_is_active {
+            (buf_a.as_slice(), &mut buf_b)
+        } else {
+            (buf_b.as_slice(), &mut buf_a)
+        };
 
-        std::mem::swap(&mut current, &mut decoded);
-        if !changed {
-            break;
-        }
-        if !current.contains(&b'%') {
+        let (sub_changed, sub_has_percent) = decode_percent_pass(src, dest);
+        a_is_active = !a_is_active;
+
+        if !sub_changed || !sub_has_percent {
             break;
         }
     }
 
-    String::from_utf8(current)
+    let final_buf = if a_is_active { buf_a } else { buf_b };
+    String::from_utf8(final_buf)
         .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
