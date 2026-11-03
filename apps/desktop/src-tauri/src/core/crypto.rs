@@ -464,7 +464,7 @@ pub fn encrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         let is_yaml = path
             .extension()
             .and_then(|e| e.to_str())
-            .is_some_and(|ext| ext == "yaml" || ext == "yml");
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         if !is_yaml || !path.is_file() {
             continue;
         }
@@ -526,7 +526,7 @@ pub fn decrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         let is_yaml = path
             .extension()
             .and_then(|e| e.to_str())
-            .is_some_and(|ext| ext == "yaml" || ext == "yml");
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         if !is_yaml || !path.is_file() {
             continue;
         }
@@ -770,8 +770,10 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
             entry
                 .path()
                 .extension()
-                .map(|ext| ext == "yaml" || ext == "yml")
-                .unwrap_or(false)
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| {
+                    ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml")
+                })
         })
         .filter_map(|entry| {
             entry

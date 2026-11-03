@@ -527,8 +527,10 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
 
             let is_profile = source
                 .extension()
-                .map(|ext| ext == "yaml" || ext == "yml")
-                .unwrap_or(false);
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| {
+                    ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml")
+                });
 
             let target = if is_profile {
                 paths.profiles_dir.join(file_name)
@@ -651,8 +653,8 @@ pub(crate) fn first_available_profile(paths: &AppPaths) -> Option<PathBuf> {
         let path = entry.path();
         let is_yaml = path
             .extension()
-            .map(|ext| ext == "yaml" || ext == "yml")
-            .unwrap_or(false);
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         let is_run_config = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -1013,8 +1015,8 @@ fn select_runtime_config(
         let path = entry.path();
         let is_yaml = path
             .extension()
-            .map(|ext| ext == "yaml" || ext == "yml")
-            .unwrap_or(false);
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         let is_run_config = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -2931,6 +2933,27 @@ mod tests {
         let (active, _, _, _) = select_runtime_config(&paths, &name, &path, "s", None).unwrap();
         assert!(active.is_none());
         assert!(!path.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_available_profile_recognizes_uppercase_extensions() {
+        let dir =
+            std::env::temp_dir().join(format!("zephyr-first-profile-upper-{}", std::process::id()));
+        let profiles_dir = dir.join("profiles");
+        fs::create_dir_all(&profiles_dir).unwrap();
+        fs::write(profiles_dir.join("bar.YAML"), "port: 7890\n").unwrap();
+        let paths = AppPaths {
+            app_data_dir: dir.clone(),
+            core_dir: dir.join("core"),
+            profiles_dir: profiles_dir.clone(),
+        };
+        // An uppercase-extension profile is a valid profile: it must
+        // be picked up as the replacement selection, not skipped.
+        assert_eq!(
+            first_available_profile(&paths).as_deref(),
+            Some(profiles_dir.join("bar.YAML").as_path())
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

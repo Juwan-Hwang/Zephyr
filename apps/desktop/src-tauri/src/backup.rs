@@ -608,8 +608,30 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
     let app_version = manifest.app_version.clone();
     let has_settings = manifest.files.iter().any(|f| f.path == "settings.json");
     let paths_clone = paths.clone();
+    // The settings lock for the commit closure below; absent when the
+    // state was never registered (then there is nothing to serialize).
+    let commit_settings_arc = app
+        .try_state::<SettingsState>()
+        .map(|state| std::sync::Arc::clone(&state.0));
 
     let commit_result = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Hold the profile-transform guard across the whole commit: a
+        // concurrent profile delete verifies the removal and retries
+        // under this guard, so publishing a restored profile mid-delete
+        // would let the retry delete the file the restore just reported
+        // as restored. The commit itself is only renames (the
+        // extraction already ran), so holding the guard here is cheap.
+        let _transform_guard = crate::lock_profile_transform();
+        // Serialize settings saves with the import: a save that lands
+        // after the settings.json backup but before the staged install
+        // would be overwritten by the import. Settings saves take the
+        // settings lock, so holding it across the commit (after the
+        // transform guard, matching every other writer) keeps them out
+        // until the new file is in place.
+        let _settings_guard = commit_settings_arc
+            .as_ref()
+            .map(|arc| arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+
         // Back up current files, then swap — use UUID for the rollback
         // directory name to avoid collisions and improve predictability.
         let backup_dir = paths_clone
@@ -750,29 +772,32 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
             let settings_arc = std::sync::Arc::clone(&settings_state.0);
             let settings_file = paths.app_data_dir.join("settings.json");
 
-            let reload_result =
-                tokio::task::spawn_blocking(move || -> Result<crate::Settings, String> {
-                    if !settings_file.exists() {
-                        return Err("settings.json does not exist after import".to_owned());
-                    }
-                    let content = fs::read_to_string(&settings_file)
-                        .map_err(|e| format!("Failed to read settings.json: {e}"))?;
-                    let value = serde_json::from_str::<serde_json::Value>(&content)
-                        .map_err(|e| format!("Failed to parse settings JSON: {e}"))?;
-                    // Try converting to Settings; if that fails (e.g., due
-                    // to a type mismatch in a future schema), return Err to
-                    // avoid overwriting the file on disk with defaults.
-                    let new_settings = serde_json::from_value::<crate::Settings>(value)
-                        .map_err(|e| format!("Failed to convert JSON to Settings: {e}"))?;
-                    Ok(crate::migrate_settings(new_settings, &settings_file))
-                })
-                .await
-                .map_err(|e| format!("Reload task panicked: {e}"))??;
-
-            let mut guard = settings_arc
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            *guard = reload_result;
+            // Hold the settings lock across the read and the assignment:
+            // an update that lands in between would otherwise be
+            // overwritten by the stale file content. The whole reload
+            // runs on the blocking pool, so holding the std lock here
+            // cannot stall a Tokio worker.
+            tokio::task::spawn_blocking(move || -> Result<(), String> {
+                let mut guard = settings_arc
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if !settings_file.exists() {
+                    return Err("settings.json does not exist after import".to_owned());
+                }
+                let content = fs::read_to_string(&settings_file)
+                    .map_err(|e| format!("Failed to read settings.json: {e}"))?;
+                let value = serde_json::from_str::<serde_json::Value>(&content)
+                    .map_err(|e| format!("Failed to parse settings JSON: {e}"))?;
+                // Try converting to Settings; if that fails (e.g., due
+                // to a type mismatch in a future schema), return Err to
+                // avoid overwriting the file on disk with defaults.
+                let new_settings = serde_json::from_value::<crate::Settings>(value)
+                    .map_err(|e| format!("Failed to convert JSON to Settings: {e}"))?;
+                *guard = crate::migrate_settings(new_settings, &settings_file);
+                Ok(())
+            })
+            .await
+            .map_err(|e| format!("Reload task panicked: {e}"))??;
         }
     }
 
