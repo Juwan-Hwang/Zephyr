@@ -382,8 +382,12 @@ async fn cleanup_dangling_last_config_blocking(
 pub async fn delete_config(app: AppHandle, name: String) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
 
-    // Ensure the name has a .yaml extension
-    let mut clean_name = if name.ends_with(".yaml") || name.ends_with(".yml") {
+    // Ensure the name has a .yaml/.yml extension. The check is
+    // case-insensitive: `Foo.YAML` is already a YAML file, and appending
+    // `.yaml` to it would make the file undeletable (neither the primary
+    // `Foo.YAML.yaml` nor any fallback would ever match it).
+    let lower_name = name.to_lowercase();
+    let mut clean_name = if lower_name.ends_with(".yaml") || lower_name.ends_with(".yml") {
         name.clone()
     } else {
         format!("{name}.yaml")
@@ -400,9 +404,26 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
     let file_exists = target_path.exists();
 
     if !file_exists {
-        // Try with .yml extension as well
-        let yml_name = name.replace(".yaml", ".yml");
+        // Try with .yml extension as well. Build the fallback from the
+        // sanitized name, not the raw input, and validate it like the
+        // primary path: the raw name can carry a drive-relative or
+        // otherwise escaping path that `join` would keep.
+        // Only the trailing extension is swapped: replacing every
+        // occurrence would let `team.yaml.backup` fall back to the
+        // unrelated `team.yml.backup.yml`. The match is case-insensitive
+        // so an uppercase `.YAML` name still finds its `.yml` file,
+        // while the stem keeps its original spelling. (The last five
+        // bytes are ASCII, so slicing before them is always a char
+        // boundary even if lowercasing the stem would change its length.)
+        let yml_name = if clean_name.len() >= 5
+            && clean_name[clean_name.len() - 5..].eq_ignore_ascii_case(".yaml")
+        {
+            format!("{}.yml", &clean_name[..clean_name.len() - 5])
+        } else {
+            clean_name.clone()
+        };
         let yml_path = paths.profiles_dir.join(&yml_name);
+        validate_path_within_dir(&yml_path, &paths.profiles_dir).map_err(|e| e.to_string())?;
 
         if yml_path.exists() {
             remove_profile_file_blocking(&yml_path).await?;
