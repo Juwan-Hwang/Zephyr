@@ -101,6 +101,15 @@ pub fn prism_insert_rule(
     position: String,
     group_id: Option<String>,
 ) -> Result<usize, String> {
+    // Hold RUN_CONFIG_LOCK across the read-apply sequence: `insert_rule`
+    // reads the current compiled output and `apply_config` writes it back,
+    // and a core start completing in between would leave the old content
+    // paired with the new credentials on disk. The lock order
+    // (run-config lock, then the Prism inner lock) matches every other
+    // `ext.apply` site; `apply_config` itself must NOT take it.
+    let _guard = crate::prism::pipeline::RUN_CONFIG_LOCK
+        .lock()
+        .map_err(|e| format!("Run config lock poisoned: {e}"))?;
     state.with_ext(|ext| {
         let pos = parse_position(&position, group_id.as_deref())?;
         ext.insert_rule(rule, &pos)
@@ -114,6 +123,12 @@ pub fn prism_insert_rule_str(
     position: String,
     group_id: Option<String>,
 ) -> Result<usize, String> {
+    // Same as `prism_insert_rule`: hold the lock across the read-apply
+    // sequence so a core start cannot land between the output read and
+    // the write (see above).
+    let _guard = crate::prism::pipeline::RUN_CONFIG_LOCK
+        .lock()
+        .map_err(|e| format!("Run config lock poisoned: {e}"))?;
     state.with_ext(|ext| {
         let pos = parse_position(&position, group_id.as_deref())?;
         ext.insert_rule_str(&rule_text, &pos)
@@ -223,35 +238,6 @@ pub async fn prism_rebuild(
     let inner = std::sync::Arc::clone(&state.inner);
     let app = state.app.clone();
 
-    // Read the original profile config before entering spawn_blocking
-    // (AppHandle::state() is not available inside spawn_blocking closures)
-    let (raw_profile, current_secret, global_prefs) = {
-        let mihomo = tauri::Manager::state::<crate::core_manager::MihomoState>(&app);
-        let lock = lock_critical(&mihomo.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
-        let Some(config_path) = lock.last_config_path().map(ToOwned::to_owned) else {
-            // No subscription yet: the core runs the built-in direct-only config and
-            // there is no profile to patch. Rule files saved now apply once one is added.
-            drop(lock);
-            return Ok(serde_json::json!({ "skipped": "no active profile" }));
-        };
-        let secret = lock.last_secret().to_owned();
-        drop(lock);
-
-        let paths = crate::core_manager::ensure_app_storage(&app)?;
-        let profile_file = paths.profiles_dir.join(&config_path);
-        // Use read_profile_file to auto-decrypt encrypted profiles (encrypt_configs)
-        let content = read_profile_file(&profile_file)
-            .map_err(|e| format!("Failed to read profile '{config_path}': {e}"))?;
-
-        // Read global preferences for injection
-        let settings_state = tauri::Manager::state::<crate::SettingsState>(&app);
-        let settings_lock = lock_best_effort(&settings_state.0);
-        let prefs = settings_lock.to_global_prefs();
-        drop(settings_lock);
-
-        (content, secret, Some(prefs))
-    };
-
     tokio::task::spawn_blocking(move || {
         // Held across the clean-base write and the compile, as every other
         // run_config.yaml writer does: an override apply in between would
@@ -259,6 +245,59 @@ pub async fn prism_rebuild(
         let _guard = crate::prism::pipeline::RUN_CONFIG_LOCK
             .lock()
             .map_err(|e| format!("Run config lock poisoned: {e}"))?;
+        // Refuse while a core start is in progress, before writing
+        // anything: the start is about to write the new run config with
+        // fresh credentials, and this clean base would overwrite it, so
+        // the startup health check would fail on the old credentials.
+        // `ext.apply` below is guard-checked against a start, but the
+        // base write here was not.
+        if crate::prism::pipeline::core_start_in_progress() {
+            return Err("Hot reload refused: a core start is in progress".to_owned());
+        }
+        // Read the original profile config here, under the lock and after
+        // the start check — not before entering spawn_blocking: a start
+        // that finished while waiting for the lock would otherwise leave
+        // this clean base carrying the previous run's profile text paired
+        // with the new run's secret. (Same reason the secret is re-read
+        // below. The lock order here — run-config lock, then the
+        // core-state lock — matches `apply_config`.)
+        let (raw_profile, global_prefs) = {
+            let mihomo = tauri::Manager::state::<crate::core_manager::MihomoState>(&app);
+            let lock = lock_critical(&mihomo.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
+            let Some(config_path) = lock.last_config_path().map(ToOwned::to_owned) else {
+                // No subscription yet: the core runs the built-in direct-only config and
+                // there is no profile to patch. Rule files saved now apply once one is added.
+                drop(lock);
+                return Ok(serde_json::json!({ "skipped": "no active profile" }));
+            };
+            drop(lock);
+
+            let paths = crate::core_manager::ensure_app_storage(&app)?;
+            let profile_file = paths.profiles_dir.join(&config_path);
+            // Use read_profile_file to auto-decrypt encrypted profiles (encrypt_configs)
+            let content = read_profile_file(&profile_file)
+                .map_err(|e| format!("Failed to read profile '{config_path}': {e}"))?;
+
+            // Read global preferences for injection
+            let settings_state = tauri::Manager::state::<crate::SettingsState>(&app);
+            let settings_lock = lock_best_effort(&settings_state.0);
+            let prefs = settings_lock.to_global_prefs();
+            drop(settings_lock);
+
+            (content, Some(prefs))
+        };
+        // Re-read the secret here, under the lock and after the check, for
+        // the same reason as the profile read above: a start that finished
+        // while waiting for the lock would otherwise leave the clean base
+        // carrying the previous run's secret. (Same reason `apply_config`
+        // re-reads the endpoint just before injecting it; the lock order
+        // here — run-config lock, then the core-state lock — matches that
+        // path.)
+        let current_secret = {
+            let mihomo = tauri::Manager::state::<crate::core_manager::MihomoState>(&app);
+            let lock = lock_critical(&mihomo.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
+            lock.last_secret().to_owned()
+        };
         // Captures the core's answer to the reload `ext.apply` triggers
         // (set by `ZephyrPrismHost::apply_config` on this thread).
         let status_guard = super::host::HttpStatusGuard::enter();
