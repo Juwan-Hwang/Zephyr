@@ -30,6 +30,11 @@
 **Learning:** Commands in secondary modules that manipulate plugin permissions or settings can easily omit validation routines implemented in the primary plugin module.
 **Prevention:** Always enforce `validate_plugin_id` on every IPC handler accepting a `plugin_id` parameter regardless of module boundary.
 
+## 2026-07-19 - String Prefix Boundary Check Bypass in validate_path_within_dir
+**Vulnerability:** `validate_path_within_dir` used raw string `starts_with()` when validating paths that do not yet exist on disk, permitting traversal sequences (e.g. `/base/dir/../../etc/passwd`) and sibling directories that share a name prefix (e.g. `/base/dir_evil/file`).
+**Learning:** Comparing file paths via string prefix matching fails to enforce path component boundaries and fails to resolve relative path elements (`..` / `.`) when canonicalization cannot be performed on non-existent paths.
+**Prevention:** Always normalize paths lexically across components using `Path::components()` and verify boundary containment at the path component level (`Path::starts_with()`) rather than substring matching.
+
 ## 2026-11-02 - Enforce HTTPS Scheme and Strict Domain Suffix for Core Updaters
 **Vulnerability:** `is_trusted_update_url` and `parse_github_release_info` validated hostname strings against trusted GitHub hosts without verifying `parsed.scheme() == "https"`, allowing plaintext HTTP downloads of updater binaries and opening vectors for on-path adversary MITM attacks. Additionally, host check avoided allocation via suffix stripping with dot delimiter.
 **Learning:** Checking hostname patterns without enforcing encrypted transport protocol schemes permits silent fallback to plaintext traffic in updater workflows.
@@ -38,3 +43,7 @@
 **Vulnerability:** `override_update` and `override_create` allowed persisting arbitrary URL strings (including unsupported schemes like `file://` or `javascript:` and oversized strings) directly into override metadata without scheme or length validation.
 **Learning:** Metadata update commands that bypass network download routines can easily omit URL scheme and length checks performed by network fetchers.
 **Prevention:** Always enforce centralized URL validation (`http`/`https` scheme check and length cap) across all IPC handlers that receive or update URL parameters.
+## 2026-11-06 - Symlink Hidden Behind `..` After a Missing Directory in validate_path_within_dir
+**Vulnerability:** `expand_symlinks` probed path components through the OS, which cannot resolve `..` past a directory that does not exist yet — so for `/base/missing/../link` the link was never expanded, the normalized path looked in-base, and a later `create_dir_all` on the parent would let a write follow the link outside the base.
+**Learning:** A `..` after a not-yet-existing component still moves lexically; symlink expansion that only trusts OS probes silently skips every link behind such a `..`.
+**Prevention:** When a component is missing on disk, cancel it lexically on a following `..` before probing further components, so links are expanded at the location the path will actually resolve to.
