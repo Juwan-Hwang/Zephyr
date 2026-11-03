@@ -92,7 +92,15 @@ fn hot_reload_target(app: &AppHandle) -> Result<(u16, String, String), String> {
             .0
             .lock()
             .map_err(|e| format!("Lock failed: {e}"))?;
-        let port = lock.last_port().unwrap_or(9090);
+        // Fail closed while the core has not published its controller
+        // yet (first start, before the health check passes): falling
+        // back to 9090 / a stale secret here would write the prepared
+        // credentials away and fail the startup health check.
+        let Some(port) = lock.last_port() else {
+            return Err(
+                "Hot reload refused: the core has not published its controller port yet".to_owned(),
+            );
+        };
         let secret = lock.last_secret().to_owned();
         drop(lock);
         (port, secret)
@@ -325,7 +333,34 @@ fn read_running_config(state: &PrismState) -> Result<serde_json::Value, String> 
 /// file: a failed write leaves the previous config whole, since the reload
 /// that follows a failed batch (for the Prism patches before it) loads it.
 fn write_running_config(state: &PrismState, config: &serde_json::Value) -> Result<(), String> {
-    let yaml_str = serde_yaml::to_string(config)
+    // A script may add an unauthenticated control surface (such as
+    // `external-controller-unix`) to the running config; the strip in
+    // `prepare_runtime_config` never sees script output, so filter it
+    // here, before the config is written back and hot-reloaded. The
+    // strip only removes the unauthenticated surfaces — the TCP
+    // `external-controller` / `secret` are left alone there, because
+    // `prepare_runtime_config` re-injects the managed values right
+    // after. This writer has no such step, so a script that sets
+    // `external-controller` to `0.0.0.0:9090` and clears `secret`
+    // would reach the reload as-is. Restore the managed values here
+    // instead: the written config always carries the controller the
+    // app itself uses, never the script's.
+    let mut stripped = config.clone();
+    zephyr_core::config::sanitizer::remove_control_plane_keys_json(&mut stripped);
+    // Same rule as the `apply_config` path: also strip provider `path`
+    // / `script-path` keys a script may have added, mirroring the
+    // import sanitizer — otherwise a provider path inside the core
+    // directory would be kept and reloaded, and mihomo would load it.
+    zephyr_core::config::sanitizer::remove_dangerous_keys_json(&mut stripped);
+    let (port, secret, _) = hot_reload_target(&state.app)?;
+    if let Some(obj) = stripped.as_object_mut() {
+        obj.insert(
+            "external-controller".to_owned(),
+            serde_json::json!(format!("127.0.0.1:{port}")),
+        );
+        obj.insert("secret".to_owned(), serde_json::json!(secret));
+    }
+    let yaml_str = serde_yaml::to_string(&stripped)
         .map_err(|e| format!("Failed to serialize config to YAML: {e}"))?;
     state.with_ext(|_ext| {
         let paths = ensure_app_storage(&state.app)?;
