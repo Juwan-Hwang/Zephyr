@@ -610,6 +610,14 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
     let paths_clone = paths.clone();
 
     let commit_result = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Hold the profile-transform guard across the whole commit: a
+        // concurrent profile delete verifies the removal and retries
+        // under this guard, so publishing a restored profile mid-delete
+        // would let the retry delete the file the restore just reported
+        // as restored. The commit itself is only renames (the
+        // extraction already ran), so holding the guard here is cheap.
+        let _transform_guard = crate::lock_profile_transform();
+
         // Back up current files, then swap — use UUID for the rollback
         // directory name to avoid collisions and improve predictability.
         let backup_dir = paths_clone
