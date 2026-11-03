@@ -203,14 +203,6 @@ impl PrismHost for ZephyrPrismHost {
         let paths = ensure_app_storage(&self.app)?;
         let run_config_path = paths.core_dir.join("run_config.yaml");
 
-        // Secure write (Unix 0600 / Windows DACL) through a temporary file:
-        // a failed write leaves the config the core loaded intact.
-        crate::core_manager::core::secure_io::write_file_secure_atomic(&run_config_path, config)?;
-
-        // Mihomo's PUT /configs expects a JSON body {"path": "..."} to reload
-        // from disk — NOT the raw YAML config. Sending raw YAML with
-        // Content-Type: application/json causes a silent 400 Bad Request.
-        let body = serde_json::json!({ "path": run_config_path.to_string_lossy() }).to_string();
         // Hold the reload-and-reconcile sequence for this whole
         // reload, as the pipeline path does, from the generation
         // snapshot through the confirmation and the publication it
@@ -228,10 +220,14 @@ impl PrismHost for ZephyrPrismHost {
         // caller under the Prism inner lock for the PUT; the join adds
         // the confirmation wait to that block, which is the price of
         // keeping the sequence ordered end to end.
+        //
+        // The endpoint is read under the sequence lock: a core restart
+        // while this waited for it changes the port and secret. The
+        // filter below restores those same values into the config, so
+        // the read happens here, before the write — a restart between
+        // the injection and the PUT would otherwise leave the file
+        // carrying the previous core's address and secret.
         let sequence = super::pipeline::acquire_reload_reconcile_lock();
-        // Hot-reload via mihomo REST API (PUT for full config replacement).
-        // The endpoint is read under the sequence lock: a core restart while
-        // this waited for it changes the port and secret.
         let (port, secret) = {
             let state = self.app.state::<MihomoState>();
             let lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
@@ -240,6 +236,66 @@ impl PrismHost for ZephyrPrismHost {
                 lock.last_secret().to_owned(),
             )
         };
+
+        // A script may add an unauthenticated control surface (such as
+        // `external-controller-unix`) to the config it hands back; the
+        // strip in `prepare_runtime_config` never sees Prism output, so
+        // filter it here before the config is written and hot-reloaded.
+        // The strip only removes the unauthenticated surfaces — the TCP
+        // `external-controller` / `secret` are left alone there, because
+        // `prepare_runtime_config` re-injects the managed values right
+        // after. This writer has no such step, so a script that sets
+        // `external-controller` to `0.0.0.0:9090` and clears `secret`
+        // would reach the reload as-is. Restore the managed values
+        // (read above, under the sequence lock) instead: the written
+        // config always carries the controller the app itself uses,
+        // never the script's.
+        // An unparsable input is written as-is (the reload rejects it,
+        // as before); a failed re-serialization falls back the same way.
+        let filtered;
+        let config_to_write: &str = match serde_yaml::from_str::<serde_yaml::Value>(config) {
+            Ok(mut value) => {
+                zephyr_core::config::sanitizer::remove_control_plane_keys(&mut value);
+                let mut target = &mut value;
+                while let serde_yaml::Value::Tagged(tagged) = target {
+                    target = &mut tagged.value;
+                }
+                if let serde_yaml::Value::Mapping(map) = target {
+                    map.insert(
+                        serde_yaml::Value::String("external-controller".to_owned()),
+                        serde_yaml::Value::String(format!("127.0.0.1:{port}")),
+                    );
+                    map.insert(
+                        serde_yaml::Value::String("secret".to_owned()),
+                        serde_yaml::Value::String(secret.clone()),
+                    );
+                }
+                match serde_yaml::to_string(&value) {
+                    Ok(text) => {
+                        filtered = text;
+                        &filtered
+                    }
+                    Err(_) => config,
+                }
+            }
+            Err(_) => config,
+        };
+
+        // Secure write (Unix 0600 / Windows DACL) through a temporary file:
+        // a failed write leaves the config the core loaded intact.
+        crate::core_manager::core::secure_io::write_file_secure_atomic(
+            &run_config_path,
+            config_to_write,
+        )?;
+
+        // Mihomo's PUT /configs expects a JSON body {"path": "..."} to reload
+        // from disk — NOT the raw YAML config. Sending raw YAML with
+        // Content-Type: application/json causes a silent 400 Bad Request.
+        let body = serde_json::json!({ "path": run_config_path.to_string_lossy() }).to_string();
+        // Hot-reload via mihomo REST API (PUT for full config replacement).
+        // The endpoint was read above, under the sequence lock, so the
+        // PUT talks to the same core the injected controller values
+        // belong to.
         let url = format!("http://127.0.0.1:{port}/configs?force=true");
         // Snapshot the live-state generation before the reload: the PUT
         // below can block for seconds, and a snapshot taken only after
@@ -363,11 +419,26 @@ None => "Config saved. Failed to apply via core REST API (connection or response
             .map_err(|e| format!("Failed to read profiles dir: {e}"))?;
 
         let mut profiles = Vec::new();
+        // Resolve the selected name to the stored entry: on a
+        // case-insensitive volume the selection may differ in case
+        // from the file on disk (`work.yaml` selects `Work.YAML`),
+        // and a plain string comparison would mark it as not current.
+        // On a case-sensitive volume the two spellings are distinct
+        // files, and the resolver prefers the exact match, so they
+        // are not conflated.
+        let current_entry = crate::core_manager::core::config_manager::actual_entry_name(
+            &paths.profiles_dir,
+            &current,
+        );
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            let is_yaml = name.ends_with(".yaml") || name.ends_with(".yml");
+            // Directories are not profiles, even when they carry a
+            // YAML extension.
+            let lower = name.to_lowercase();
+            let is_yaml =
+                entry.path().is_file() && (lower.ends_with(".yaml") || lower.ends_with(".yml"));
             if is_yaml {
-                let is_current = name == current;
+                let is_current = name == current_entry;
                 profiles.push(ProfileInfo {
                     id: name.clone(),
                     name,

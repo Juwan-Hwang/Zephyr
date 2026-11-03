@@ -7,8 +7,8 @@ use tauri_plugin_dialog::DialogExt as _;
 
 use super::core_process::ensure_app_storage;
 use super::crypto::{
-    cleanup_metadata_cache, load_metadata, lock_metadata, read_profile_file, save_metadata,
-    save_profile_file, ConfigMetadata,
+    cleanup_metadata_cache, load_metadata, lock_metadata, metadata_for_config, read_profile_file,
+    save_metadata, save_profile_file, ConfigMetadata,
 };
 use super::secure_io::write_file_secure;
 use super::ConfigInfo;
@@ -51,14 +51,22 @@ pub async fn list_configs(app: AppHandle) -> Result<Vec<ConfigInfo>, String> {
     if let Ok(entries) = fs::read_dir(&paths.profiles_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path
-                .extension()
-                .is_some_and(|ext| ext == "yaml" || ext == "yml")
+            // Directories are not profiles, even when they carry a
+            // YAML extension.
+            if path.is_file()
+                && path
+                    .extension()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .is_some_and(|ext| {
+                        ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml")
+                    })
             {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name != "run_config.yaml" {
                         let (url, sub_info, last_updated, auto_update_interval, user_agent) =
-                            if let Some(meta) = metadata.configs.get(name) {
+                            if let Some(meta) =
+                                metadata_for_config(&metadata, &paths.profiles_dir, name)
+                            {
                                 (
                                     meta.url.clone(),
                                     meta.sub_info.clone(),
@@ -117,7 +125,7 @@ pub fn get_config_url(app: &AppHandle, name: &str) -> Result<String, String> {
     let metadata = load_metadata(&paths);
 
     // Look up URL from metadata first
-    if let Some(meta) = metadata.configs.get(&safe_name) {
+    if let Some(meta) = metadata_for_config(&metadata, &paths.profiles_dir, &safe_name) {
         if let Some(url) = &meta.url {
             return Ok(url.clone());
         }
@@ -220,9 +228,19 @@ pub async fn update_subscription_ua(
 
     let _guard = lock_metadata();
     let mut metadata = load_metadata(&paths);
+    // Update the entry the file is already stored under, if any: on a
+    // case-insensitive volume it may sit under a different spelling
+    // (`work.yaml` for `Work.yaml`), and inserting under the request
+    // spelling would leave a second record beside it — the listing
+    // would then prefer the new, empty record and hide the saved
+    // URL, interval, and subscription info.
+    let entry_key =
+        super::crypto::metadata_key_for_config(&metadata, &paths.profiles_dir, &safe_name)
+            .map(str::to_owned)
+            .unwrap_or_else(|| safe_name.clone());
     let entry = metadata
         .configs
-        .entry(safe_name)
+        .entry(entry_key)
         .or_insert_with(|| ConfigMetadata {
             url: fallback_url,
             ..Default::default()
@@ -256,22 +274,219 @@ fn strip_yaml_ext(name: &str) -> &str {
     name
 }
 
+/// Build the `.yml` fallback name for a missing `.yaml` profile: only the
+/// trailing extension is swapped, so `team.yaml.backup` never falls back
+/// to the unrelated `team.yml.backup.yml`. The match is case-insensitive
+/// so an uppercase `.YAML` name still finds its `.yml` file, while the
+/// stem keeps its original spelling. Uses `str::get` like
+/// [`strip_yaml_ext`]: a multibyte character straddling the suffix
+/// boundary (e.g. a missing `é.yml` / `中.yml`) is a non-match, not a
+/// panic — the raw slice would panic before the comparison ever ran.
+fn yml_fallback_name(clean_name: &str) -> String {
+    if clean_name.len() >= 5 {
+        if let Some(suffix) = clean_name.get(clean_name.len() - 5..) {
+            if suffix.eq_ignore_ascii_case(".yaml") {
+                // The suffix matched ".yaml", so its five bytes are ASCII
+                // and the cut is a char boundary.
+                return format!("{}.yml", &clean_name[..clean_name.len() - 5]);
+            }
+        }
+    }
+    clean_name.to_owned()
+}
+
+/// Whether a stored profile spelling is the reserved runtime config.
+/// The comparison is exact: a case variant such as `RUN_CONFIG.yaml`
+/// is an ordinary listed profile when that is how it is stored
+/// (creation and listing both treat only the exact `run_config.yaml`
+/// as reserved), while the runtime config's own spelling stays
+/// protected.
+fn is_reserved_config_name(stored_name: &str) -> bool {
+    stored_name == "run_config.yaml"
+}
+
+/// The name as stored on disk. On a case-insensitive filesystem the
+/// request may differ in case from the entry (`FOO.YAML` deletes
+/// `foo.yaml`); metadata keys and `last_config` use the stored spelling,
+/// so removing them under the request's spelling would leave stale
+/// references behind. An exact-case match always wins: on a
+/// case-sensitive filesystem `foo.yaml` and `Foo.yaml` can coexist, and
+/// taking the first case-insensitive match in `read_dir` order could
+/// clear the metadata of the file that was *not* deleted. The
+/// case-insensitive fallback compares Unicode lowercases, not ASCII
+/// only: on a case-insensitive volume `É.YAML` and `é.YAML` are the
+/// same file. It only counts when the requested path resolves to that
+/// entry (canonicalize): on a case-sensitive volume the request may
+/// name a deleted file while a differently-cased sibling survives, and
+/// taking the sibling would mark the wrong profile current. Falls back
+/// to the request when the entry is gone.
+pub(crate) fn actual_entry_name(dir: &std::path::Path, name: &str) -> String {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        // Prefer an exact-case match; remember the first
+        // case-insensitive match as a fallback.
+        let mut case_insensitive_match: Option<String> = None;
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            if file_name == name {
+                return file_name;
+            }
+            if case_insensitive_match.is_none() && file_name.to_lowercase() == name.to_lowercase() {
+                case_insensitive_match = Some(file_name);
+            }
+        }
+        // Only take the case-insensitive match when the requested path
+        // actually resolves to that entry: on a case-sensitive volume
+        // the request may name a deleted file while a differently-cased
+        // sibling survives, and taking the sibling would mark the wrong
+        // profile current (or delete the wrong file). On a
+        // case-insensitive volume the request resolves to the same
+        // entry, so the canonical paths agree.
+        if let Some(matched) = case_insensitive_match {
+            let same_entry = dir
+                .join(name)
+                .canonicalize()
+                .ok()
+                .zip(dir.join(&matched).canonicalize().ok())
+                .is_some_and(|(requested, stored)| requested == stored);
+            if same_entry {
+                return matched;
+            }
+        }
+    }
+    // Normalization-insensitive volumes (macOS): the request may use a
+    // different Unicode normalization form than the stored spelling
+    // (composed `é` vs decomposed `e` + accent), which lowercase
+    // comparison cannot see. The filesystem itself resolves it:
+    // canonicalize returns the stored spelling. Only when the resolved
+    // file is a direct child of this directory, and only for a
+    // non-symlink: canonicalize would give a symlink's target name
+    // instead of the link's own name, which is what metadata keys use.
+    let entry_path = dir.join(name);
+    let is_symlink = entry_path
+        .symlink_metadata()
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+    if !is_symlink {
+        if let Ok(canonical) = entry_path.canonicalize() {
+            if let (Some(file_name), Ok(canonical_dir)) =
+                (canonical.file_name(), dir.canonicalize())
+            {
+                if canonical.parent() == Some(canonical_dir.as_path()) {
+                    return file_name.to_string_lossy().into_owned();
+                }
+            }
+        }
+    }
+    name.to_owned()
+}
+
+/// Move every settings key that names the old file (any spelling) to
+/// the new name, and report whether the map changed. Exact spellings
+/// always move; a case variant moves only when no file by that name
+/// survives (on a case-sensitive volume it is a different profile).
+/// The first exact spelling wins when several keys name the same file;
+/// the rest are stale aliases and are dropped. A value already stored
+/// under the new name wins over a moved one.
+fn migrate_settings_keys_for_rename(
+    map: &mut std::collections::HashMap<String, String>,
+    profiles_dir: &std::path::Path,
+    old_names: &[String],
+    new_name: &str,
+) -> bool {
+    let mut moved: Option<String> = None;
+    let mut changed = false;
+    for old in old_names {
+        if let Some(value) = map.remove(old) {
+            changed = true;
+            if moved.is_none() {
+                moved = Some(value);
+            }
+        }
+    }
+    // A third spelling (e.g. a key written as `WORK.yaml` while the
+    // file is `Work.yaml`): same rule as the metadata alias scan —
+    // only a key with no surviving file by that name counts.
+    let old_lowers: Vec<String> = old_names.iter().map(|name| name.to_lowercase()).collect();
+    let alias_keys: Vec<String> = map
+        .keys()
+        .filter(|key| {
+            old_lowers.iter().any(|lower| key.to_lowercase() == *lower)
+                && path_is_absent(&profiles_dir.join(key))
+        })
+        .cloned()
+        .collect();
+    for key in alias_keys {
+        if let Some(value) = map.remove(&key) {
+            changed = true;
+            if moved.is_none() {
+                moved = Some(value);
+            }
+        }
+    }
+    if let Some(value) = moved {
+        if !map.contains_key(new_name) {
+            map.insert(new_name.to_owned(), value);
+        }
+    }
+    changed
+}
+
+/// Whether a `last_config` value names the deleted profile.
+///
+/// The value is normalized (an extensionless `foo` means `foo.yaml`)
+/// and compared by stem. A match only counts when no file by that
+/// name is left on disk: the same stem can name a surviving sibling
+/// with a different extension (`foo.yaml` outlives the deletion of
+/// `foo.yml`), and the file may have been recreated by a concurrent
+/// save. The selection cleanup now runs inside the deletion
+/// transaction, under the transform lock, so a save cannot recreate
+/// the file between the check and the reset; the two-phase cleanup
+/// re-checks under the settings lock as a second line of defense.
+/// The stem checks use the normalized name, not the raw value: for an
+/// extensionless value the raw name has no extension and would stat a
+/// nonexistent path, resetting a reference to a surviving profile.
+fn is_same_config_name(profiles_dir: &std::path::Path, lc: &str, deleted_name: &str) -> bool {
+    if lc == deleted_name {
+        // The file was just deleted; only reset when it is really
+        // gone (see the doc comment). Only a confirmed absence
+        // counts: `exists()` returns false for any error, so a
+        // transient loss of access to the directory would reset the
+        // selection for a profile that is still on disk.
+        return path_is_absent(&profiles_dir.join(lc));
+    }
+    let norm_lc = sanitize_config_file_name(lc.to_owned())
+        .or_else(|_| sanitize_config_file_name(format!("{lc}.yaml")))
+        .unwrap_or_default();
+    let norm_del = sanitize_config_file_name(deleted_name.to_owned()).unwrap_or_default();
+    if norm_lc.is_empty() {
+        return false;
+    }
+    if strip_yaml_ext(&norm_lc) == strip_yaml_ext(&norm_del) {
+        // Same stem: the value names the deleted file — unless it
+        // names a surviving sibling with a different extension
+        // (`foo.yaml` outlives the deletion of `foo.yml`).
+        return path_is_absent(&profiles_dir.join(&norm_lc));
+    }
+    // The selected name may differ in case from the stored spelling
+    // (`FOO.yaml` selected, `foo.yaml` on disk). A case-insensitive
+    // stem match alone would also match a *different* profile on a
+    // case-sensitive filesystem, so only treat it as the same file
+    // when nothing by that name is left on disk. This stat runs
+    // only on the case-insensitive-match path, not the common one.
+    // Unicode lowercase, like the stored-name resolution above:
+    // `É` and `é` are the same file on a case-insensitive volume.
+    strip_yaml_ext(&norm_lc).to_lowercase() == strip_yaml_ext(&norm_del).to_lowercase()
+        && path_is_absent(&profiles_dir.join(&norm_lc))
+}
+
 /// 删除配置后检查 `last_config` 是否悬空（指向已删除的文件）。
 /// 如果是，重置为第一个可用配置；如果没有任何配置，置为 `None`。
 fn cleanup_dangling_last_config(app: &AppHandle, paths: &super::AppPaths, deleted_name: &str) {
     let state = app.state::<SettingsState>();
     // 判断 last_config 是否指向已删除的配置（规范化 + strip 扩展名后比较）
     // 提取为闭包便于两段锁内复用，避免 TOCTOU 竞态时第二段锁无条件覆盖并发更新
-    let is_same_config = |lc: &str| -> bool {
-        if lc == deleted_name {
-            return true;
-        }
-        let norm_lc = sanitize_config_file_name(lc.to_owned())
-            .or_else(|_| sanitize_config_file_name(format!("{lc}.yaml")))
-            .unwrap_or_default();
-        let norm_del = sanitize_config_file_name(deleted_name.to_owned()).unwrap_or_default();
-        !norm_lc.is_empty() && strip_yaml_ext(&norm_lc) == strip_yaml_ext(&norm_del)
-    };
+    let is_same_config =
+        |lc: &str| -> bool { is_same_config_name(&paths.profiles_dir, lc, deleted_name) };
 
     // 第一段持锁：只判断是否需要清理，避免在锁内做阻塞 I/O 导致锁竞争
     let needs_cleanup = {
@@ -341,113 +556,234 @@ fn cleanup_dangling_last_config(app: &AppHandle, paths: &super::AppPaths, delete
     }
 }
 
-/// Remove a profile under the profile-transform guard, so the encryption batch
-/// cannot read the file before the removal and write it back afterwards.
-fn remove_profile_file(path: &std::path::Path) -> Result<(), String> {
-    let transform_guard = crate::lock_profile_transform();
-    let result = fs::remove_file(path).map_err(|e| format!("Failed to delete file: {e}"));
-    drop(transform_guard);
-    result
+/// The actual removal, without taking the profile-transform lock: the
+/// caller must hold it (see [`delete_profile_file_transaction`]). The
+/// guard keeps the encryption batch from reading the file before the
+/// removal and writing it back afterwards.
+fn remove_profile_file_inner(path: &std::path::Path) -> Result<(), String> {
+    fs::remove_file(path).map_err(|e| format!("Failed to delete file: {e}"))
 }
 
-/// [`remove_profile_file`] on the blocking pool: the profile-transform guard is a
-/// std mutex an encryption batch can hold for a while, so waiting for it must
+/// Delete a profile file and verify it is actually gone, without taking
+/// the profile-transform lock: the caller must hold it (see
+/// [`delete_profile_file_transaction`]).
+/// On Windows a remove can report success while the file remains
+/// (locked), so one attempt is not proof; retries once after a short
+/// wait. A retry that finds the file already gone is success: the
+/// pending deletion completed during the wait.
+fn remove_profile_file_verified_inner(path: &std::path::Path) -> Result<(), String> {
+    remove_profile_file_inner(path)?;
+    // Verify deletion (Windows may report success but file remains if locked).
+    // Only a confirmed absence skips the verification: `Path::exists`
+    // returns false for any inspection error, so it would mistake a
+    // locked or inaccessible file for a completed deletion.
+    if !path_is_absent(path) {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if let Err(err) = remove_profile_file_inner(path) {
+            // The pending deletion may have completed during the
+            // wait: a missing file is the success we were waiting for.
+            // Only a confirmed absence counts: `Path::exists` returns
+            // false for any inspection error, so it would mistake a
+            // locked or inaccessible file for a completed deletion.
+            if path_is_absent(path) {
+                return Ok(());
+            }
+            return Err(err);
+        }
+        if !path_is_absent(path) {
+            return Err("File could not be deleted (locked by another process?)".to_owned());
+        }
+    }
+    Ok(())
+}
+
+/// Whether a path is confirmed absent: only a `NotFound` inspection
+/// counts. `Path::exists` returns false for *any* error, so it would
+/// mistake an inspection failure (a locked or inaccessible file) for
+/// a completed deletion and report success while the file remains.
+/// The link itself is inspected, not its target: a dangling symlink
+/// is a present entry, and removing it is what the delete verified.
+fn path_is_absent(path: &std::path::Path) -> bool {
+    matches!(
+        path.symlink_metadata(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound
+    )
+}
+
+/// Remove every metadata entry that names a deleted profile file.
+///
+/// Keys may be stored under any case spelling of the name, so an
+/// exact-spelling removal leaves aliases behind on case-insensitive
+/// volumes. A differently-cased key is removed only when no file by
+/// that exact spelling remains: on a case-sensitive filesystem a
+/// differently-cased key belongs to a distinct surviving file.
+/// `names` lists the spellings known to name the file (stored and
+/// request); a key matching any of them case-insensitively is the
+/// deleted file's when its own file is gone.
+fn remove_deleted_metadata(paths: &super::AppPaths, names: &[String]) -> Result<(), String> {
+    let _guard = lock_metadata();
+    let mut metadata = load_metadata(paths);
+    let lowers: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
+    let dir = &paths.profiles_dir;
+    metadata.configs.retain(|key, _| {
+        if !lowers.iter().any(|lower| key.to_lowercase() == *lower) {
+            return true;
+        }
+        // An exact spelling always goes; a differently-cased key goes
+        // only when its file is gone (see the doc comment). A dangling
+        // link still counts as a config (its target may come back), and
+        // a file that is temporarily unreadable must keep its metadata
+        // too: `exists()` follows the link and returns false for any
+        // error, so only a confirmed absence counts.
+        if names.iter().any(|n| n == key) {
+            return false;
+        }
+        !path_is_absent(&dir.join(key))
+    });
+    save_metadata(paths, &metadata)
+}
+
+/// Delete one profile file and its metadata entries as a single
+/// transform-guarded transaction on the blocking pool.
+///
+/// Holding the transform guard across the file removal, the
+/// verification retry, the metadata cleanup, and the selection
+/// cleanup keeps a concurrent save (subscription or user) from
+/// recreating the profile in between and having its fresh metadata
+/// removed, or its selection reset, while the recreated file
+/// survives — the same serialization the subscription save already
+/// keeps for its own file swap plus metadata write. The lock is a
+/// std mutex a save can hold for a while, so waiting for it must
 /// not stall a Tokio worker (same rule as `update_config`).
-async fn remove_profile_file_blocking(path: &std::path::Path) -> Result<(), String> {
-    let owned = path.to_path_buf();
-    tokio::task::spawn_blocking(move || remove_profile_file(&owned))
-        .await
-        .map_err(|e| format!("Profile delete task failed: {e}"))?
-}
-
-/// [`cleanup_dangling_last_config`] on the blocking pool: it waits for the std
-/// settings mutex and writes `settings.json` under it, neither of which may
-/// stall a Tokio worker.
-async fn cleanup_dangling_last_config_blocking(
-    app: &AppHandle,
-    paths: &super::AppPaths,
-    deleted_name: &str,
+/// The selection cleanup runs even on partial failure (file gone,
+/// metadata not saved): the command still reports the deletion
+/// error, but a dangling `last_config` must not be left behind for
+/// a retry to trip over.
+async fn delete_profile_file_transaction(
+    app: AppHandle,
+    paths: super::AppPaths,
+    target_path: std::path::PathBuf,
+    metadata_names: Vec<String>,
+    deleted_name: String,
 ) -> Result<(), String> {
-    let owned_app = app.clone();
-    let owned_paths = paths.clone();
-    let owned_name = deleted_name.to_owned();
     tokio::task::spawn_blocking(move || {
-        cleanup_dangling_last_config(&owned_app, &owned_paths, &owned_name);
+        // Serialize with legacy migration (see LEGACY_MIGRATION_LOCK):
+        // taken before the transform lock, and held across the whole
+        // transaction, so a migration cannot load the record, see the
+        // file still there, and copy it back after this deletion
+        // removes it. The record update below lands inside the same
+        // hold, so it cannot be overwritten by a stale record save.
+        let _migration_guard = super::core_process::LEGACY_MIGRATION_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _transform_guard = crate::lock_profile_transform();
+        let remove_result = remove_profile_file_verified_inner(&target_path);
+        let metadata_result = match &remove_result {
+            Ok(()) => remove_deleted_metadata(&paths, &metadata_names),
+            // If the file could not be removed, metadata stays intact.
+            Err(_) => Ok(()),
+        };
+        if remove_result.is_ok() {
+            // Record the deletion, so a later migration does not copy
+            // the profile back from its intact legacy source. Best
+            // effort: the file is already gone, and a failed write
+            // only means the next migration may copy it back once.
+            super::core_process::record_legacy_migrated_deletion(
+                &paths.app_data_dir,
+                &deleted_name,
+            );
+        }
+        cleanup_dangling_last_config(&app, &paths, &deleted_name);
+        remove_result.and(metadata_result)
     })
     .await
-    .map_err(|e| format!("last_config cleanup task failed: {e}"))
+    .map_err(|e| format!("Profile delete task failed: {e}"))?
 }
 
 #[tauri::command]
 pub async fn delete_config(app: AppHandle, name: String) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
 
-    // Ensure the name has a .yaml extension
-    let mut clean_name = if name.ends_with(".yaml") || name.ends_with(".yml") {
+    // Ensure the name has a .yaml/.yml extension. The check is
+    // case-insensitive: `Foo.YAML` is already a YAML file, and appending
+    // `.yaml` to it would make the file undeletable (neither the primary
+    // `Foo.YAML.yaml` nor any fallback would ever match it).
+    let lower_name = name.to_lowercase();
+    let mut clean_name = if lower_name.ends_with(".yaml") || lower_name.ends_with(".yml") {
         name.clone()
     } else {
         format!("{name}.yaml")
     };
 
     clean_name = sanitize_config_file_name(clean_name).map_err(|e| e.to_string())?;
-    if clean_name == "run_config.yaml" {
-        return Err("Cannot delete the active temp config".to_owned());
-    }
 
     let target_path = paths.profiles_dir.join(&clean_name);
     validate_path_within_dir(&target_path, &paths.profiles_dir).map_err(|e| e.to_string())?;
 
-    let file_exists = target_path.exists();
+    // The link itself counts, not just its target: a dangling link is
+    // still a config (its target may come back), and `exists()` follows
+    // the link, so it would report a dangling profile as missing and
+    // leave the link and its metadata behind.
+    let file_exists = target_path.symlink_metadata().is_ok();
 
     if !file_exists {
-        // Try with .yml extension as well
-        let yml_name = name.replace(".yaml", ".yml");
+        // Try with .yml extension as well. Build the fallback from the
+        // sanitized name, not the raw input, and validate it like the
+        // primary path: the raw name can carry a drive-relative or
+        // otherwise escaping path that `join` would keep.
+        let yml_name = yml_fallback_name(&clean_name);
         let yml_path = paths.profiles_dir.join(&yml_name);
+        validate_path_within_dir(&yml_path, &paths.profiles_dir).map_err(|e| e.to_string())?;
 
-        if yml_path.exists() {
-            remove_profile_file_blocking(&yml_path).await?;
-            {
-                let _guard = lock_metadata();
-                let mut metadata = load_metadata(&paths);
-                metadata.configs.remove(&yml_name);
-                save_metadata(&paths, &metadata)?;
-            }
-            cleanup_dangling_last_config_blocking(&app, &paths, &yml_name).await?;
+        if yml_path.symlink_metadata().is_ok() {
+            // Use the on-disk spelling for metadata and last_config:
+            // on a case-insensitive filesystem the request may differ
+            // in case from the entry.
+            let stored_yml = actual_entry_name(&paths.profiles_dir, &yml_name);
+            // File removal, metadata cleanup, and selection cleanup in
+            // one transform-guarded transaction (see
+            // `delete_profile_file_transaction`).
+            delete_profile_file_transaction(
+                app.clone(),
+                paths.clone(),
+                yml_path,
+                vec![stored_yml.clone(), yml_name.clone()],
+                stored_yml,
+            )
+            .await?;
             return Ok(format!("Config {yml_name} deleted"));
         }
         return Err("File does not exist".to_owned());
     }
 
-    // Delete the file first, then update metadata
-    // This ensures metadata consistency: if file deletion fails, metadata stays intact
-    remove_profile_file_blocking(&target_path).await?;
+    // The on-disk spelling, for metadata and last_config: on a
+    // case-insensitive filesystem the request may differ in case from
+    // the entry. Resolve it before deleting, while the entry exists.
+    let stored_name = actual_entry_name(&paths.profiles_dir, &clean_name);
 
-    // Verify deletion (Windows may report success but file remains if locked)
-    if target_path.exists() {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        remove_profile_file_blocking(&target_path).await?;
-
-        if target_path.exists() {
-            return Err("File could not be deleted (locked by another process?)".to_owned());
-        }
+    // The reserved name is the stored spelling: a case variant such as
+    // `RUN_CONFIG.yaml` is an ordinary listed profile when that is how
+    // it is stored (creation and listing both treat only the exact
+    // `run_config.yaml` as reserved), while the runtime config's own
+    // spelling stays protected.
+    if is_reserved_config_name(&stored_name) {
+        return Err("Cannot delete the active temp config".to_owned());
     }
 
-    // File deleted successfully — now update metadata
-    // Use clean_name for metadata removal (matches the actual file key stored)
-    {
-        let _guard = lock_metadata();
-        let mut metadata = load_metadata(&paths);
-        metadata.configs.remove(&clean_name);
-        // Also try the original name in case metadata was stored with a different key
-        if name != clean_name {
-            metadata.configs.remove(&name);
-        }
-        save_metadata(&paths, &metadata)?;
-    }
-
-    // 如果被删除的配置恰好是 last_config 指向的配置，重置为第一个可用配置，
-    // 避免悬空指针导致下次冷启动加载到错误的配置。
-    cleanup_dangling_last_config_blocking(&app, &paths, &clean_name).await?;
+    // File removal, metadata cleanup, and selection cleanup in one
+    // transform-guarded transaction: if file deletion fails, metadata
+    // stays intact. The request spelling is listed too: metadata can
+    // be keyed under the spelling it was stored with, which may differ
+    // in case from the file on disk, and the original name in case it
+    // was stored with a different key.
+    delete_profile_file_transaction(
+        app,
+        paths.clone(),
+        target_path,
+        vec![stored_name.clone(), clean_name.clone(), name.clone()],
+        stored_name,
+    )
+    .await?;
 
     Ok(format!("Config {name} deleted"))
 }
@@ -614,7 +950,8 @@ fn rename_config_blocking(
     let paths = ensure_app_storage(&app)?;
 
     // Sanitize old name
-    let mut clean_old = if old_name.ends_with(".yaml") || old_name.ends_with(".yml") {
+    let lower_old = old_name.to_lowercase();
+    let mut clean_old = if lower_old.ends_with(".yaml") || lower_old.ends_with(".yml") {
         old_name.clone()
     } else {
         format!("{old_name}.yaml")
@@ -625,7 +962,8 @@ fn rename_config_blocking(
     }
 
     // Sanitize new name
-    let mut clean_new = if new_name.ends_with(".yaml") || new_name.ends_with(".yml") {
+    let lower_new = new_name.to_lowercase();
+    let mut clean_new = if lower_new.ends_with(".yaml") || lower_new.ends_with(".yml") {
         new_name
     } else {
         format!("{new_name}.yaml")
@@ -640,7 +978,12 @@ fn rename_config_blocking(
     validate_path_within_dir(&old_path, &paths.profiles_dir).map_err(|e| e.to_string())?;
     validate_path_within_dir(&new_path, &paths.profiles_dir).map_err(|e| e.to_string())?;
 
-    if !old_path.exists() {
+    // The link itself counts, not just its target: a dangling link is
+    // still a config, and `exists()` follows the link, so it would
+    // refuse to rename a dangling profile. The destination check below
+    // keeps `exists()`: a dangling link at the new name still occupies
+    // it.
+    if old_path.symlink_metadata().is_err() {
         return Err(format!("Config '{clean_old}' does not exist"));
     }
     if clean_old == clean_new {
@@ -650,13 +993,41 @@ fn rename_config_blocking(
         return Err(format!("A config named '{clean_new}' already exists"));
     }
 
-    // Rename file + update metadata under lock to prevent cleanup_metadata_cache
-    // from removing the metadata entry while the file is temporarily absent.
+    // Update last_config setting if it references the old name
+    // Also migrate last_proxy_selection key from old name to new name
+    let mut last_config_updated = false;
+
+    // Rename file + update metadata + migrate settings references
+    // under one transform lock: resolving the stored spelling or
+    // publishing the new name outside it would let a concurrent
+    // overwrite or delete slip in between (a stale metadata
+    // migration, or last_config published for a file that is
+    // already gone). Holding the lock also keeps
+    // cleanup_metadata_cache from removing the metadata entry while
+    // the file is temporarily absent.
     {
         // The encryption batch rewrites every profile it read, so a rename that
         // lands between its read and write would leave a stale copy at the old
         // name. Taken before the metadata lock, matching the profile writers.
         let _transform_guard = crate::lock_profile_transform();
+        // Resolve the stored spelling under the transform lock, while
+        // the old file still exists: on a case-insensitive volume the
+        // request may differ in case from the entry, and the metadata
+        // and preferences are keyed under the stored spelling.
+        // Migrating them by the request spelling would orphan them,
+        // and a later listing would delete the orphaned metadata.
+        // Resolving it before the lock would let a concurrent
+        // overwrite change the disk spelling first, and the rename
+        // would then migrate the stale record.
+        let stored_old = actual_entry_name(&paths.profiles_dir, &clean_old);
+        // The reserved name is the stored spelling, not the request
+        // one: on a case-insensitive volume `RUN_CONFIG.YAML` resolves
+        // to the runtime file, and the exact check on `clean_old`
+        // above would let it through. The delete path checks the
+        // stored spelling the same way.
+        if is_reserved_config_name(&stored_old) {
+            return Err("Cannot rename the active temp config".to_owned());
+        }
         let _guard = lock_metadata();
         // Re-validate under lock: a concurrent command may have created new_path
         // between the pre-lock check and here.
@@ -666,14 +1037,43 @@ fn rename_config_blocking(
         std::fs::rename(&old_path, &new_path)
             .map_err(|e| format!("Failed to rename config: {e}"))?;
         let mut metadata = load_metadata(&paths);
-        if let Some(meta) = metadata.configs.remove(&clean_old) {
-            metadata.configs.insert(clean_new.clone(), meta);
-        }
-        // Also try original name in case metadata was stored differently
-        if old_name != clean_old {
-            if let Some(meta) = metadata.configs.remove(&old_name) {
-                metadata.configs.insert(clean_new.clone(), meta);
+        let migrated_meta = metadata
+            .configs
+            .remove(&stored_old)
+            .or_else(|| metadata.configs.remove(&clean_old))
+            .or_else(|| {
+                if old_name != clean_old {
+                    metadata.configs.remove(&old_name)
+                } else {
+                    None
+                }
+            });
+        // A third spelling (metadata keyed under `work.yaml` while the
+        // file is `Work.yaml`): migrate it too, or the next listing
+        // drops it as orphaned. Only a key with no surviving file by
+        // that name counts — on a case-sensitive volume a
+        // differently-cased key is a different profile and its entry
+        // must stay. Any further alias is a stale duplicate of the
+        // same file and is dropped with it.
+        let stored_lower = stored_old.to_lowercase();
+        let alias_keys: Vec<String> = metadata
+            .configs
+            .keys()
+            .filter(|key| {
+                key.to_lowercase() == stored_lower && path_is_absent(&paths.profiles_dir.join(key))
+            })
+            .cloned()
+            .collect();
+        let mut migrated_meta = migrated_meta;
+        for key in alias_keys {
+            if let Some(meta) = metadata.configs.remove(&key) {
+                if migrated_meta.is_none() {
+                    migrated_meta = Some(meta);
+                }
             }
+        }
+        if let Some(meta) = migrated_meta {
+            metadata.configs.insert(clean_new.clone(), meta);
         }
         if let Err(e) = save_metadata(&paths, &metadata) {
             // Rollback: rename file back to old path
@@ -686,79 +1086,93 @@ fn rename_config_blocking(
             }
             return Err(format!("Failed to save metadata: {e}"));
         }
-    }
 
-    // Update last_config setting if it references the old name
-    // Also migrate last_proxy_selection key from old name to new name
-    let mut last_config_updated = false;
-    {
-        let state = app.state::<crate::SettingsState>();
-        let mut guard = state
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut dirty = false;
-
-        // Update last_config if it references the old name
-        if guard.last_config.as_deref() == Some(&clean_old)
-            || guard.last_config.as_deref() == Some(&old_name)
+        // Update last_config setting if it references the old name,
+        // still under the transform lock (see the block comment
+        // above): a concurrent delete in between would otherwise
+        // leave last_config pointing at a file that is already gone.
+        // Also migrate last_proxy_selection key from old name to new name.
         {
-            guard.last_config = Some(clean_new.clone());
-            dirty = true;
-            last_config_updated = true;
-        }
+            let state = app.state::<crate::SettingsState>();
+            let mut guard = state
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut dirty = false;
 
-        // Migrate proxy selection key
-        let node_to_migrate = guard.last_proxy_selection.remove(&clean_old).or_else(|| {
-            if old_name != clean_old {
-                guard.last_proxy_selection.remove(&old_name)
-            } else {
-                None
+            // Update last_config if it names the old file, using the
+            // same comparison as the deletion cleanup
+            // (`is_same_config_name`): an extensionless value (`foo`
+            // means `foo.yaml`) and a differently-cased spelling count
+            // too, while a surviving sibling with a different extension
+            // (`foo.yml` outliving `foo.yaml`) does not. The old file
+            // was already renamed away above, so the absence check
+            // inside reads the same state as the deletion path.
+            if guard
+                .last_config
+                .as_deref()
+                .is_some_and(|lc| is_same_config_name(&paths.profiles_dir, lc, &stored_old))
+            {
+                guard.last_config = Some(clean_new.clone());
+                dirty = true;
+                last_config_updated = true;
             }
-        });
-        if let Some(node) = node_to_migrate {
-            guard.last_proxy_selection.insert(clean_new.clone(), node);
-            dirty = true;
-        }
 
-        // Migrate primary group preference key
-        let group_to_migrate = guard
-            .primary_group_preference
-            .remove(&clean_old)
-            .or_else(|| {
-                if old_name != clean_old {
-                    guard.primary_group_preference.remove(&old_name)
-                } else {
-                    None
+            // Migrate the proxy selection and primary group preference
+            // keys: any key naming the old file (any spelling) moves to
+            // the new name, so a selection saved under a case variant
+            // does not go stale. The old spellings are the stored one,
+            // the sanitized request, and the raw request.
+            let old_names = vec![stored_old.clone(), clean_old.clone(), old_name.clone()];
+            if migrate_settings_keys_for_rename(
+                &mut guard.last_proxy_selection,
+                &paths.profiles_dir,
+                &old_names,
+                &clean_new,
+            ) {
+                dirty = true;
+            }
+            if migrate_settings_keys_for_rename(
+                &mut guard.primary_group_preference,
+                &paths.profiles_dir,
+                &old_names,
+                &clean_new,
+            ) {
+                dirty = true;
+            }
+
+            // Persist under the lock: a snapshot written after releasing it could
+            // land after a newer one and revert it on disk. Memory keeps the
+            // migrated keys even if the write fails, since the file is renamed.
+            if dirty {
+                if let Err(e) = crate::persist_settings(&app, &guard) {
+                    emit_error!(
+                        Config,
+                        CONFIG_SAVE_FAILED,
+                        "Failed to persist settings: {e}"
+                    );
                 }
-            });
-        if let Some(group) = group_to_migrate {
-            guard
-                .primary_group_preference
-                .insert(clean_new.clone(), group);
-            dirty = true;
-        }
-
-        // Persist under the lock: a snapshot written after releasing it could
-        // land after a newer one and revert it on disk. Memory keeps the
-        // migrated keys even if the write fails, since the file is renamed.
-        if dirty {
-            if let Err(e) = crate::persist_settings(&app, &guard) {
-                emit_error!(
-                    Config,
-                    CONFIG_SAVE_FAILED,
-                    "Failed to persist settings: {e}"
-                );
             }
+            drop(guard);
         }
-        drop(guard);
     }
 
-    // Sync runtime MihomoState.last_config_path
+    // Sync runtime MihomoState.last_config_path, but only when the
+    // runtime still points at the old file: two overlapping renames
+    // publish in lock order, and the first one's write landing after
+    // the second's would point the runtime at a file that no longer
+    // exists. The runtime path keeps the spelling the file was
+    // selected under, so any of the old spellings counts.
     if last_config_updated {
         let mihomo = app.state::<MihomoState>();
         if let Ok(mut guard) = mihomo.0.lock() {
-            guard.set_last_config_path(Some(clean_new.clone()));
+            if guard.last_config_path().is_some_and(|path| {
+                path == stored_old.as_str()
+                    || path == clean_old.as_str()
+                    || path == old_name.as_str()
+            }) {
+                guard.set_last_config_path(Some(clean_new.clone()));
+            }
         };
     }
 
@@ -994,6 +1408,214 @@ port: 7890
         assert!(out.contains("# URL: https://example.com/sub.yaml"));
         assert!(out.contains("# SUB_INFO: upload=0"));
         assert!(out.contains("7890"));
+    }
+
+    // ── yml_fallback_name tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_yml_fallback_swaps_trailing_yaml_only() {
+        assert_eq!(yml_fallback_name("foo.yaml"), "foo.yml");
+        assert_eq!(yml_fallback_name("Foo.YAML"), "Foo.yml");
+        // Not a trailing .yaml: left alone, never a different file.
+        assert_eq!(yml_fallback_name("team.yaml.backup"), "team.yaml.backup");
+        assert_eq!(yml_fallback_name("foo.yml"), "foo.yml");
+    }
+
+    #[test]
+    fn test_yml_fallback_unicode_names_do_not_panic() {
+        // A missing `é.yml` / `中.yml` used to panic: slicing five bytes
+        // back lands inside the multibyte character. Now it is simply
+        // not a `.yaml` name and comes back unchanged.
+        assert_eq!(yml_fallback_name("é.yml"), "é.yml");
+        assert_eq!(yml_fallback_name("中.yml"), "中.yml");
+        assert_eq!(yml_fallback_name("é.yaml"), "é.yml");
+    }
+
+    // ── actual_entry_name tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_actual_entry_name_keeps_stored_spelling() {
+        let unique = format!("zephyr_test_entry_name_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("foo.yaml"), "port: 7890\n").unwrap();
+
+        // A differently-cased request resolves to the stored spelling
+        // on a case-insensitive volume, so metadata removal and
+        // last_config cleanup match the entry. On a case-sensitive
+        // volume the request names a different (missing) file, so it
+        // comes back as requested instead of claiming the surviving
+        // sibling as current.
+        let case_insensitive = dir.join("FOO.YAML").exists();
+        assert_eq!(
+            actual_entry_name(&dir, "FOO.YAML"),
+            if case_insensitive {
+                "foo.yaml"
+            } else {
+                "FOO.YAML"
+            }
+        );
+        assert_eq!(actual_entry_name(&dir, "foo.yaml"), "foo.yaml");
+        // A missing entry comes back as requested.
+        assert_eq!(actual_entry_name(&dir, "missing.yaml"), "missing.yaml");
+
+        // Unicode case folding, not ASCII only: on a case-insensitive
+        // volume `É.YAML` and `é.YAML` are the same file.
+        std::fs::write(dir.join("é.YAML"), "port: 7892\n").unwrap();
+        assert_eq!(
+            actual_entry_name(&dir, "É.YAML"),
+            if dir.join("É.YAML").exists() {
+                "é.YAML"
+            } else {
+                "É.YAML"
+            }
+        );
+
+        // On a case-sensitive filesystem both casings can coexist: the
+        // exact match must win, or deleting one would clear the other's
+        // metadata. On a case-insensitive filesystem the second write
+        // lands on the same file, so only check coexistence when both
+        // entries are really there.
+        std::fs::write(dir.join("Foo.yaml"), "port: 7891\n").unwrap();
+        let entries: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        if entries.iter().any(|n| n == "foo.yaml") && entries.iter().any(|n| n == "Foo.yaml") {
+            assert_eq!(actual_entry_name(&dir, "Foo.yaml"), "Foo.yaml");
+            assert_eq!(actual_entry_name(&dir, "foo.yaml"), "foo.yaml");
+            // With no exact match (`FOO.YAML`): on a case-sensitive
+            // volume the request names a missing file and comes back as
+            // requested — taking a sibling would mark the wrong profile
+            // current. On a case-insensitive volume either stored
+            // spelling is a valid answer; read_dir order decides, so
+            // don't pin it.
+            if dir.join("FOO.YAML").exists() {
+                assert!(matches!(
+                    actual_entry_name(&dir, "FOO.YAML").as_str(),
+                    "foo.yaml" | "Foo.yaml"
+                ));
+            } else {
+                assert_eq!(actual_entry_name(&dir, "FOO.YAML"), "FOO.YAML");
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_is_reserved_config_name_exact_only() {
+        assert!(is_reserved_config_name("run_config.yaml"));
+        assert!(!is_reserved_config_name("RUN_CONFIG.yaml"));
+        assert!(!is_reserved_config_name("Run_Config.yaml"));
+        assert!(!is_reserved_config_name("run_config.yml"));
+        assert!(!is_reserved_config_name("my-run_config.yaml"));
+        assert!(!is_reserved_config_name(""));
+    }
+
+    #[test]
+    fn test_is_same_config_name_extensionless_survivor() {
+        let unique = format!("zephyr_test_same_config_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("foo.yaml"), "port: 7890\n").unwrap();
+        // An extensionless `foo` selects `foo.yaml`, which survives the
+        // deletion of the distinct `FOO.yaml`: the reference is not
+        // dangling. The old check stat'ed the raw `foo` (no extension)
+        // and would have reset it anyway.
+        assert!(!is_same_config_name(&dir, "foo", "FOO.yaml"));
+        // Once `foo.yaml` is gone too, the reference is dangling.
+        std::fs::remove_file(dir.join("foo.yaml")).unwrap();
+        assert!(is_same_config_name(&dir, "foo", "FOO.yaml"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_is_same_config_name_surviving_sibling_and_recreation() {
+        let unique = format!("zephyr_test_same_config_sib_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("foo.yaml"), "port: 7890\n").unwrap();
+        std::fs::write(dir.join("foo.yml"), "port: 7891\n").unwrap();
+        // Same stem, different extension: deleting `foo.yml` must not
+        // reset a selection pointing at the surviving `foo.yaml`.
+        assert!(!is_same_config_name(&dir, "foo.yaml", "foo.yml"));
+        assert!(!is_same_config_name(&dir, "foo.yml", "foo.yaml"));
+        // Once the sibling is gone too, the reference is dangling.
+        std::fs::remove_file(dir.join("foo.yaml")).unwrap();
+        assert!(is_same_config_name(&dir, "foo.yaml", "foo.yml"));
+        // An exact match counts only while the file is really gone: a
+        // concurrent save may have recreated it after the deletion.
+        std::fs::write(dir.join("foo.yml"), "port: 7891\n").unwrap();
+        assert!(!is_same_config_name(&dir, "foo.yml", "foo.yml"));
+        std::fs::remove_file(dir.join("foo.yml")).unwrap();
+        assert!(is_same_config_name(&dir, "foo.yml", "foo.yml"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_remove_deleted_metadata_keeps_surviving_case_variant() {
+        let unique = format!("zephyr_test_del_meta_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        // `foo.yaml` is the deleted file (absent); `FOO.yaml` survives
+        // as a distinct file on a case-sensitive filesystem; `bar.yaml`
+        // is unrelated.
+        std::fs::write(dir.join("FOO.yaml"), "port: 7890\n").unwrap();
+        std::fs::write(dir.join("bar.yaml"), "port: 7891\n").unwrap();
+        std::fs::write(
+            dir.join("metadata.json"),
+            r#"{"configs": {"foo.yaml": {"url": "https://example.com/a"}, "FOO.yaml": {"url": "https://example.com/b"}, "bar.yaml": {}}}"#,
+        )
+        .unwrap();
+        let paths = crate::core_manager::AppPaths {
+            app_data_dir: dir.clone(),
+            core_dir: dir.clone(),
+            profiles_dir: dir.clone(),
+        };
+        remove_deleted_metadata(&paths, &["foo.yaml".to_owned()]).unwrap();
+        let meta = load_metadata(&paths);
+        assert!(!meta.configs.contains_key("foo.yaml"));
+        assert!(meta.configs.contains_key("FOO.yaml"));
+        assert!(meta.configs.contains_key("bar.yaml"));
+
+        // Alias case: a differently-cased key whose file is gone names
+        // the deleted file and goes too. Remove the surviving `FOO.yaml`
+        // first: on a case-insensitive volume `Foo.yaml` resolves to
+        // it, so the key would (correctly) be kept while the file lives.
+        std::fs::remove_file(dir.join("FOO.yaml")).unwrap();
+        std::fs::write(
+            dir.join("metadata.json"),
+            r#"{"configs": {"foo.yaml": {}, "Foo.yaml": {}}}"#,
+        )
+        .unwrap();
+        remove_deleted_metadata(&paths, &["foo.yaml".to_owned()]).unwrap();
+        let meta = load_metadata(&paths);
+        assert!(!meta.configs.contains_key("foo.yaml"));
+        assert!(!meta.configs.contains_key("Foo.yaml"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Normalization-insensitive volumes only (macOS): a composed
+    // request resolves to a decomposed stored spelling. On Linux the
+    // two forms are distinct files, so this cannot be exercised there.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_actual_entry_name_unicode_normalization() {
+        let unique = format!("zephyr_test_entry_norm_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Stored decomposed (e + combining acute), requested composed (é).
+        let decomposed = "e\u{301}.yaml";
+        let composed = "\u{e9}.yaml";
+        std::fs::write(dir.join(decomposed), "port: 7890\n").unwrap();
+        assert_eq!(actual_entry_name(&dir, composed), decomposed);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
