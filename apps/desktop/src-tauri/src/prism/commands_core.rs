@@ -259,6 +259,16 @@ pub async fn prism_rebuild(
         let _guard = crate::prism::pipeline::RUN_CONFIG_LOCK
             .lock()
             .map_err(|e| format!("Run config lock poisoned: {e}"))?;
+        // Refuse while a core start is in progress, before writing
+        // anything: the secret read above is the previous run's, and
+        // the start is about to write the new run config with fresh
+        // credentials — this clean base, written with the stale secret,
+        // would overwrite it, and the startup health check would fail
+        // on the old credentials. `ext.apply` below is guard-checked
+        // against a start, but the base write here was not.
+        if crate::prism::pipeline::core_start_in_progress() {
+            return Err("Hot reload refused: a core start is in progress".to_owned());
+        }
         // Captures the core's answer to the reload `ext.apply` triggers
         // (set by `ZephyrPrismHost::apply_config` on this thread).
         let status_guard = super::host::HttpStatusGuard::enter();
