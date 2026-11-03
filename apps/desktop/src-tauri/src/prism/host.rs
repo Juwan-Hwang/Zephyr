@@ -190,6 +190,70 @@ impl ZephyrPrismHost {
     }
 }
 
+/// Same rule as `restore_unchanged_provider_paths` in the pipeline,
+/// for the YAML values this path works with: a provider `path` /
+/// `script-path` the script left exactly as it was in the running
+/// config is restored after the import sanitizer strips it. The
+/// script's own output is `modified`; the on-disk `run_config.yaml`
+/// is `before`.
+fn restore_unchanged_provider_paths_yaml(
+    stripped: &mut serde_yaml::Value,
+    modified: &serde_yaml::Value,
+    before: &serde_yaml::Value,
+) {
+    for section in ["proxy-providers", "rule-providers"] {
+        let section_key = serde_yaml::Value::String(section.to_owned());
+        let Some(stripped_providers) = stripped
+            .as_mapping_mut()
+            .and_then(|m| m.get_mut(section_key.clone()))
+            .and_then(serde_yaml::Value::as_mapping_mut)
+        else {
+            continue;
+        };
+        let Some(before_providers) = before
+            .as_mapping()
+            .and_then(|m| m.get(section_key.clone()))
+            .and_then(serde_yaml::Value::as_mapping)
+        else {
+            continue;
+        };
+        let Some(modified_providers) = modified
+            .as_mapping()
+            .and_then(|m| m.get(section_key.clone()))
+            .and_then(serde_yaml::Value::as_mapping)
+        else {
+            continue;
+        };
+        let names: Vec<serde_yaml::Value> = stripped_providers.keys().cloned().collect();
+        for name in names {
+            let Some(before_provider) = before_providers.get(name.clone()) else {
+                continue;
+            };
+            // Only when the script left this provider exactly as it
+            // was: any other change means the path is the script's.
+            if modified_providers.get(name.clone()) != Some(before_provider) {
+                continue;
+            }
+            let Some(provider) = stripped_providers.get_mut(name.clone()) else {
+                continue;
+            };
+            let (Some(provider_map), Some(before_map)) =
+                (provider.as_mapping_mut(), before_provider.as_mapping())
+            else {
+                continue;
+            };
+            for key in ["path", "script-path"] {
+                let key_value = serde_yaml::Value::String(key.to_owned());
+                if !provider_map.contains_key(key_value.clone()) {
+                    if let Some(value) = before_map.get(key_value.clone()) {
+                        provider_map.insert(key_value, value.clone());
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl PrismHost for ZephyrPrismHost {
     // -- Required methods ----------------------------------------------------
 
@@ -203,14 +267,6 @@ impl PrismHost for ZephyrPrismHost {
         let paths = ensure_app_storage(&self.app)?;
         let run_config_path = paths.core_dir.join("run_config.yaml");
 
-        // Secure write (Unix 0600 / Windows DACL) through a temporary file:
-        // a failed write leaves the config the core loaded intact.
-        crate::core_manager::core::secure_io::write_file_secure_atomic(&run_config_path, config)?;
-
-        // Mihomo's PUT /configs expects a JSON body {"path": "..."} to reload
-        // from disk — NOT the raw YAML config. Sending raw YAML with
-        // Content-Type: application/json causes a silent 400 Bad Request.
-        let body = serde_json::json!({ "path": run_config_path.to_string_lossy() }).to_string();
         // Hold the reload-and-reconcile sequence for this whole
         // reload, as the pipeline path does, from the generation
         // snapshot through the confirmation and the publication it
@@ -228,18 +284,162 @@ impl PrismHost for ZephyrPrismHost {
         // caller under the Prism inner lock for the PUT; the join adds
         // the confirmation wait to that block, which is the price of
         // keeping the sequence ordered end to end.
+        //
+        // The managed endpoint is re-read just before it is injected
+        // into the config below: a core restart while this waited for
+        // the sequence lock changes the port and secret, and the filter
+        // restores those same values into the config — a restart
+        // between the injection and the PUT would otherwise leave the
+        // file carrying the previous core's address and secret.
         let sequence = super::pipeline::acquire_reload_reconcile_lock();
-        // Hot-reload via mihomo REST API (PUT for full config replacement).
-        // The endpoint is read under the sequence lock: a core restart while
-        // this waited for it changes the port and secret.
-        let (port, secret) = {
-            let state = self.app.state::<MihomoState>();
-            let lock = lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
-            (
-                lock.last_port().unwrap_or(9090),
-                lock.last_secret().to_owned(),
-            )
+        // The caller holds `RUN_CONFIG_LOCK` for the whole apply: all
+        // four `ext.apply` sites take it before the Prism inner lock,
+        // so the order is `RUN_CONFIG_LOCK` → inner → sequence
+        // everywhere. This function must NOT take it itself — the mutex
+        // is not re-entrant, and the batch/write/rebuild callers
+        // already hold it on this thread, so taking it here would
+        // deadlock instead of serializing. It is held for the whole
+        // apply, through the write and the reload signal below.
+        // Fail closed while a core start is in progress (see
+        // `CORE_START_COUNT` in the pipeline): the start is replacing
+        // `run_config.yaml` with fresh credentials, and an apply here
+        // would write the previous run's port/secret back into the
+        // file and fail the startup health check.
+        if super::pipeline::core_start_in_progress() {
+            return Err("Prism apply refused: a core start is in progress".to_owned());
+        }
+
+        // A script may add an unauthenticated control surface (such as
+        // `external-controller-unix`) to the config it hands back; the
+        // strip in `prepare_runtime_config` never sees Prism output, so
+        // filter it here before the config is written and hot-reloaded.
+        // The strip also removes provider `path` / `script-path` keys a
+        // script may add: the import sanitizer strips those, and the
+        // same rule applies to script output — otherwise a provider
+        // path inside the core directory would be kept and reloaded,
+        // and mihomo would load it. The TCP `external-controller` /
+        // `secret` are left alone by the strip, because
+        // `prepare_runtime_config` re-injects the managed values right
+        // after. This writer has no such step, so a script that sets
+        // `external-controller` to `0.0.0.0:9090` and clears `secret`
+        // would reach the reload as-is. Restore the managed values
+        // (read above, under the sequence lock) instead: the written
+        // config always carries the controller the app itself uses,
+        // never the script's.
+        // An unparsable input is rejected, not written as-is: the
+        // single-document parser refuses multi-document input, so a
+        // script output like `external-controller-unix: /tmp/x`
+        // followed by `---` would otherwise be written raw — leaving
+        // an unauthenticated control surface on disk for a later
+        // restart to load, and possibly in the reload itself. The same
+        // holds for a failed re-serialization. The previous config
+        // keeps running; the script's output is reported as an error.
+        let filtered;
+        // Bound here so the PUT and the TUN confirmation below can use
+        // the same values: assigned inside the parse arm, just before
+        // they are injected (see below) — a start that begins during
+        // the parse must not leave stale values in the file, and the
+        // reload must talk to the core those values describe.
+        let (port, secret);
+        let config_to_write: &str = match serde_yaml::from_str::<serde_yaml::Value>(config) {
+            Ok(mut value) => {
+                // The full import sanitizer, not just the control-plane
+                // strip: it also removes provider `path` / `script-path`
+                // keys (see the comment above) and `script` keys.
+                // Snapshot the script's output first: the restore below
+                // compares providers against it to tell a path the
+                // script left alone from one the script set.
+                let modified = value.clone();
+                zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(
+                    &mut value, false,
+                );
+                // A provider path the script did not touch is not the
+                // script's to remove: restore it from the running
+                // config on disk, exactly as the pipeline path does.
+                // Best-effort — if the file cannot be read or parsed,
+                // the path simply stays stripped, as today.
+                if let Ok(before_text) = self.read_running_config() {
+                    if let Ok(before) = serde_yaml::from_str::<serde_yaml::Value>(&before_text) {
+                        restore_unchanged_provider_paths_yaml(&mut value, &modified, &before);
+                    }
+                }
+                let mut target = &mut value;
+                while let serde_yaml::Value::Tagged(tagged) = target {
+                    target = &mut tagged.value;
+                }
+                // Re-read the managed values here, just before injecting
+                // them: a core start can begin after the check above (the
+                // start path takes no lock this function holds), and the
+                // values read then would be stale — writing them back
+                // would undo the start's fresh credentials. Fail closed
+                // if a start is in progress now, or the core has not
+                // published its controller yet (first start, before the
+                // health check passes): falling back to 9090 / an empty
+                // secret here would write the prepared credentials away
+                // and expose the loopback controller without
+                // authentication until the health check stops the core.
+                if super::pipeline::core_start_in_progress() {
+                    return Err("Prism apply refused: a core start is in progress".to_owned());
+                }
+                (port, secret) = {
+                    let state = self.app.state::<MihomoState>();
+                    let lock =
+                        lock_critical(&state.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
+                    let Some(port) = lock.last_port() else {
+                        return Err(
+                            "Prism apply refused: the core has not published its controller port yet"
+                                .to_owned(),
+                        );
+                    };
+                    (port, lock.last_secret().to_owned())
+                };
+                if let serde_yaml::Value::Mapping(map) = target {
+                    map.insert(
+                        serde_yaml::Value::String("external-controller".to_owned()),
+                        serde_yaml::Value::String(format!("127.0.0.1:{port}")),
+                    );
+                    map.insert(
+                        serde_yaml::Value::String("secret".to_owned()),
+                        serde_yaml::Value::String(secret.clone()),
+                    );
+                }
+                match serde_yaml::to_string(&value) {
+                    Ok(text) => {
+                        filtered = text;
+                        &filtered
+                    }
+                    Err(e) => {
+                        return Err(format!("Failed to serialize filtered Prism config: {e}"));
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(format!("Prism script output is not valid YAML: {e}"));
+            }
         };
+
+        // Re-check immediately before the write: a start that began
+        // during the filter/serialize above would have its fresh
+        // credentials overwritten by this write.
+        if super::pipeline::core_start_in_progress() {
+            return Err("Prism apply refused: a core start is in progress".to_owned());
+        }
+
+        // Secure write (Unix 0600 / Windows DACL) through a temporary file:
+        // a failed write leaves the config the core loaded intact.
+        crate::core_manager::core::secure_io::write_file_secure_atomic(
+            &run_config_path,
+            config_to_write,
+        )?;
+
+        // Mihomo's PUT /configs expects a JSON body {"path": "..."} to reload
+        // from disk — NOT the raw YAML config. Sending raw YAML with
+        // Content-Type: application/json causes a silent 400 Bad Request.
+        let body = serde_json::json!({ "path": run_config_path.to_string_lossy() }).to_string();
+        // Hot-reload via mihomo REST API (PUT for full config replacement).
+        // The endpoint was read above, under the sequence lock, so the
+        // PUT talks to the same core the injected controller values
+        // belong to.
         let url = format!("http://127.0.0.1:{port}/configs?force=true");
         // Snapshot the live-state generation before the reload: the PUT
         // below can block for seconds, and a snapshot taken only after
@@ -363,11 +563,26 @@ None => "Config saved. Failed to apply via core REST API (connection or response
             .map_err(|e| format!("Failed to read profiles dir: {e}"))?;
 
         let mut profiles = Vec::new();
+        // Resolve the selected name to the stored entry: on a
+        // case-insensitive volume the selection may differ in case
+        // from the file on disk (`work.yaml` selects `Work.YAML`),
+        // and a plain string comparison would mark it as not current.
+        // On a case-sensitive volume the two spellings are distinct
+        // files, and the resolver prefers the exact match, so they
+        // are not conflated.
+        let current_entry = crate::core_manager::core::config_manager::actual_entry_name(
+            &paths.profiles_dir,
+            &current,
+        );
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            let is_yaml = name.ends_with(".yaml") || name.ends_with(".yml");
+            // Directories are not profiles, even when they carry a
+            // YAML extension.
+            let lower = name.to_lowercase();
+            let is_yaml =
+                entry.path().is_file() && (lower.ends_with(".yaml") || lower.ends_with(".yml"));
             if is_yaml {
-                let is_current = name == current;
+                let is_current = name == current_entry;
                 profiles.push(ProfileInfo {
                     id: name.clone(),
                     name,
@@ -489,5 +704,113 @@ None => "Config saved. Failed to apply via core REST API (connection or response
 
     fn get_ssid(&self) -> Option<String> {
         crate::network_coordinator::detect_ssid()
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    fn file_provider_yaml(path: &str) -> serde_yaml::Value {
+        serde_yaml::from_str(&format!("type: file\npath: {path}\ninterval: 3600\n")).unwrap()
+    }
+
+    fn providers_yaml(provider: serde_yaml::Value) -> serde_yaml::Value {
+        let mut top = serde_yaml::Mapping::new();
+        let mut providers = serde_yaml::Mapping::new();
+        providers.insert(serde_yaml::Value::String("local".to_owned()), provider);
+        top.insert(
+            serde_yaml::Value::String("proxy-providers".to_owned()),
+            serde_yaml::Value::Mapping(providers),
+        );
+        serde_yaml::Value::Mapping(top)
+    }
+
+    #[test]
+    fn restore_unchanged_provider_paths_yaml_restores_untouched_path() {
+        let before = providers_yaml(file_provider_yaml("/profiles/local.yaml"));
+        let modified = before.clone();
+        let mut stripped = modified.clone();
+        stripped
+            .as_mapping_mut()
+            .unwrap()
+            .get_mut(serde_yaml::Value::String("proxy-providers".to_owned()))
+            .unwrap()
+            .as_mapping_mut()
+            .unwrap()
+            .get_mut(serde_yaml::Value::String("local".to_owned()))
+            .unwrap()
+            .as_mapping_mut()
+            .unwrap()
+            .remove(serde_yaml::Value::String("path".to_owned()));
+        restore_unchanged_provider_paths_yaml(&mut stripped, &modified, &before);
+        let path = stripped
+            .as_mapping()
+            .unwrap()
+            .get(serde_yaml::Value::String("proxy-providers".to_owned()))
+            .unwrap()
+            .as_mapping()
+            .unwrap()
+            .get(serde_yaml::Value::String("local".to_owned()))
+            .unwrap()
+            .as_mapping()
+            .unwrap()
+            .get(serde_yaml::Value::String("path".to_owned()))
+            .unwrap();
+        assert_eq!(path.as_str(), Some("/profiles/local.yaml"));
+    }
+
+    #[test]
+    fn restore_unchanged_provider_paths_yaml_ignores_script_added_path() {
+        let before = providers_yaml(
+            serde_yaml::from_str(
+                "type: http\nurl: https://example.com/list.yaml\ninterval: 3600\n",
+            )
+            .unwrap(),
+        );
+        let mut modified = before.clone();
+        modified
+            .as_mapping_mut()
+            .unwrap()
+            .get_mut(serde_yaml::Value::String("proxy-providers".to_owned()))
+            .unwrap()
+            .as_mapping_mut()
+            .unwrap()
+            .get_mut(serde_yaml::Value::String("local".to_owned()))
+            .unwrap()
+            .as_mapping_mut()
+            .unwrap()
+            .insert(
+                serde_yaml::Value::String("path".to_owned()),
+                serde_yaml::Value::String("/tmp/evil.yaml".to_owned()),
+            );
+        let mut stripped = modified.clone();
+        stripped
+            .as_mapping_mut()
+            .unwrap()
+            .get_mut(serde_yaml::Value::String("proxy-providers".to_owned()))
+            .unwrap()
+            .as_mapping_mut()
+            .unwrap()
+            .get_mut(serde_yaml::Value::String("local".to_owned()))
+            .unwrap()
+            .as_mapping_mut()
+            .unwrap()
+            .remove(serde_yaml::Value::String("path".to_owned()));
+        restore_unchanged_provider_paths_yaml(&mut stripped, &modified, &before);
+        assert!(stripped
+            .as_mapping()
+            .unwrap()
+            .get(serde_yaml::Value::String("proxy-providers".to_owned()))
+            .unwrap()
+            .as_mapping()
+            .unwrap()
+            .get(serde_yaml::Value::String("local".to_owned()))
+            .unwrap()
+            .as_mapping()
+            .unwrap()
+            .get(serde_yaml::Value::String("path".to_owned()))
+            .is_none());
     }
 }

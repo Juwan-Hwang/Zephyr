@@ -2497,11 +2497,20 @@ const PROFILE_SUFFIX_RESERVE_BYTES: usize = 11;
 /// boundary) to leave room for the widest suffix; the cut is the same for
 /// every call, so the suffix search stays consistent.
 fn next_free_profile_name(profiles_dir: &std::path::Path, clean_name: &str) -> String {
-    let full_stem = clean_name
-        .strip_suffix(".yaml")
-        .or_else(|| clean_name.strip_suffix(".yml"))
-        .unwrap_or(clean_name);
-    let ext = clean_name.strip_prefix(full_stem).unwrap_or(".yaml");
+    // Strip the YAML extension case-insensitively so the collision
+    // suffix lands before it (`Foo.YAML` → `Foo-1.YAML`): appending
+    // after it would make `Foo.YAML-1`, whose extension is not YAML
+    // and which the listing, backup, and encryption batches skip.
+    // The extension keeps its original case in the result.
+    let lower = clean_name.to_lowercase();
+    let full_stem = if lower.ends_with(".yaml") {
+        &clean_name[..clean_name.len() - 5]
+    } else if lower.ends_with(".yml") {
+        &clean_name[..clean_name.len() - 4]
+    } else {
+        clean_name
+    };
+    let ext = &clean_name[full_stem.len()..];
     let max_stem_bytes =
         MAX_PROFILE_FILE_NAME_BYTES.saturating_sub(ext.len() + PROFILE_SUFFIX_RESERVE_BYTES);
     let mut stem_end = full_stem.len().min(max_stem_bytes);
@@ -2565,6 +2574,143 @@ fn pick_new_subscription_file_name(
     }
 
     rule_name().and_then(|name| usable_suggested_file_name(&format!("{name}.yaml")))
+}
+
+/// Move one settings map's keys from the old spelling to the new one
+/// after an overwrite changed the stored spelling (see
+/// [`migrate_settings_keys_after_overwrite`]); returns whether the map
+/// changed. A separate function so the two maps are borrowed one at a
+/// time: holding both `&mut` borrows in one array literal does not
+/// compile.
+fn migrate_one_settings_map_after_overwrite(
+    map: &mut std::collections::HashMap<String, String>,
+    profiles_dir: &std::path::Path,
+    target_resolved: &std::path::Path,
+    old_name: &str,
+    new_name: &str,
+) -> bool {
+    let mut keys: Vec<String> = map
+        .keys()
+        .filter(|key| {
+            *key != new_name
+                // The canonical check below already guarantees the key
+                // resolves to this same file; a lowercase comparison
+                // would additionally block NFC/NFD spellings (`to_lowercase`
+                // does not normalize), while a symlink alias resolving
+                // here is a different config and must not move.
+                && !profiles_dir
+                    .join(key)
+                    .symlink_metadata()
+                    .is_ok_and(|m| m.file_type().is_symlink())
+                && profiles_dir.join(key).canonicalize().ok().as_deref() == Some(target_resolved)
+        })
+        .cloned()
+        .collect();
+    // Several stale spellings can hold different selections for the
+    // same file; HashMap order must not decide which one survives.
+    // The spelling in effect until now holds the most recent
+    // selection, so it wins; the rest fall back to sorted order.
+    keys.sort();
+    if let Some(pos) = keys.iter().position(|key| key == old_name) {
+        keys.swap(0, pos);
+    }
+    let mut changed = false;
+    for key in keys {
+        if let Some(value) = map.remove(&key) {
+            // The spelling in effect until now holds the most recent
+            // selection, so it wins even over a value already stored
+            // under the new spelling (that one is from an earlier era,
+            // when the file last had the new spelling). A stale alias
+            // never overwrites a value already under the new spelling.
+            if key == old_name || !map.contains_key(new_name) {
+                map.insert(new_name.to_owned(), value);
+            }
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Move the proxy/group selections and `last_config` from the old
+/// spelling to the new one after an overwrite changed the stored
+/// spelling on a case-insensitive volume (`Work.yaml` overwritten
+/// as `WORK.yaml`). Only keys that resolve to this same file move:
+/// on a case-sensitive volume a differently-cased key is a different
+/// profile and its selection must stay (same rule as
+/// [`metadata_for_config`]). A key already under the new spelling
+/// wins over a stale alias, but the spelling in effect until now
+/// wins over a value already under the new spelling (that value is
+/// from an earlier era, when the file last had the new spelling).
+/// Best-effort: a failed settings persist only warns — the download
+/// itself already succeeded.
+fn migrate_settings_keys_after_overwrite(
+    app: &AppHandle,
+    paths: &super::AppPaths,
+    old_name: &str,
+    new_name: &str,
+) {
+    let Some(target_resolved) = paths.profiles_dir.join(new_name).canonicalize().ok() else {
+        return;
+    };
+    let state = app.state::<crate::SettingsState>();
+    let mut guard = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut dirty = if guard.last_config.as_deref() == Some(old_name) {
+        guard.last_config = Some(new_name.to_owned());
+        true
+    } else {
+        false
+    };
+    dirty |= migrate_one_settings_map_after_overwrite(
+        &mut guard.last_proxy_selection,
+        &paths.profiles_dir,
+        &target_resolved,
+        old_name,
+        new_name,
+    );
+    dirty |= migrate_one_settings_map_after_overwrite(
+        &mut guard.primary_group_preference,
+        &paths.profiles_dir,
+        &target_resolved,
+        old_name,
+        new_name,
+    );
+    if dirty {
+        if let Err(e) = crate::persist_settings(app, &guard) {
+            emit_warn!(
+                Subscription,
+                SUB_UPDATE_FAILED,
+                "Failed to persist settings after subscription spelling change: {e}"
+            );
+        }
+    }
+    // The guard's last use is the persist above (or the map
+    // migrations when nothing is dirty): drop it explicitly
+    // instead of holding the settings lock to the end of scope.
+    drop(guard);
+
+    // Sync the runtime name like the rename path does: the settings
+    // above moved to the new spelling, but the core still runs the
+    // old one, so a non-forced start under the new spelling would
+    // treat it as a different config and restart the core. Only
+    // when the runtime still points at this same file — canonicalize
+    // covers any older spelling it was started under. Taking
+    // MihomoState under the caller's metadata lock follows the
+    // rename path, which does the same.
+    let mihomo = app.state::<MihomoState>();
+    if let Ok(mut mihomo_guard) = mihomo.0.lock() {
+        if mihomo_guard.last_config_path().is_some_and(|path| {
+            paths.profiles_dir.join(path).canonicalize().ok().as_deref()
+                == Some(target_resolved.as_path())
+        }) {
+            mihomo_guard.set_last_config_path(Some(new_name.to_owned()));
+        }
+    };
+    // The trailing semicolon is load-bearing, like the rename path's:
+    // without it this `if let` is the function's tail expression, the
+    // lock's temporary outlives `mihomo`, and rustc rejects it (E0597).
 }
 
 /// Download a subscription, validate and normalise its content, and save it
@@ -3106,7 +3252,8 @@ async fn download_sub_inner_raw(
 
     let paths = ensure_app_storage(app)?;
 
-    let mut clean_name = if safe_name.ends_with(".yaml") || safe_name.ends_with(".yml") {
+    let lower_safe = safe_name.to_lowercase();
+    let mut clean_name = if lower_safe.ends_with(".yaml") || lower_safe.ends_with(".yml") {
         safe_name.clone()
     } else {
         format!("{safe_name}.yaml")
@@ -3210,6 +3357,18 @@ async fn download_sub_inner_raw(
                 return Err(e.to_string());
             }
         }
+        // Resolve the spelling the file actually has on disk, before
+        // the swap: on a case-insensitive volume the request may differ
+        // in case from the stored one. The metadata lookup below
+        // resolves the spelling itself (see `metadata_for_config`),
+        // but the settings keys (proxy/group selections, `last_config`)
+        // are keyed by name and must be moved when the swap changes
+        // the spelling.
+        let stored_name = if overwrite && target_path.exists() {
+            super::config_manager::actual_entry_name(&paths.profiles_dir, &clean_name)
+        } else {
+            clean_name.clone()
+        };
         let backup_path = if target_path.exists() {
             if !overwrite {
                 // Still taken after picking a free suffix: refuse to clobber it.
@@ -3246,10 +3405,17 @@ async fn download_sub_inner_raw(
         // For new subscriptions, any pre-existing entry under `clean_name` is
         // stale (e.g. an orphaned entry left by a failed delete) and must not
         // leak into the new subscription's metadata.
+        //
+        // The lookup goes through `metadata_for_config`, not an exact
+        // spelling: on a case-insensitive volume the entry may sit under
+        // a third spelling (neither the disk spelling nor the request
+        // one), and looking it up by either alone would reset the URL,
+        // interval, User-Agent, and subscription info. The fallback only
+        // counts when the spelling resolves to the same file, so on a
+        // case-sensitive volume a differently-cased key stays a
+        // different profile's.
         let (preserved_interval, preserved_ua, preserved_url, preserved_sub_info) = if overwrite {
-            metadata
-                .configs
-                .get(&clean_name)
+            super::crypto::metadata_for_config(&metadata, &paths.profiles_dir, &clean_name)
                 .map(|m| {
                     (
                         m.auto_update_interval,
@@ -3281,8 +3447,62 @@ async fn download_sub_inner_raw(
                 user_agent: preserved_ua,
             },
         );
+        // One record per profile: drop every other spelling that names
+        // this same file, not just the stored one — an alias left over
+        // from an earlier spelling would otherwise stay beside the new
+        // entry, and the scheduler would download the same file twice
+        // (once per key, the second from its stale URL). A key only
+        // counts when it resolves to the same file (canonicalize): on
+        // a case-sensitive volume a differently-cased key is a
+        // different profile and its metadata must stay. A key whose
+        // file cannot be resolved is kept: it may belong to a deleted
+        // file, and the metadata cleanup owns stale entries.
+        if overwrite {
+            let target_resolved = target_path.canonicalize().ok();
+            metadata.configs.retain(|key, _| {
+                if key == &clean_name {
+                    return true;
+                }
+                // A symlink names its own profile even when it points at
+                // the target: canonicalize would follow it and delete a
+                // live subscription (the scheduler groups symlinks
+                // separately for the same reason).
+                if paths
+                    .profiles_dir
+                    .join(key)
+                    .symlink_metadata()
+                    .is_ok_and(|m| m.file_type().is_symlink())
+                {
+                    return true;
+                }
+                // No lowercase pre-filter here: `to_lowercase` does no
+                // Unicode normalization, so an NFC spelling and its NFD
+                // twin lowercase to different strings and the canonical
+                // comparison below would never run for them — the very
+                // keys it could match. Canonicalize every other key
+                // instead; overwrites are rare and the metadata is small.
+                match (
+                    &target_resolved,
+                    paths.profiles_dir.join(key).canonicalize().ok(),
+                ) {
+                    (Some(target), Some(candidate)) => target != &candidate,
+                    _ => true,
+                }
+            });
+        }
         match save_metadata(&paths, &metadata) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                // The swap can change the stored spelling on a
+                // case-insensitive volume (`Work.yaml` overwritten as
+                // `WORK.yaml`): move the settings keys with it, so the
+                // proxy/group selections and `last_config` do not keep
+                // pointing at the old spelling. Best-effort — the
+                // download itself already succeeded.
+                if overwrite && stored_name != clean_name {
+                    migrate_settings_keys_after_overwrite(app, &paths, &stored_name, &clean_name);
+                }
+                Ok(())
+            }
             Err(e) => {
                 // Rollback under lock to prevent cleanup_metadata_cache
                 // from removing the metadata entry while the file is
@@ -3415,10 +3635,12 @@ pub async fn download_sub_batch(
                 continue;
             }
         };
-        // Per-subscription UA takes priority over global user_agent
-        let ua_for_this = metadata
-            .configs
-            .get(&name)
+        // Per-subscription UA takes priority over global user_agent.
+        // Resolve through `metadata_for_config` (like the URL above),
+        // not an exact key: a differently-cased or NFC/NFD spelling
+        // would otherwise drop the per-sub UA and fall back to global,
+        // while the list page (which does resolve it) shows one.
+        let ua_for_this = super::crypto::metadata_for_config(&metadata, &paths.profiles_dir, &name)
             .and_then(|m| m.user_agent.as_ref().filter(|s| !s.is_empty()).cloned())
             .or_else(|| user_agent.clone());
         let result = download_sub_inner_with_budget(
