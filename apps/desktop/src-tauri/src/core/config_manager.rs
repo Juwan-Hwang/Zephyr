@@ -256,6 +256,57 @@ fn strip_yaml_ext(name: &str) -> &str {
     name
 }
 
+/// Build the `.yml` fallback name for a missing `.yaml` profile: only the
+/// trailing extension is swapped, so `team.yaml.backup` never falls back
+/// to the unrelated `team.yml.backup.yml`. The match is case-insensitive
+/// so an uppercase `.YAML` name still finds its `.yml` file, while the
+/// stem keeps its original spelling. Uses `str::get` like
+/// [`strip_yaml_ext`]: a multibyte character straddling the suffix
+/// boundary (e.g. a missing `é.yml` / `中.yml`) is a non-match, not a
+/// panic — the raw slice would panic before the comparison ever ran.
+fn yml_fallback_name(clean_name: &str) -> String {
+    if clean_name.len() >= 5 {
+        if let Some(suffix) = clean_name.get(clean_name.len() - 5..) {
+            if suffix.eq_ignore_ascii_case(".yaml") {
+                // The suffix matched ".yaml", so its five bytes are ASCII
+                // and the cut is a char boundary.
+                return format!("{}.yml", &clean_name[..clean_name.len() - 5]);
+            }
+        }
+    }
+    clean_name.to_owned()
+}
+
+/// The name as stored on disk. On a case-insensitive filesystem the
+/// request may differ in case from the entry (`FOO.YAML` deletes
+/// `foo.yaml`); metadata keys and `last_config` use the stored spelling,
+/// so removing them under the request's spelling would leave stale
+/// references behind. An exact-case match always wins: on a
+/// case-sensitive filesystem `foo.yaml` and `Foo.yaml` can coexist, and
+/// taking the first case-insensitive match in `read_dir` order could
+/// clear the metadata of the file that was *not* deleted. Falls back to
+/// the request when the entry is gone.
+fn actual_entry_name(dir: &std::path::Path, name: &str) -> String {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        // Prefer an exact-case match; remember the first
+        // case-insensitive match as a fallback.
+        let mut case_insensitive_match: Option<String> = None;
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            if file_name == name {
+                return file_name;
+            }
+            if case_insensitive_match.is_none() && file_name.eq_ignore_ascii_case(name) {
+                case_insensitive_match = Some(file_name);
+            }
+        }
+        if let Some(matched) = case_insensitive_match {
+            return matched;
+        }
+    }
+    name.to_owned()
+}
+
 /// 删除配置后检查 `last_config` 是否悬空（指向已删除的文件）。
 /// 如果是，重置为第一个可用配置；如果没有任何配置，置为 `None`。
 fn cleanup_dangling_last_config(app: &AppHandle, paths: &super::AppPaths, deleted_name: &str) {
@@ -382,15 +433,19 @@ async fn cleanup_dangling_last_config_blocking(
 pub async fn delete_config(app: AppHandle, name: String) -> Result<String, String> {
     let paths = ensure_app_storage(&app)?;
 
-    // Ensure the name has a .yaml extension
-    let mut clean_name = if name.ends_with(".yaml") || name.ends_with(".yml") {
+    // Ensure the name has a .yaml/.yml extension. The check is
+    // case-insensitive: `Foo.YAML` is already a YAML file, and appending
+    // `.yaml` to it would make the file undeletable (neither the primary
+    // `Foo.YAML.yaml` nor any fallback would ever match it).
+    let lower_name = name.to_lowercase();
+    let mut clean_name = if lower_name.ends_with(".yaml") || lower_name.ends_with(".yml") {
         name.clone()
     } else {
         format!("{name}.yaml")
     };
 
     clean_name = sanitize_config_file_name(clean_name).map_err(|e| e.to_string())?;
-    if clean_name == "run_config.yaml" {
+    if clean_name.eq_ignore_ascii_case("run_config.yaml") {
         return Err("Cannot delete the active temp config".to_owned());
     }
 
@@ -400,23 +455,36 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
     let file_exists = target_path.exists();
 
     if !file_exists {
-        // Try with .yml extension as well
-        let yml_name = name.replace(".yaml", ".yml");
+        // Try with .yml extension as well. Build the fallback from the
+        // sanitized name, not the raw input, and validate it like the
+        // primary path: the raw name can carry a drive-relative or
+        // otherwise escaping path that `join` would keep.
+        let yml_name = yml_fallback_name(&clean_name);
         let yml_path = paths.profiles_dir.join(&yml_name);
+        validate_path_within_dir(&yml_path, &paths.profiles_dir).map_err(|e| e.to_string())?;
 
         if yml_path.exists() {
+            // Use the on-disk spelling for metadata and last_config:
+            // on a case-insensitive filesystem the request may differ
+            // in case from the entry.
+            let stored_yml = actual_entry_name(&paths.profiles_dir, &yml_name);
             remove_profile_file_blocking(&yml_path).await?;
             {
                 let _guard = lock_metadata();
                 let mut metadata = load_metadata(&paths);
-                metadata.configs.remove(&yml_name);
+                metadata.configs.remove(&stored_yml);
                 save_metadata(&paths, &metadata)?;
             }
-            cleanup_dangling_last_config_blocking(&app, &paths, &yml_name).await?;
+            cleanup_dangling_last_config_blocking(&app, &paths, &stored_yml).await?;
             return Ok(format!("Config {yml_name} deleted"));
         }
         return Err("File does not exist".to_owned());
     }
+
+    // The on-disk spelling, for metadata and last_config: on a
+    // case-insensitive filesystem the request may differ in case from
+    // the entry. Resolve it before deleting, while the entry exists.
+    let stored_name = actual_entry_name(&paths.profiles_dir, &clean_name);
 
     // Delete the file first, then update metadata
     // This ensures metadata consistency: if file deletion fails, metadata stays intact
@@ -433,11 +501,12 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
     }
 
     // File deleted successfully — now update metadata
-    // Use clean_name for metadata removal (matches the actual file key stored)
+    // Use the on-disk spelling for metadata removal (matches the actual
+    // file key stored, even when the request differed in case)
     {
         let _guard = lock_metadata();
         let mut metadata = load_metadata(&paths);
-        metadata.configs.remove(&clean_name);
+        metadata.configs.remove(&stored_name);
         // Also try the original name in case metadata was stored with a different key
         if name != clean_name {
             metadata.configs.remove(&name);
@@ -447,7 +516,7 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
 
     // 如果被删除的配置恰好是 last_config 指向的配置，重置为第一个可用配置，
     // 避免悬空指针导致下次冷启动加载到错误的配置。
-    cleanup_dangling_last_config_blocking(&app, &paths, &clean_name).await?;
+    cleanup_dangling_last_config_blocking(&app, &paths, &stored_name).await?;
 
     Ok(format!("Config {name} deleted"))
 }
@@ -994,6 +1063,59 @@ port: 7890
         assert!(out.contains("# URL: https://example.com/sub.yaml"));
         assert!(out.contains("# SUB_INFO: upload=0"));
         assert!(out.contains("7890"));
+    }
+
+    // ── yml_fallback_name tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_yml_fallback_swaps_trailing_yaml_only() {
+        assert_eq!(yml_fallback_name("foo.yaml"), "foo.yml");
+        assert_eq!(yml_fallback_name("Foo.YAML"), "Foo.yml");
+        // Not a trailing .yaml: left alone, never a different file.
+        assert_eq!(yml_fallback_name("team.yaml.backup"), "team.yaml.backup");
+        assert_eq!(yml_fallback_name("foo.yml"), "foo.yml");
+    }
+
+    #[test]
+    fn test_yml_fallback_unicode_names_do_not_panic() {
+        // A missing `é.yml` / `中.yml` used to panic: slicing five bytes
+        // back lands inside the multibyte character. Now it is simply
+        // not a `.yaml` name and comes back unchanged.
+        assert_eq!(yml_fallback_name("é.yml"), "é.yml");
+        assert_eq!(yml_fallback_name("中.yml"), "中.yml");
+        assert_eq!(yml_fallback_name("é.yaml"), "é.yml");
+    }
+
+    // ── actual_entry_name tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_actual_entry_name_keeps_stored_spelling() {
+        let unique = format!("zephyr_test_entry_name_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("foo.yaml"), "port: 7890\n").unwrap();
+
+        // A differently-cased request resolves to the stored spelling,
+        // so metadata removal and last_config cleanup match the entry.
+        assert_eq!(actual_entry_name(&dir, "FOO.YAML"), "foo.yaml");
+        assert_eq!(actual_entry_name(&dir, "foo.yaml"), "foo.yaml");
+        // A missing entry comes back as requested.
+        assert_eq!(actual_entry_name(&dir, "missing.yaml"), "missing.yaml");
+
+        // On a case-sensitive filesystem both casings can coexist: the
+        // exact match must win, or deleting one would clear the other's
+        // metadata.
+        std::fs::write(dir.join("Foo.yaml"), "port: 7891\n").unwrap();
+        assert_eq!(actual_entry_name(&dir, "Foo.yaml"), "Foo.yaml");
+        assert_eq!(actual_entry_name(&dir, "foo.yaml"), "foo.yaml");
+        // With no exact match (`FOO.YAML`), either stored spelling is
+        // a valid answer; read_dir order decides, so don't pin it.
+        assert!(matches!(
+            actual_entry_name(&dir, "FOO.YAML").as_str(),
+            "foo.yaml" | "Foo.yaml"
+        ));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
