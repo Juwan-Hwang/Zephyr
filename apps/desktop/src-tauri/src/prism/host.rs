@@ -365,7 +365,11 @@ None => "Config saved. Failed to apply via core REST API (connection or response
         let mut profiles = Vec::new();
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            let is_yaml = name.ends_with(".yaml") || name.ends_with(".yml");
+            // Directories are not profiles, even when they carry a
+            // YAML extension.
+            let lower = name.to_lowercase();
+            let is_yaml =
+                entry.path().is_file() && (lower.ends_with(".yaml") || lower.ends_with(".yml"));
             if is_yaml {
                 let is_current = name == current;
                 profiles.push(ProfileInfo {

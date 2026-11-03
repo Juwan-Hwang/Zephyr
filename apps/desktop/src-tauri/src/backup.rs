@@ -608,8 +608,39 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
     let app_version = manifest.app_version.clone();
     let has_settings = manifest.files.iter().any(|f| f.path == "settings.json");
     let paths_clone = paths.clone();
+    // The settings lock for the commit closure below; absent when the
+    // state was never registered (then there is nothing to serialize).
+    let commit_settings_arc = app
+        .try_state::<SettingsState>()
+        .map(|state| std::sync::Arc::clone(&state.0));
 
     let commit_result = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Hold the profile-transform guard across the whole commit: a
+        // concurrent profile delete verifies the removal and retries
+        // under this guard, so publishing a restored profile mid-delete
+        // would let the retry delete the file the restore just reported
+        // as restored. The commit itself is only renames (the
+        // extraction already ran), so holding the guard here is cheap.
+        let _transform_guard = crate::lock_profile_transform();
+        // Serialize settings saves with the import: a save that lands
+        // after the settings.json backup but before the staged install
+        // would be overwritten by the import. Settings saves take the
+        // settings lock, so holding it across the commit (after the
+        // transform guard, matching every other writer) keeps them out
+        // until the new file is in place. The guard is held through
+        // the settings reload below, so no save can land between the
+        // file swap and the in-memory publish either.
+        let mut settings_guard = commit_settings_arc
+            .as_ref()
+            .map(|arc| arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        // Hold the metadata lock across the commit too: the import
+        // installs a new metadata.json, and a metadata writer (the
+        // listing cleanup, a subscription save) that lands mid-commit
+        // would read the old file and save it back over the imported
+        // one. Taken after the settings guard, matching the global
+        // transform → settings → metadata order.
+        let _metadata_guard = crate::core_manager::core::crypto::lock_metadata();
+
         // Back up current files, then swap — use UUID for the rollback
         // directory name to avoid collisions and improve predictability.
         let backup_dir = paths_clone
@@ -721,60 +752,53 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
         // Success — clean up
         let _ = fs::remove_dir_all(&staging_dir);
         let _ = fs::remove_dir_all(&backup_dir);
+
+        // Reload SettingsState from the newly imported settings.json
+        // while still holding the settings lock (see the commit-guard
+        // comment): a save landing between the commit and the reload
+        // would overwrite the imported file with stale in-memory
+        // values, and the reload would then publish those stale
+        // values as the import's result.
+        //
+        // We deserialize to serde_json::Value first, then convert to
+        // Settings. This avoids a fragile dependency on direct
+        // deserialization: if a future schema migration introduces a
+        // breaking change (e.g., changing a field type), direct
+        // from_str::<Settings> would fail and bypass the migration
+        // chain entirely. Deserializing to Value first allows us to
+        // run migrations on the JSON before converting to Settings.
+        //
+        // A failure here reports the import as failed but does not
+        // roll back the files (they are already in place, and the
+        // rollback above only covers the file swap itself).
+        if has_settings {
+            if let Some(guard) = settings_guard.as_deref_mut() {
+                let settings_file = paths_clone.app_data_dir.join("settings.json");
+                if !settings_file.exists() {
+                    return Err("settings.json does not exist after import".to_owned());
+                }
+                let content = fs::read_to_string(&settings_file)
+                    .map_err(|e| format!("Failed to read settings.json: {e}"))?;
+                let value = serde_json::from_str::<serde_json::Value>(&content)
+                    .map_err(|e| format!("Failed to parse settings JSON: {e}"))?;
+                // Try converting to Settings; if that fails (e.g., due
+                // to a type mismatch in a future schema), return Err to
+                // avoid overwriting the file on disk with defaults.
+                let new_settings = serde_json::from_value::<crate::Settings>(value)
+                    .map_err(|e| format!("Failed to convert JSON to Settings: {e}"))?;
+                *guard = crate::migrate_settings(new_settings, &settings_file);
+            }
+        }
+        // Release the settings lock explicitly: its last use is the
+        // reload assignment above, and holding it to the end of the
+        // closure would trip clippy's significant-drop-tightening lint.
+        drop(settings_guard);
         Ok(())
     })
     .await
     .map_err(|e| format!("Commit task failed: {e}"))?;
 
     commit_result?;
-
-    // Reload SettingsState from the newly imported settings.json to
-    // prevent the in-memory state from overwriting the imported file.
-    // Run migrate_settings to handle backups from older schema versions.
-    //
-    // We deserialize to serde_json::Value first, then convert to Settings.
-    // This avoids a fragile dependency on direct deserialization: if a
-    // future schema migration introduces a breaking change (e.g., changing
-    // a field type), direct from_str::<Settings> would fail and bypass
-    // the migration chain entirely. Deserializing to Value first allows
-    // us to run migrations on the JSON before converting to Settings.
-    //
-    // All file I/O (read_to_string, migrate_settings write) runs inside
-    // spawn_blocking to avoid blocking the async executor.
-    if let Some(settings_state) = app.try_state::<SettingsState>() {
-        // Only reload SettingsState if the manifest actually contained
-        // settings.json. A backup may legitimately omit it (e.g., a fresh
-        // install that never persisted settings), and in that case the
-        // in-memory settings should remain unchanged.
-        if has_settings {
-            let settings_arc = std::sync::Arc::clone(&settings_state.0);
-            let settings_file = paths.app_data_dir.join("settings.json");
-
-            let reload_result =
-                tokio::task::spawn_blocking(move || -> Result<crate::Settings, String> {
-                    if !settings_file.exists() {
-                        return Err("settings.json does not exist after import".to_owned());
-                    }
-                    let content = fs::read_to_string(&settings_file)
-                        .map_err(|e| format!("Failed to read settings.json: {e}"))?;
-                    let value = serde_json::from_str::<serde_json::Value>(&content)
-                        .map_err(|e| format!("Failed to parse settings JSON: {e}"))?;
-                    // Try converting to Settings; if that fails (e.g., due
-                    // to a type mismatch in a future schema), return Err to
-                    // avoid overwriting the file on disk with defaults.
-                    let new_settings = serde_json::from_value::<crate::Settings>(value)
-                        .map_err(|e| format!("Failed to convert JSON to Settings: {e}"))?;
-                    Ok(crate::migrate_settings(new_settings, &settings_file))
-                })
-                .await
-                .map_err(|e| format!("Reload task panicked: {e}"))??;
-
-            let mut guard = settings_arc
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            *guard = reload_result;
-        }
-    }
 
     Ok(format!(
         "Backup restored successfully ({file_count} files from v{app_version})"

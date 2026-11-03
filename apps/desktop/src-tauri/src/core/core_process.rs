@@ -521,14 +521,20 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
                 None => continue,
             };
 
-            if file_name.eq_ignore_ascii_case("run_config.yaml") {
+            // Only the exact `run_config.yaml` is the generated
+            // runtime file: a case variant such as `RUN_CONFIG.YAML`
+            // is an ordinary user profile and must be migrated like
+            // any other.
+            if file_name == "run_config.yaml" {
                 continue;
             }
 
             let is_profile = source
                 .extension()
-                .map(|ext| ext == "yaml" || ext == "yml")
-                .unwrap_or(false);
+                .and_then(std::ffi::OsStr::to_str)
+                .is_some_and(|ext| {
+                    ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml")
+                });
 
             let target = if is_profile {
                 paths.profiles_dir.join(file_name)
@@ -651,8 +657,8 @@ pub(crate) fn first_available_profile(paths: &AppPaths) -> Option<PathBuf> {
         let path = entry.path();
         let is_yaml = path
             .extension()
-            .map(|ext| ext == "yaml" || ext == "yml")
-            .unwrap_or(false);
+            .and_then(std::ffi::OsStr::to_str)
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         let is_run_config = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -825,6 +831,14 @@ pub fn prepare_runtime_config(
     if !yaml_val.is_mapping() {
         return None;
     }
+
+    // Strip unauthenticated control surfaces before use: a profile
+    // (subscription, manual save, or a legacy file migrated from the
+    // old location) can carry `external-controller-unix`, which
+    // mihomo would serve without the secret check. The TCP
+    // `external-controller` and `secret` are managed below, so they
+    // are intentionally left alone here.
+    zephyr_core::config::sanitizer::remove_control_plane_keys(&mut yaml_val);
 
     let config_port = parse_external_controller_port(&yaml_val);
     if let Some(mapping) = yaml_val.as_mapping_mut() {
@@ -1013,8 +1027,8 @@ fn select_runtime_config(
         let path = entry.path();
         let is_yaml = path
             .extension()
-            .map(|ext| ext == "yaml" || ext == "yml")
-            .unwrap_or(false);
+            .and_then(std::ffi::OsStr::to_str)
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         let is_run_config = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -2935,6 +2949,27 @@ mod tests {
     }
 
     #[test]
+    fn first_available_profile_recognizes_uppercase_extensions() {
+        let dir =
+            std::env::temp_dir().join(format!("zephyr-first-profile-upper-{}", std::process::id()));
+        let profiles_dir = dir.join("profiles");
+        fs::create_dir_all(&profiles_dir).unwrap();
+        fs::write(profiles_dir.join("bar.YAML"), "port: 7890\n").unwrap();
+        let paths = AppPaths {
+            app_data_dir: dir.clone(),
+            core_dir: dir.join("core"),
+            profiles_dir: profiles_dir.clone(),
+        };
+        // An uppercase-extension profile is a valid profile: it must
+        // be picked up as the replacement selection, not skipped.
+        assert_eq!(
+            first_available_profile(&paths).as_deref(),
+            Some(profiles_dir.join("bar.YAML").as_path())
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn test_core_binary_name() {
         let name = core_binary_name();
         #[cfg(target_os = "windows")]
@@ -2976,6 +3011,19 @@ mod tests {
         assert!(prepared.contains("external-controller: 127.0.0.1:7897"));
         assert!(prepared.contains("secret: new-secret"));
         assert!(!prepared.contains("secret: old"));
+    }
+
+    #[test]
+    fn prepare_runtime_config_strips_unauthenticated_control_surfaces() {
+        let config = "external-controller-unix: /tmp/evil.sock\nexternal-ui: /tmp/ui\nmode: rule\n";
+        let (prepared, api_port, _) = prepare_runtime_config(config, "s", None).unwrap();
+
+        assert_eq!(api_port, 9090);
+        assert!(!prepared.contains("external-controller-unix"));
+        assert!(!prepared.contains("/tmp/evil.sock"));
+        assert!(!prepared.contains("external-ui"));
+        assert!(prepared.contains("external-controller: 127.0.0.1:9090"));
+        assert!(prepared.contains("secret: s"));
     }
 
     #[test]

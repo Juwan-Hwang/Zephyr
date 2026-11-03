@@ -3106,7 +3106,8 @@ async fn download_sub_inner_raw(
 
     let paths = ensure_app_storage(app)?;
 
-    let mut clean_name = if safe_name.ends_with(".yaml") || safe_name.ends_with(".yml") {
+    let lower_safe = safe_name.to_lowercase();
+    let mut clean_name = if lower_safe.ends_with(".yaml") || lower_safe.ends_with(".yml") {
         safe_name.clone()
     } else {
         format!("{safe_name}.yaml")

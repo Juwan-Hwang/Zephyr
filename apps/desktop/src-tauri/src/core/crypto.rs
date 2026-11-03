@@ -464,7 +464,7 @@ pub fn encrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         let is_yaml = path
             .extension()
             .and_then(|e| e.to_str())
-            .is_some_and(|ext| ext == "yaml" || ext == "yml");
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         if !is_yaml || !path.is_file() {
             continue;
         }
@@ -526,7 +526,7 @@ pub fn decrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         let is_yaml = path
             .extension()
             .and_then(|e| e.to_str())
-            .is_some_and(|ext| ext == "yaml" || ext == "yml");
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         if !is_yaml || !path.is_file() {
             continue;
         }
@@ -601,7 +601,7 @@ static METADATA_LOCK: Mutex<()> = Mutex::new(());
 /// The returned guard is dropped automatically at the end of the enclosing
 /// scope. **Never hold it across `.await` points** — `std::sync::MutexGuard`
 /// is `!Send`, so the compiler will reject that.
-pub(super) fn lock_metadata() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn lock_metadata() -> std::sync::MutexGuard<'static, ()> {
     METADATA_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -760,18 +760,34 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
     let mut metadata = load_metadata(paths);
     let mut changed = false;
 
-    // Collect all existing config files
+    // Collect all existing config files. A metadata key names a file
+    // the way the filesystem does: on a case-insensitive volume a key
+    // stored under one spelling still names the file on disk under
+    // another, so match keys the way the filesystem does; on a
+    // case-sensitive volume only an exact match counts (a
+    // differently-cased key belongs to a distinct file). Directories
+    // are not profiles, even when they carry a YAML extension.
+    let normalize_key = |name: &str| -> String {
+        if cfg!(windows) || cfg!(target_os = "macos") {
+            name.to_lowercase()
+        } else {
+            name.to_owned()
+        }
+    };
     let existing_configs: std::collections::HashSet<String> = fs::read_dir(&paths.profiles_dir)
         .ok()
         .into_iter()
         .flatten()
         .filter_map(std::result::Result::ok)
         .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .map(|ext| ext == "yaml" || ext == "yml")
-                .unwrap_or(false)
+            entry.path().is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .is_some_and(|ext| {
+                        ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml")
+                    })
         })
         .filter_map(|entry| {
             entry
@@ -780,13 +796,14 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
                 .map(std::borrow::ToOwned::to_owned)
         })
         .filter(|name| name != "run_config.yaml")
+        .map(|name| normalize_key(&name))
         .collect();
 
     // Remove metadata entries for deleted configs
     let keys_to_remove: Vec<String> = metadata
         .configs
         .keys()
-        .filter(|key| !existing_configs.contains(*key))
+        .filter(|key| !existing_configs.contains(&normalize_key(key)))
         .cloned()
         .collect();
 
