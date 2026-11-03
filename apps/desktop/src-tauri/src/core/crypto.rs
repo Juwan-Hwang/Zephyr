@@ -464,7 +464,7 @@ pub fn encrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         let is_yaml = path
             .extension()
             .and_then(|e| e.to_str())
-            .is_some_and(|ext| ext == "yaml" || ext == "yml");
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         if !is_yaml || !path.is_file() {
             continue;
         }
@@ -526,7 +526,7 @@ pub fn decrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         let is_yaml = path
             .extension()
             .and_then(|e| e.to_str())
-            .is_some_and(|ext| ext == "yaml" || ext == "yml");
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         if !is_yaml || !path.is_file() {
             continue;
         }
@@ -601,7 +601,7 @@ static METADATA_LOCK: Mutex<()> = Mutex::new(());
 /// The returned guard is dropped automatically at the end of the enclosing
 /// scope. **Never hold it across `.await` points** — `std::sync::MutexGuard`
 /// is `!Send`, so the compiler will reject that.
-pub(super) fn lock_metadata() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn lock_metadata() -> std::sync::MutexGuard<'static, ()> {
     METADATA_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -748,6 +748,83 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result
     Ok(())
 }
 
+/// Whether a metadata key still names a profile file on disk.
+/// The filesystem decides the match (see [`cleanup_metadata_cache`]):
+/// a key stored under one spelling still names the file on disk
+/// under another on a case-insensitive volume, and names nothing on
+/// a case-sensitive one. Only the exact `run_config.yaml` is the
+/// generated runtime file; it carries no subscription metadata.
+/// Only a direct filename counts: a key carrying a path (such as
+/// `../outside.yaml`) names no managed profile even when that file
+/// exists. A symlink to a directory does not count either: the
+/// listing hides it, so keeping its metadata would attach stale
+/// subscription data to a regular profile created under the same
+/// name later. A dangling symlink still counts: its target may
+/// return, and the metadata keeps the subscription alive meanwhile.
+#[allow(clippy::filetype_is_file)]
+// `is_file()` is deliberate here: only a regular file or a symlink
+// (including a dangling one) counts as a profile. `!is_dir()`, the
+// lint's suggestion, would also admit fifos, sockets, and devices.
+fn key_names_existing_profile(profiles_dir: &Path, key: &str) -> bool {
+    if key == "run_config.yaml" {
+        return false;
+    }
+    if Path::new(key).file_name().and_then(|n| n.to_str()) != Some(key) {
+        return false;
+    }
+    let is_yaml = Path::new(key)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
+    if !is_yaml {
+        return false;
+    }
+    match profiles_dir.join(key).symlink_metadata() {
+        Ok(meta) => {
+            let ft = meta.file_type();
+            if ft.is_file() {
+                return true;
+            }
+            if !ft.is_symlink() {
+                return false;
+            }
+            match profiles_dir.join(key).metadata() {
+                Ok(target) => !target.is_dir(),
+                Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+            }
+        }
+        Err(_) => false,
+    }
+}
+
+/// Find the metadata entry for a profile file, preferring the exact
+/// key and falling back to a case variant that names the same file.
+/// The cleanup keeps a key stored under a different spelling than
+/// the file on disk (see [`key_names_existing_profile`]), but a
+/// plain exact lookup would miss it and the listing would hide the
+/// profile's saved URL, update interval, and User-Agent. On a
+/// case-sensitive volume the two spellings are distinct files, so
+/// the fallback only counts when the filesystem resolves both to
+/// the same entry.
+pub(super) fn metadata_for_config<'a>(
+    metadata: &'a ProfilesMetadata,
+    profiles_dir: &Path,
+    name: &str,
+) -> Option<&'a ConfigMetadata> {
+    if let Some(meta) = metadata.configs.get(name) {
+        return Some(meta);
+    }
+    let lower = name.to_lowercase();
+    let resolved = profiles_dir.join(name).canonicalize().ok()?;
+    metadata.configs.iter().find_map(|(key, meta)| {
+        if key.to_lowercase() != lower {
+            return None;
+        }
+        let key_resolved = profiles_dir.join(key).canonicalize().ok()?;
+        (key_resolved == resolved).then_some(meta)
+    })
+}
+
 /// Clean up metadata entries for configs that no longer exist on disk.
 ///
 /// Acquires the metadata lock for the entire scan-modify-save sequence.
@@ -760,33 +837,21 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
     let mut metadata = load_metadata(paths);
     let mut changed = false;
 
-    // Collect all existing config files
-    let existing_configs: std::collections::HashSet<String> = fs::read_dir(&paths.profiles_dir)
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter_map(std::result::Result::ok)
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .map(|ext| ext == "yaml" || ext == "yml")
-                .unwrap_or(false)
-        })
-        .filter_map(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .map(std::borrow::ToOwned::to_owned)
-        })
-        .filter(|name| name != "run_config.yaml")
-        .collect();
-
-    // Remove metadata entries for deleted configs
+    // Remove metadata entries for deleted configs. A key names a file
+    // the way the filesystem does: ask the filesystem, not the
+    // platform. Assuming macOS is case-insensitive would retain a
+    // deleted profile's metadata on a case-sensitive volume (and a
+    // later update could use its stale URL to recreate the profile).
+    // `symlink_metadata` resolves the name case-insensitively on a
+    // case-insensitive volume and exactly on a case-sensitive one,
+    // and it sees a dangling symlink as a present entry. The scan
+    // runs under the lock, so a concurrent writer cannot create a
+    // file between the check and the metadata save. Directories are
+    // not profiles.
     let keys_to_remove: Vec<String> = metadata
         .configs
         .keys()
-        .filter(|key| !existing_configs.contains(*key))
+        .filter(|key| !key_names_existing_profile(&paths.profiles_dir, key))
         .cloned()
         .collect();
 
@@ -909,6 +974,22 @@ mod tests {
 
     fn random_test_key() -> [u8; 32] {
         rand::rng().random()
+    }
+
+    /// Whether `dir` tells apart filenames that differ only by case.
+    /// Probed at runtime, not by OS: the CI macOS runner's APFS
+    /// volume is case-insensitive, so `foo.yaml` and `FOO.yaml` are
+    /// one file there, while a case-sensitive volume holds both.
+    fn dir_is_case_sensitive(dir: &std::path::Path) -> bool {
+        let probe = dir.join("zephyr_case_probe");
+        let _ = std::fs::create_dir_all(&probe);
+        let _ = std::fs::write(probe.join("probe.yaml"), b"");
+        let _ = std::fs::write(probe.join("PROBE.yaml"), b"");
+        let count = std::fs::read_dir(&probe)
+            .map(std::iter::Iterator::count)
+            .unwrap_or(0);
+        let _ = std::fs::remove_dir_all(&probe);
+        count >= 2
     }
 
     #[test]
@@ -1045,5 +1126,155 @@ mod tests {
         let machine_id = "test-machine-id";
         let derived = derive_key(machine_id);
         assert!(derived.iter().any(|&b| b != 0));
+    }
+
+    #[test]
+    fn cleanup_metadata_cache_uses_filesystem_identity() {
+        // `foo.yaml` and `FOO.yaml` are distinct files on a
+        // case-sensitive volume: a key for the deleted one must go
+        // even though a case variant survives. On a
+        // case-insensitive volume the two spellings name one file,
+        // so the same filesystem check keeps both keys.
+        let unique = format!("zephyr_test_meta_cache_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let case_sensitive = dir_is_case_sensitive(&dir);
+        let paths = super::AppPaths {
+            app_data_dir: dir.clone(),
+            core_dir: dir.clone(),
+            profiles_dir: dir.clone(),
+        };
+        std::fs::write(dir.join("FOO.yaml"), "port: 7890\n").unwrap();
+        let mut metadata = super::ProfilesMetadata::default();
+        metadata.configs.insert(
+            "foo.yaml".to_owned(),
+            super::ConfigMetadata {
+                url: Some("https://example.com/a".to_owned()),
+                ..Default::default()
+            },
+        );
+        metadata.configs.insert(
+            "FOO.yaml".to_owned(),
+            super::ConfigMetadata {
+                url: Some("https://example.com/b".to_owned()),
+                ..Default::default()
+            },
+        );
+        super::save_metadata(&paths, &metadata).unwrap();
+        super::cleanup_metadata_cache(&paths);
+        let kept = super::load_metadata(&paths);
+        if case_sensitive {
+            assert!(!kept.configs.contains_key("foo.yaml"));
+        } else {
+            // Both spellings name the surviving file.
+            assert!(kept.configs.contains_key("foo.yaml"));
+        }
+        assert!(kept.configs.contains_key("FOO.yaml"));
+
+        // A directory carrying a YAML extension is not a profile:
+        // its metadata must not survive the cleanup.
+        std::fs::remove_file(dir.join("FOO.yaml")).unwrap();
+        std::fs::create_dir(dir.join("FOO.yaml")).unwrap();
+        super::save_metadata(&paths, &metadata).unwrap();
+        super::cleanup_metadata_cache(&paths);
+        let kept = super::load_metadata(&paths);
+        assert!(!kept.configs.contains_key("FOO.yaml"));
+        assert!(!kept.configs.contains_key("foo.yaml"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn key_names_existing_profile_rejects_paths_and_directory_links() {
+        let unique = format!("zephyr_test_key_profile_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("foo.yaml"), "port: 7890\n").unwrap();
+        // A key carrying a path is not a managed profile, even when
+        // the file it points at exists outside the directory.
+        let outside_name = format!("zephyr_outside_{}.yaml", std::process::id());
+        std::fs::write(dir.parent().unwrap().join(&outside_name), "port: 7891\n").unwrap();
+        assert!(!super::key_names_existing_profile(
+            &dir,
+            &format!("../{outside_name}")
+        ));
+        assert!(!super::key_names_existing_profile(&dir, "sub/foo.yaml"));
+        assert!(super::key_names_existing_profile(&dir, "foo.yaml"));
+        assert!(!super::key_names_existing_profile(&dir, "run_config.yaml"));
+        // A symlink to a directory is not a profile: the listing
+        // hides it, so its metadata must not survive the cleanup.
+        // A dangling symlink still counts: its target may return.
+        // (Symlink creation needs privileges on Windows, so these
+        // cases only run on unix.)
+        #[cfg(unix)]
+        {
+            std::fs::create_dir(dir.join("realdir")).unwrap();
+            std::os::unix::fs::symlink(dir.join("realdir"), dir.join("link.yaml")).unwrap();
+            assert!(!super::key_names_existing_profile(&dir, "link.yaml"));
+            std::os::unix::fs::symlink(dir.join("missing.yaml"), dir.join("dangling.yaml"))
+                .unwrap();
+            assert!(super::key_names_existing_profile(&dir, "dangling.yaml"));
+            std::os::unix::fs::symlink(dir.join("foo.yaml"), dir.join("alias.yaml")).unwrap();
+            assert!(super::key_names_existing_profile(&dir, "alias.yaml"));
+        }
+
+        let _ = std::fs::remove_file(dir.parent().unwrap().join(&outside_name));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn metadata_for_config_prefers_exact_key() {
+        let unique = format!("zephyr_test_meta_lookup_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let case_sensitive = dir_is_case_sensitive(&dir);
+        std::fs::write(dir.join("FOO.yaml"), "port: 7890\n").unwrap();
+        std::fs::write(dir.join("foo.yaml"), "port: 7891\n").unwrap();
+        let mut metadata = super::ProfilesMetadata::default();
+        metadata.configs.insert(
+            "FOO.yaml".to_owned(),
+            super::ConfigMetadata {
+                url: Some("https://example.com/upper".to_owned()),
+                ..Default::default()
+            },
+        );
+        metadata.configs.insert(
+            "foo.yaml".to_owned(),
+            super::ConfigMetadata {
+                url: Some("https://example.com/lower".to_owned()),
+                ..Default::default()
+            },
+        );
+        // Exact match wins when both spellings coexist as distinct
+        // files. On a case-insensitive volume the two writes land
+        // on one file, but the exact-key lookup still returns each
+        // spelling's own record.
+        let found = super::metadata_for_config(&metadata, &dir, "FOO.yaml").unwrap();
+        assert_eq!(found.url.as_deref(), Some("https://example.com/upper"));
+        let found = super::metadata_for_config(&metadata, &dir, "foo.yaml").unwrap();
+        assert_eq!(found.url.as_deref(), Some("https://example.com/lower"));
+        assert!(super::metadata_for_config(&metadata, &dir, "bar.yaml").is_none());
+
+        // A case-variant key alone does not match on a
+        // case-sensitive volume: the key names a different (missing)
+        // file, so the fallback must not conflate it. On a
+        // case-insensitive volume both spellings name the same file,
+        // so the variant key is the file's record.
+        let mut metadata = super::ProfilesMetadata::default();
+        metadata.configs.insert(
+            "foo.yaml".to_owned(),
+            super::ConfigMetadata {
+                url: Some("https://example.com/lower".to_owned()),
+                ..Default::default()
+            },
+        );
+        if case_sensitive {
+            assert!(super::metadata_for_config(&metadata, &dir, "FOO.yaml").is_none());
+        } else {
+            let found = super::metadata_for_config(&metadata, &dir, "FOO.yaml").unwrap();
+            assert_eq!(found.url.as_deref(), Some("https://example.com/lower"));
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
