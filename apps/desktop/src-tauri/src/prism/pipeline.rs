@@ -1,5 +1,6 @@
 //! Shared pipeline for executing scripts with config write-back and hot-reload.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -19,6 +20,43 @@ use crate::MihomoState;
 /// This prevents "lost update" race conditions when multiple override executions
 /// or profile switches occur concurrently.
 pub(crate) static RUN_CONFIG_LOCK: Mutex<()> = Mutex::new(());
+
+/// Number of core starts currently in progress (see [`CoreStartGuard`]).
+/// A Prism write that lands while a start is replacing `run_config.yaml`
+/// would re-write the file with the previous run's port/secret and fail
+/// the startup health check — the new core reads the old secret while
+/// the check presents the new one. Both `hot_reload_target` and the
+/// Prism host's apply path fail closed while this is non-zero; the
+/// caller retries once the start has published the new child. A
+/// counter (not a bool) so two overlapping starts cannot clear each
+/// other's flag.
+static CORE_START_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Whether a core start/restart is currently in progress.
+pub(crate) fn core_start_in_progress() -> bool {
+    CORE_START_COUNT.load(Ordering::SeqCst) > 0
+}
+
+/// RAII guard: mark a core start in progress from `select_runtime_config`
+/// writing the new `run_config.yaml` until the new child is published in
+/// core state. Cleared on drop, so every failure path releases it too.
+/// The guard only gates `hot_reload_target` and the Prism host's apply
+/// path — a refused reload errors and its caller retries.
+#[must_use]
+pub(crate) struct CoreStartGuard;
+
+impl CoreStartGuard {
+    pub(crate) fn acquire() -> Self {
+        CORE_START_COUNT.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for CoreStartGuard {
+    fn drop(&mut self) {
+        CORE_START_COUNT.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 /// Serializes one reload-and-reconcile sequence against the next.
 ///
@@ -86,13 +124,28 @@ pub struct PatchInfo {
 /// The endpoint a hot reload talks to: the running core's port and secret,
 /// plus the `run_config.yaml` path the reload asks it to load.
 fn hot_reload_target(app: &AppHandle) -> Result<(u16, String, String), String> {
+    // Fail closed while a core start is in progress: the start is
+    // replacing `run_config.yaml` with fresh credentials (see
+    // `CORE_START_COUNT`) — a write here would re-write the file with
+    // the previous run's port/secret and fail the startup health check.
+    if core_start_in_progress() {
+        return Err("Hot reload refused: a core start is in progress".to_owned());
+    }
     let (port, secret) = {
         let mihomo_state = app.state::<MihomoState>();
         let lock = mihomo_state
             .0
             .lock()
             .map_err(|e| format!("Lock failed: {e}"))?;
-        let port = lock.last_port().unwrap_or(9090);
+        // Fail closed while the core has not published its controller
+        // yet (first start, before the health check passes): falling
+        // back to 9090 / a stale secret here would write the prepared
+        // credentials away and fail the startup health check.
+        let Some(port) = lock.last_port() else {
+            return Err(
+                "Hot reload refused: the core has not published its controller port yet".to_owned(),
+            );
+        };
         let secret = lock.last_secret().to_owned();
         drop(lock);
         (port, secret)
@@ -325,7 +378,34 @@ fn read_running_config(state: &PrismState) -> Result<serde_json::Value, String> 
 /// file: a failed write leaves the previous config whole, since the reload
 /// that follows a failed batch (for the Prism patches before it) loads it.
 fn write_running_config(state: &PrismState, config: &serde_json::Value) -> Result<(), String> {
-    let yaml_str = serde_yaml::to_string(config)
+    // A script may add an unauthenticated control surface (such as
+    // `external-controller-unix`) to the running config; the strip in
+    // `prepare_runtime_config` never sees script output, so filter it
+    // here, before the config is written back and hot-reloaded. The
+    // strip only removes the unauthenticated surfaces — the TCP
+    // `external-controller` / `secret` are left alone there, because
+    // `prepare_runtime_config` re-injects the managed values right
+    // after. This writer has no such step, so a script that sets
+    // `external-controller` to `0.0.0.0:9090` and clears `secret`
+    // would reach the reload as-is. Restore the managed values here
+    // instead: the written config always carries the controller the
+    // app itself uses, never the script's.
+    let mut stripped = config.clone();
+    zephyr_core::config::sanitizer::remove_control_plane_keys_json(&mut stripped);
+    // Same rule as the `apply_config` path: also strip provider `path`
+    // / `script-path` keys a script may have added, mirroring the
+    // import sanitizer — otherwise a provider path inside the core
+    // directory would be kept and reloaded, and mihomo would load it.
+    zephyr_core::config::sanitizer::remove_dangerous_keys_json(&mut stripped);
+    let (port, secret, _) = hot_reload_target(&state.app)?;
+    if let Some(obj) = stripped.as_object_mut() {
+        obj.insert(
+            "external-controller".to_owned(),
+            serde_json::json!(format!("127.0.0.1:{port}")),
+        );
+        obj.insert("secret".to_owned(), serde_json::json!(secret));
+    }
+    let yaml_str = serde_yaml::to_string(&stripped)
         .map_err(|e| format!("Failed to serialize config to YAML: {e}"))?;
     state.with_ext(|_ext| {
         let paths = ensure_app_storage(&state.app)?;
