@@ -276,37 +276,80 @@ async fn check_and_update_subscriptions(
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    // Collect subscriptions that need updating, with per-subscription UA override
-    let to_update: Vec<(String, String, Option<String>)> = metadata
-        .configs
-        .iter()
-        .filter_map(|(name, meta)| {
+    // Collect subscriptions that need updating, with per-subscription UA override.
+    // Metadata can hold two keys for the same file (a case-variant alias
+    // left by an earlier overwrite), and both pass the exists() check
+    // below on a case-insensitive volume. Group by filesystem identity
+    // first and keep, per file, the record stored under the spelling
+    // the file actually has on disk: an alias can carry a stale URL and
+    // interval, and downloading from it would also delete the current
+    // record. Only when no candidate matches the on-disk spelling is
+    // the first one seen kept. The due-check then runs on the winning
+    // record's values, so a stale alias can neither trigger a download
+    // of its old URL nor suppress the current record's own schedule.
+    let to_update: Vec<(String, String, Option<String>)> = {
+        let mut by_file: std::collections::HashMap<
+            std::path::PathBuf,
+            (String, String, Option<String>, u64, u64),
+        > = std::collections::HashMap::new();
+        for (name, meta) in metadata.configs.iter() {
             // Skip if no URL or no interval set
-            let url = meta.url.as_ref()?;
-            let interval_secs = meta.auto_update_interval.filter(|&s| s > 0)?;
+            let Some(url) = meta.url.as_ref() else {
+                continue;
+            };
+            let Some(interval_secs) = meta.auto_update_interval.filter(|&s| s > 0) else {
+                continue;
+            };
 
             // Skip if file doesn't exist (stale metadata entry)
             if !paths.profiles_dir.join(name).exists() {
-                return None;
+                continue;
             }
 
-            // Calculate time since last update
-            let last_updated = meta.last_updated.unwrap_or(0);
-            let elapsed = now.saturating_sub(last_updated);
-
-            // Only include if interval has passed
-            (elapsed >= interval_secs).then(|| {
-                // Per-subscription UA takes precedence over global UA
-                let ua = meta
-                    .user_agent
-                    .as_ref()
-                    .filter(|s| !s.is_empty())
-                    .cloned()
-                    .or_else(|| global_user_agent.clone());
-                (name.clone(), url.clone(), ua)
+            let resolved = paths
+                .profiles_dir
+                .join(name)
+                .canonicalize()
+                .unwrap_or_else(|_| paths.profiles_dir.join(name));
+            // Per-subscription UA takes precedence over global UA
+            let ua = meta
+                .user_agent
+                .as_ref()
+                .filter(|s| !s.is_empty())
+                .cloned()
+                .or_else(|| global_user_agent.clone());
+            let on_disk = super::config_manager::actual_entry_name(&paths.profiles_dir, name);
+            let candidate = (
+                name.clone(),
+                url.clone(),
+                ua,
+                interval_secs,
+                meta.last_updated.unwrap_or(0),
+            );
+            match by_file.get(&resolved) {
+                None => {
+                    by_file.insert(resolved, candidate);
+                }
+                Some(existing) => {
+                    // The on-disk spelling wins over an alias; between
+                    // two aliases the first one seen stays (their
+                    // order is arbitrary, and neither is more current
+                    // than the other).
+                    if on_disk == *name && existing.0 != on_disk {
+                        by_file.insert(resolved, candidate);
+                    }
+                }
+            }
+        }
+        by_file
+            .into_values()
+            .filter_map(|(name, url, ua, interval_secs, last_updated)| {
+                // Only include if interval has passed
+                let elapsed = now.saturating_sub(last_updated);
+                (elapsed >= interval_secs).then_some((name, url, ua))
             })
-        })
-        .collect();
+            .collect()
+    };
 
     if to_update.is_empty() {
         return Ok(0);

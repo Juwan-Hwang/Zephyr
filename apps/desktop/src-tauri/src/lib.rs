@@ -1152,7 +1152,7 @@ fn patch_settings_blocking(
             let result = if authoritative {
                 encrypt_all_profiles(&profiles_dir)
             } else {
-                decrypt_all_profiles(&profiles_dir)
+                decrypt_all_profiles(&profiles_dir, false)
             };
             drop(transform_guard);
             match result {
@@ -1900,7 +1900,7 @@ pub fn run() {
                     let result = if encrypt {
                         encrypt_all_profiles(&profiles_dir)
                     } else {
-                        decrypt_all_profiles(&profiles_dir)
+                        decrypt_all_profiles(&profiles_dir, false)
                     };
                     drop(transform_guard);
                     if let Err(e) = result {
