@@ -356,7 +356,11 @@ pub fn rule_import_file(
     let has_valid_ext = resolved
         .extension()
         .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ALLOWED_EXTENSIONS.contains(&ext));
+        .is_some_and(|ext| {
+            ALLOWED_EXTENSIONS
+                .iter()
+                .any(|allowed| ext.eq_ignore_ascii_case(allowed))
+        });
     if !has_valid_ext {
         return Err("File must have a .yaml, .yml, .conf, .txt, or .list extension".to_owned());
     }

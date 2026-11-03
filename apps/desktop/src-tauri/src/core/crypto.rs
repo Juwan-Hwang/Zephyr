@@ -464,7 +464,7 @@ pub fn encrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         let is_yaml = path
             .extension()
             .and_then(|e| e.to_str())
-            .is_some_and(|ext| ext == "yaml" || ext == "yml");
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         if !is_yaml || !path.is_file() {
             continue;
         }
@@ -516,17 +516,42 @@ pub fn encrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
 
 /// Decrypt all encrypted profile YAML files in `profiles_dir`.
 /// Files not encrypted (not starting with "djI6") are skipped.
-/// Returns an error string with the count of failures (does not abort on individual failures).
-pub fn decrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
-    let entries =
-        fs::read_dir(profiles_dir).map_err(|e| format!("Failed to read profiles dir: {e}"))?;
+/// Returns an error string with the count of failures (does not abort on individual failures),
+/// plus the paths the sanitizer refused to write: a refused profile
+/// stays encrypted on disk, and the caller must not leave it in the
+/// profiles dir — it would decrypt onto disk as-is the next time
+/// encryption is off. Callers that pass `None` never get refusals
+/// back (nothing is sanitized), so they may ignore the second value.
+///
+/// `sanitize` names the files whose decrypted content is sanitized
+/// (see `sanitize_decrypted_profile`): pass `Some` with the files
+/// this import delivered — an imported encrypted profile arrives as
+/// an opaque base64 scalar the staging sanitizer cannot see through,
+/// so its decrypted content must not land on disk unsanitized. Pass
+/// `None` for every other caller (encryption toggle, startup
+/// reconciliation): the content is the user's own profile, encrypted
+/// from disk as-is, and sanitizing it would strip keys the user
+/// configured and discard ordinary comments. Files not in the set
+/// are decrypted as-is. When encryption is on, the import reconcile
+/// never decrypts, so the same guarantee is provided by
+/// `sanitize_imported_encrypted_profiles` instead (decrypt, sanitize,
+/// re-encrypt in place).
+pub fn decrypt_all_profiles(
+    profiles_dir: &Path,
+    sanitize: Option<&std::collections::HashSet<PathBuf>>,
+) -> (Result<(), String>, Vec<PathBuf>) {
+    let entries = match fs::read_dir(profiles_dir) {
+        Ok(entries) => entries,
+        Err(e) => return (Err(format!("Failed to read profiles dir: {e}")), Vec::new()),
+    };
     let mut failures = 0u32;
+    let mut refused: Vec<PathBuf> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         let is_yaml = path
             .extension()
             .and_then(|e| e.to_str())
-            .is_some_and(|ext| ext == "yaml" || ext == "yml");
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         if !is_yaml || !path.is_file() {
             continue;
         }
@@ -548,7 +573,37 @@ pub fn decrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
         }
         match deobfuscate_string(&content) {
             Ok(decrypted) => {
-                if let Err(e) = write_file_secure_atomic(&path, &decrypted) {
+                // The import staging sanitizer skips encrypted profiles
+                // (they arrive as an opaque base64 scalar), so without
+                // this the decrypted content would land on disk
+                // unsanitized while every plaintext import is stripped.
+                // Unparsable content is refused, not written as-is:
+                // a multi-document document fails to parse as a whole
+                // yet its first document can carry a dangerous key,
+                // which would bypass the sanitizer and land on disk.
+                // Refusing leaves the profile encrypted, so no
+                // unsanitized content is ever written. Only files the
+                // import delivered are sanitized; pre-existing profiles
+                // decrypt as-is (see the `sanitize` parameter).
+                let sanitize_this = sanitize.is_some_and(|set| set.contains(&path));
+                let to_write = if sanitize_this {
+                    if let Some(clean) = sanitize_decrypted_profile(&decrypted) {
+                        clean
+                    } else {
+                        crate::emit_warn!(
+                            Config,
+                            CONFIG_DECRYPT_FAILED,
+                            "decrypt: refusing to write unparsable decrypted profile {}",
+                            path.display()
+                        );
+                        failures += 1;
+                        refused.push(path.clone());
+                        continue;
+                    }
+                } else {
+                    decrypted
+                };
+                if let Err(e) = write_file_secure_atomic(&path, &to_write) {
                     crate::emit_warn!(
                         Config,
                         CONFIG_DECRYPT_WRITE_FAILED,
@@ -569,11 +624,145 @@ pub fn decrypt_all_profiles(profiles_dir: &Path) -> Result<(), String> {
             }
         }
     }
-    if failures > 0 {
-        Err(format!("{failures} file(s) failed to decrypt"))
-    } else {
-        Ok(())
+    (
+        if failures > 0 {
+            Err(format!("{failures} file(s) failed to decrypt"))
+        } else {
+            Ok(())
+        },
+        refused,
+    )
+}
+
+/// Sanitize imported encrypted profiles in place, for the encryption-on
+/// import path: the staging sanitizer cannot see through the base64
+/// scalar, and the reconcile encryption branch never decrypts, so
+/// without this an imported encrypted profile would sit on disk
+/// unsanitized until encryption is turned off — and then decrypt onto
+/// disk as-is (see `decrypt_all_profiles`). For each file in
+/// `imported`, decrypt it, sanitize the plaintext, and re-encrypt it
+/// when the sanitizer changed anything; a file the sanitizer cannot
+/// parse is left encrypted and warned about, never written plaintext.
+/// Plaintext files are untouched: staging already sanitized them.
+/// Returns the files that could not be sanitized (empty when all
+/// went through): the caller must not leave those in the profiles
+/// dir — they would decrypt onto disk as-is — so it quarantines
+/// them instead of warning and continuing.
+#[must_use]
+pub fn sanitize_imported_encrypted_profiles(
+    imported: &std::collections::HashSet<PathBuf>,
+) -> Vec<PathBuf> {
+    let mut failures: Vec<PathBuf> = Vec::new();
+    #[allow(clippy::iter_over_hash_type)]
+    for path in imported {
+        if !path.is_file() {
+            continue;
+        }
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                crate::emit_warn!(
+                    Config,
+                    CONFIG_DECRYPT_READ_FAILED,
+                    "sanitize-import: skip {}: {e}",
+                    path.display()
+                );
+                failures.push(path.clone());
+                continue;
+            }
+        };
+        if !is_encrypted_content(&content) {
+            continue; // plaintext: staging already sanitized it
+        }
+        match deobfuscate_string(&content) {
+            Ok(decrypted) => {
+                let Some(clean) = sanitize_decrypted_profile(&decrypted) else {
+                    crate::emit_warn!(
+                        Config,
+                        CONFIG_DECRYPT_FAILED,
+                        "sanitize-import: refusing to rewrite unparsable encrypted profile {}",
+                        path.display()
+                    );
+                    failures.push(path.clone());
+                    continue;
+                };
+                if clean == decrypted {
+                    continue;
+                }
+                match obfuscate_string(&clean) {
+                    Ok(encrypted) => {
+                        if let Err(e) = write_file_secure_atomic(path, &encrypted) {
+                            crate::emit_warn!(
+                                Config,
+                                CONFIG_DECRYPT_WRITE_FAILED,
+                                "sanitize-import: write {}: {e}",
+                                path.display()
+                            );
+                            failures.push(path.clone());
+                        }
+                    }
+                    Err(e) => {
+                        crate::emit_warn!(
+                            Config,
+                            CONFIG_DECRYPT_FAILED,
+                            "sanitize-import: encrypt {}: {e}",
+                            path.display()
+                        );
+                        failures.push(path.clone());
+                    }
+                }
+            }
+            Err(e) => {
+                crate::emit_warn!(
+                    Config,
+                    CONFIG_DECRYPT_FAILED,
+                    "sanitize-import: decrypt {}: {e}",
+                    path.display()
+                );
+                failures.push(path.clone());
+            }
+        }
     }
+    failures
+}
+
+/// Strip dangerous keys from a freshly decrypted profile, mirroring
+/// the import staging sanitizer (which cannot see through the
+/// encryption). A clean document is returned untouched, so its
+/// comments survive; only a document the sanitizer rewrites is
+/// re-serialized, with the subscription URL / info lines kept like
+/// the staging does. Returns `None` when the content cannot be
+/// parsed (or re-serialized after a rewrite): the caller must refuse
+/// the write, because an unparsable document — a multi-document
+/// input, for example — can still carry a dangerous key in its
+/// first document.
+fn sanitize_decrypted_profile(decrypted: &str) -> Option<String> {
+    let Ok(mut value) = serde_yaml::from_str::<serde_yaml::Value>(decrypted) else {
+        return None;
+    };
+    // A tagged root (e.g. `!profile` on a mapping) parses as a Tagged
+    // value, not a Mapping: sanitize the tagged document itself.
+    let mut target = &mut value;
+    while let serde_yaml::Value::Tagged(tagged) = target {
+        target = &mut tagged.value;
+    }
+    if !matches!(
+        target,
+        serde_yaml::Value::Mapping(_) | serde_yaml::Value::Sequence(_)
+    ) {
+        return Some(decrypted.to_owned());
+    }
+    let before = target.clone();
+    zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(target, false);
+    if *target == before {
+        return Some(decrypted.to_owned());
+    }
+    let Ok(serialized) = serde_yaml::to_string(&value) else {
+        return None;
+    };
+    Some(crate::backup::preserve_subscription_comments(
+        decrypted, serialized,
+    ))
 }
 
 // ── Metadata concurrency ────────────────────────────────────────────────
@@ -601,7 +790,7 @@ static METADATA_LOCK: Mutex<()> = Mutex::new(());
 /// The returned guard is dropped automatically at the end of the enclosing
 /// scope. **Never hold it across `.await` points** — `std::sync::MutexGuard`
 /// is `!Send`, so the compiler will reject that.
-pub(super) fn lock_metadata() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn lock_metadata() -> std::sync::MutexGuard<'static, ()> {
     METADATA_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -748,6 +937,165 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result
     Ok(())
 }
 
+/// Whether a metadata key still names a profile file on disk.
+/// The filesystem decides the match (see [`cleanup_metadata_cache`]):
+/// a key stored under one spelling still names the file on disk
+/// under another on a case-insensitive volume, and names nothing on
+/// a case-sensitive one. Only the exact `run_config.yaml` is the
+/// generated runtime file; it carries no subscription metadata.
+/// Only a direct filename counts: a key carrying a path (such as
+/// `../outside.yaml`) names no managed profile even when that file
+/// exists. A symlink to a directory does not count either: the
+/// listing hides it, so keeping its metadata would attach stale
+/// subscription data to a regular profile created under the same
+/// name later. A dangling symlink still counts: its target may
+/// return, and the metadata keeps the subscription alive meanwhile.
+#[allow(clippy::filetype_is_file)]
+// `is_file()` is deliberate here: only a regular file or a symlink
+// (including a dangling one) counts as a profile. `!is_dir()`, the
+// lint's suggestion, would also admit fifos, sockets, and devices.
+fn key_names_existing_profile(profiles_dir: &Path, key: &str) -> bool {
+    if key == "run_config.yaml" {
+        return false;
+    }
+    if Path::new(key).file_name().and_then(std::ffi::OsStr::to_str) != Some(key) {
+        return false;
+    }
+    let is_yaml = Path::new(key)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
+    if !is_yaml {
+        return false;
+    }
+    match profiles_dir.join(key).symlink_metadata() {
+        Ok(meta) => {
+            let ft = meta.file_type();
+            if ft.is_file() {
+                return true;
+            }
+            if !ft.is_symlink() {
+                return false;
+            }
+            // A link whose target cannot be read is still a config:
+            // only a confirmed absence (NotFound) means the target is
+            // gone. A transient I/O failure must not let the cleanup
+            // drop the entry — the config is still on disk.
+            match profiles_dir.join(key).metadata() {
+                Ok(target) => target.is_file(),
+                Err(_) => true,
+            }
+        }
+        // Same rule for the link itself: any error other than NotFound
+        // (a transient loss of access to the directory, an I/O
+        // failure) keeps the entry — treating it as absent would let
+        // the cleanup delete the metadata of a config that is still
+        // there.
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
+/// Find the metadata entry for a profile file, preferring the exact
+/// key and falling back to a case variant that names the same file.
+/// The cleanup keeps a key stored under a different spelling than
+/// the file on disk (see [`key_names_existing_profile`]), but a
+/// plain exact lookup would miss it and the listing would hide the
+/// profile's saved URL, update interval, and User-Agent. On a
+/// case-sensitive volume the two spellings are distinct files, so
+/// the fallback only counts when the filesystem resolves both to
+/// the same entry.
+pub(super) fn metadata_for_config<'a>(
+    metadata: &'a ProfilesMetadata,
+    profiles_dir: &Path,
+    name: &str,
+) -> Option<&'a ConfigMetadata> {
+    metadata_key_for_config(metadata, profiles_dir, name).and_then(|key| metadata.configs.get(key))
+}
+
+/// The key [`metadata_for_config`] resolves to, for callers that
+/// update the entry instead of only reading it (an edit that inserts
+/// under the request spelling would otherwise leave a second record
+/// beside the existing one, and the listing would prefer the new,
+/// empty one). The fallback compares canonicalized paths, not
+/// lowercased spellings: on macOS a composed (`café.yaml`, NFC)
+/// and a decomposed (`café.yaml`, NFD) name point at the same file
+/// but lowercase to different strings, so a lowercase pre-filter
+/// would skip the very key the canonical comparison could match.
+pub(super) fn metadata_key_for_config<'a>(
+    metadata: &'a ProfilesMetadata,
+    profiles_dir: &Path,
+    name: &str,
+) -> Option<&'a str> {
+    if let Some((key, _)) = metadata.configs.get_key_value(name) {
+        // An exact hit is a stale alias when the file's on-disk
+        // spelling differs and names the same file: the alias is left
+        // over from an earlier spelling, and the on-disk record is the
+        // current one (the listing and the scheduler both read that
+        // spelling). Fall through to the canonical fallback below,
+        // which prefers the on-disk spelling — otherwise an overwrite
+        // under the alias spelling would preserve the alias's stale
+        // URL and interval, and the retain after it would delete the
+        // current record. A symlink exact hit is not an alias: the
+        // link is its own subscription, so it still returns at once.
+        let on_disk = super::config_manager::actual_entry_name(profiles_dir, name);
+        let stale_alias = !profiles_dir
+            .join(name)
+            .symlink_metadata()
+            .is_ok_and(|m| m.file_type().is_symlink())
+            && on_disk.as_str() != name
+            && metadata.configs.contains_key(&on_disk);
+        if !stale_alias {
+            return Some(key.as_str());
+        }
+    }
+    // A symlink entry resolves to its target: without this guard,
+    // `alias.yaml -> target.yaml` would match the target's metadata key,
+    // and URL/interval updates meant for the alias would be written into
+    // the target's record instead — the alias would never get its own.
+    // Only regular files go through the canonical fallback (NFC/NFD
+    // spellings of the same file still match; they are not symlinks).
+    if profiles_dir
+        .join(name)
+        .symlink_metadata()
+        .is_ok_and(|m| m.file_type().is_symlink())
+    {
+        return None;
+    }
+    let resolved = profiles_dir.join(name).canonicalize().ok()?;
+    let on_disk = super::config_manager::actual_entry_name(profiles_dir, name);
+    metadata
+        .configs
+        .keys()
+        .filter_map(|key| {
+            // A candidate that is itself a symlink is a different
+            // config, not a spelling of this file: without this, a
+            // metadata record filed under `alias.yaml` would be
+            // claimed by a lookup for its `target.yaml` (the same
+            // guard as the query-name check above, on the other side).
+            if profiles_dir
+                .join(key)
+                .symlink_metadata()
+                .is_ok_and(|m| m.file_type().is_symlink())
+            {
+                return None;
+            }
+            let key_resolved = profiles_dir.join(key).canonicalize().ok()?;
+            (key_resolved == resolved).then_some(key.as_str())
+        })
+        .min_by(|a, b| {
+            // The on-disk spelling is the profile the listing and the
+            // scheduler read; any other spelling is an alias left over
+            // from an earlier spelling. Between aliases, the smallest
+            // spelling wins deterministically — a `HashMap` scan would
+            // pick a different one per process.
+            match (*a == on_disk.as_str(), *b == on_disk.as_str()) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.cmp(b),
+            }
+        })
+}
+
 /// Clean up metadata entries for configs that no longer exist on disk.
 ///
 /// Acquires the metadata lock for the entire scan-modify-save sequence.
@@ -760,33 +1108,21 @@ pub(super) fn cleanup_metadata_cache(paths: &AppPaths) {
     let mut metadata = load_metadata(paths);
     let mut changed = false;
 
-    // Collect all existing config files
-    let existing_configs: std::collections::HashSet<String> = fs::read_dir(&paths.profiles_dir)
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter_map(std::result::Result::ok)
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .map(|ext| ext == "yaml" || ext == "yml")
-                .unwrap_or(false)
-        })
-        .filter_map(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .map(std::borrow::ToOwned::to_owned)
-        })
-        .filter(|name| name != "run_config.yaml")
-        .collect();
-
-    // Remove metadata entries for deleted configs
+    // Remove metadata entries for deleted configs. A key names a file
+    // the way the filesystem does: ask the filesystem, not the
+    // platform. Assuming macOS is case-insensitive would retain a
+    // deleted profile's metadata on a case-sensitive volume (and a
+    // later update could use its stale URL to recreate the profile).
+    // `symlink_metadata` resolves the name case-insensitively on a
+    // case-insensitive volume and exactly on a case-sensitive one,
+    // and it sees a dangling symlink as a present entry. The scan
+    // runs under the lock, so a concurrent writer cannot create a
+    // file between the check and the metadata save. Directories are
+    // not profiles.
     let keys_to_remove: Vec<String> = metadata
         .configs
         .keys()
-        .filter(|key| !existing_configs.contains(*key))
+        .filter(|key| !key_names_existing_profile(&paths.profiles_dir, key))
         .cloned()
         .collect();
 
@@ -909,6 +1245,22 @@ mod tests {
 
     fn random_test_key() -> [u8; 32] {
         rand::rng().random()
+    }
+
+    /// Whether `dir` tells apart filenames that differ only by case.
+    /// Probed at runtime, not by OS: the CI macOS runner's APFS
+    /// volume is case-insensitive, so `foo.yaml` and `FOO.yaml` are
+    /// one file there, while a case-sensitive volume holds both.
+    fn dir_is_case_sensitive(dir: &std::path::Path) -> bool {
+        let probe = dir.join("zephyr_case_probe");
+        let _ = std::fs::create_dir_all(&probe);
+        let _ = std::fs::write(probe.join("probe.yaml"), b"");
+        let _ = std::fs::write(probe.join("PROBE.yaml"), b"");
+        let count = std::fs::read_dir(&probe)
+            .map(std::iter::Iterator::count)
+            .unwrap_or(0);
+        let _ = std::fs::remove_dir_all(&probe);
+        count >= 2
     }
 
     #[test]
@@ -1045,5 +1397,165 @@ mod tests {
         let machine_id = "test-machine-id";
         let derived = derive_key(machine_id);
         assert!(derived.iter().any(|&b| b != 0));
+    }
+
+    #[test]
+    fn cleanup_metadata_cache_uses_filesystem_identity() {
+        // `foo.yaml` and `FOO.yaml` are distinct files on a
+        // case-sensitive volume: a key for the deleted one must go
+        // even though a case variant survives. On a
+        // case-insensitive volume the two spellings name one file,
+        // so the same filesystem check keeps both keys.
+        let unique = format!("zephyr_test_meta_cache_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let case_sensitive = dir_is_case_sensitive(&dir);
+        let paths = super::AppPaths {
+            app_data_dir: dir.clone(),
+            core_dir: dir.clone(),
+            profiles_dir: dir.clone(),
+        };
+        std::fs::write(dir.join("FOO.yaml"), "port: 7890\n").unwrap();
+        let mut metadata = super::ProfilesMetadata::default();
+        metadata.configs.insert(
+            "foo.yaml".to_owned(),
+            super::ConfigMetadata {
+                url: Some("https://example.com/a".to_owned()),
+                ..Default::default()
+            },
+        );
+        metadata.configs.insert(
+            "FOO.yaml".to_owned(),
+            super::ConfigMetadata {
+                url: Some("https://example.com/b".to_owned()),
+                ..Default::default()
+            },
+        );
+        super::save_metadata(&paths, &metadata).unwrap();
+        super::cleanup_metadata_cache(&paths);
+        let kept = super::load_metadata(&paths);
+        if case_sensitive {
+            assert!(!kept.configs.contains_key("foo.yaml"));
+        } else {
+            // Both spellings name the surviving file.
+            assert!(kept.configs.contains_key("foo.yaml"));
+        }
+        assert!(kept.configs.contains_key("FOO.yaml"));
+
+        // A directory carrying a YAML extension is not a profile:
+        // its metadata must not survive the cleanup.
+        std::fs::remove_file(dir.join("FOO.yaml")).unwrap();
+        std::fs::create_dir(dir.join("FOO.yaml")).unwrap();
+        super::save_metadata(&paths, &metadata).unwrap();
+        super::cleanup_metadata_cache(&paths);
+        let kept = super::load_metadata(&paths);
+        assert!(!kept.configs.contains_key("FOO.yaml"));
+        assert!(!kept.configs.contains_key("foo.yaml"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn key_names_existing_profile_rejects_paths_and_directory_links() {
+        let unique = format!("zephyr_test_key_profile_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("foo.yaml"), "port: 7890\n").unwrap();
+        // A key carrying a path is not a managed profile, even when
+        // the file it points at exists outside the directory.
+        let outside_name = format!("zephyr_outside_{}.yaml", std::process::id());
+        std::fs::write(dir.parent().unwrap().join(&outside_name), "port: 7891\n").unwrap();
+        assert!(!super::key_names_existing_profile(
+            &dir,
+            &format!("../{outside_name}")
+        ));
+        assert!(!super::key_names_existing_profile(&dir, "sub/foo.yaml"));
+        assert!(super::key_names_existing_profile(&dir, "foo.yaml"));
+        assert!(!super::key_names_existing_profile(&dir, "run_config.yaml"));
+        // A symlink to a directory is not a profile: the listing
+        // hides it, so its metadata must not survive the cleanup.
+        // A dangling symlink still counts: its target may return.
+        // (Symlink creation needs privileges on Windows, so these
+        // cases only run on unix.)
+        #[cfg(unix)]
+        {
+            std::fs::create_dir(dir.join("realdir")).unwrap();
+            std::os::unix::fs::symlink(dir.join("realdir"), dir.join("link.yaml")).unwrap();
+            assert!(!super::key_names_existing_profile(&dir, "link.yaml"));
+            std::os::unix::fs::symlink(dir.join("missing.yaml"), dir.join("dangling.yaml"))
+                .unwrap();
+            assert!(super::key_names_existing_profile(&dir, "dangling.yaml"));
+            std::os::unix::fs::symlink(dir.join("foo.yaml"), dir.join("alias.yaml")).unwrap();
+            assert!(super::key_names_existing_profile(&dir, "alias.yaml"));
+        }
+
+        let _ = std::fs::remove_file(dir.parent().unwrap().join(&outside_name));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn metadata_for_config_prefers_exact_key() {
+        let unique = format!("zephyr_test_meta_lookup_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let case_sensitive = dir_is_case_sensitive(&dir);
+        std::fs::write(dir.join("FOO.yaml"), "port: 7890\n").unwrap();
+        std::fs::write(dir.join("foo.yaml"), "port: 7891\n").unwrap();
+        let mut metadata = super::ProfilesMetadata::default();
+        metadata.configs.insert(
+            "FOO.yaml".to_owned(),
+            super::ConfigMetadata {
+                url: Some("https://example.com/upper".to_owned()),
+                ..Default::default()
+            },
+        );
+        metadata.configs.insert(
+            "foo.yaml".to_owned(),
+            super::ConfigMetadata {
+                url: Some("https://example.com/lower".to_owned()),
+                ..Default::default()
+            },
+        );
+        // Exact match wins when both spellings coexist as distinct
+        // files. On a case-insensitive volume the two writes land on
+        // one file, whose on-disk spelling is the first one written:
+        // a lookup for the other spelling is a stale alias, so it
+        // returns the on-disk record instead of the alias's own —
+        // otherwise an overwrite under the alias spelling would
+        // preserve the alias's stale URL and delete the current
+        // record. (Only exercisable on a case-insensitive volume;
+        // on Linux the two spellings are distinct files and the
+        // exact-key branch is what runs.)
+        let found = super::metadata_for_config(&metadata, &dir, "FOO.yaml").unwrap();
+        assert_eq!(found.url.as_deref(), Some("https://example.com/upper"));
+        let found = super::metadata_for_config(&metadata, &dir, "foo.yaml").unwrap();
+        if case_sensitive {
+            assert_eq!(found.url.as_deref(), Some("https://example.com/lower"));
+        } else {
+            assert_eq!(found.url.as_deref(), Some("https://example.com/upper"));
+        }
+        assert!(super::metadata_for_config(&metadata, &dir, "bar.yaml").is_none());
+
+        // A case-variant key alone does not match on a
+        // case-sensitive volume: the key names a different (missing)
+        // file, so the fallback must not conflate it. On a
+        // case-insensitive volume both spellings name the same file,
+        // so the variant key is the file's record.
+        let mut metadata = super::ProfilesMetadata::default();
+        metadata.configs.insert(
+            "foo.yaml".to_owned(),
+            super::ConfigMetadata {
+                url: Some("https://example.com/lower".to_owned()),
+                ..Default::default()
+            },
+        );
+        if case_sensitive {
+            assert!(super::metadata_for_config(&metadata, &dir, "FOO.yaml").is_none());
+        } else {
+            let found = super::metadata_for_config(&metadata, &dir, "FOO.yaml").unwrap();
+            assert_eq!(found.url.as_deref(), Some("https://example.com/lower"));
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
