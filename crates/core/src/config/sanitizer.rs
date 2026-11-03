@@ -2,7 +2,7 @@
 //!
 //! Migrated from `src-tauri/src/core/config_sanitizer.rs` for cross-platform reuse.
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 /// Maximum recursion depth for YAML processing to prevent stack overflow attacks.
 const MAX_YAML_DEPTH: usize = 100;
@@ -446,38 +446,71 @@ pub fn sanitize_config_file_name(config_path: String) -> Result<String, crate::e
     Ok(config_file_name)
 }
 
+/// Lexically normalize a path to resolve '.', '..', and separators.
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(..) | Component::RootDir | Component::Normal(..) => {
+                normalized.push(component);
+            }
+            Component::ParentDir => {
+                if matches!(normalized.components().next_back(), Some(Component::Normal(..))) {
+                    normalized.pop();
+                } else {
+                    normalized.push(component);
+                }
+            }
+            Component::CurDir => {}
+        }
+    }
+    normalized
+}
+
 /// Validates that the resolved path is within the expected base directory
 pub fn validate_path_within_dir(
     resolved_path: &Path,
     base_dir: &Path,
 ) -> Result<(), crate::error::AppError> {
-    // If the file exists, use canonicalize for definitive check
-    if resolved_path.exists() {
-        let canonical_resolved = resolved_path.canonicalize().map_err(|e| {
-            crate::error::AppError::IoError(format!("Failed to canonicalize resolved path: {e}"))
-        })?;
-        let canonical_base = base_dir.canonicalize().map_err(|e| {
-            crate::error::AppError::IoError(format!("Failed to canonicalize base directory: {e}"))
-        })?;
+    // Lexical check: ensure normalized path stays within base directory boundary
+    let norm_resolved = normalize_path(resolved_path);
+    let norm_base = normalize_path(base_dir);
+    if !norm_resolved.starts_with(&norm_base) {
+        return Err(crate::error::AppError::ConfigError(
+            "Path traversal detected: resolved path is outside allowed directory".to_owned(),
+        ));
+    }
 
-        if !canonical_resolved.starts_with(&canonical_base) {
-            return Err(crate::error::AppError::ConfigError(
-                "Path traversal detected: resolved path is outside allowed directory".to_owned(),
-            ));
-        }
-    } else {
-        // File doesn't exist yet, do string-level validation
-        let resolved_str = resolved_path.to_string_lossy();
-        let base_str = base_dir.to_string_lossy();
-
-        // Normalize path separators for comparison
-        let resolved_normalized = resolved_str.replace('\\', "/");
-        let base_normalized = base_str.replace('\\', "/");
-
-        if !resolved_normalized.starts_with(&*base_normalized) {
-            return Err(crate::error::AppError::ConfigError(
-                "Path traversal detected: resolved path is outside allowed directory".to_owned(),
-            ));
+    if let Ok(canonical_base) = base_dir.canonicalize() {
+        if resolved_path.exists() {
+            let canonical_resolved = resolved_path.canonicalize().map_err(|e| {
+                crate::error::AppError::IoError(format!("Failed to canonicalize resolved path: {e}"))
+            })?;
+            if !canonical_resolved.starts_with(&canonical_base) {
+                return Err(crate::error::AppError::ConfigError(
+                    "Path traversal detected: resolved path is outside allowed directory".to_owned(),
+                ));
+            }
+        } else {
+            // Check existing ancestors for symlink traversal
+            let mut ancestor = resolved_path;
+            while !ancestor.exists() {
+                if let Some(parent) = ancestor.parent() {
+                    ancestor = parent;
+                } else {
+                    break;
+                }
+            }
+            if ancestor.exists() {
+                let canonical_ancestor = ancestor.canonicalize().map_err(|e| {
+                    crate::error::AppError::IoError(format!("Failed to canonicalize ancestor: {e}"))
+                })?;
+                if !canonical_ancestor.starts_with(&canonical_base) {
+                    return Err(crate::error::AppError::ConfigError(
+                        "Path traversal detected: resolved path is outside allowed directory".to_owned(),
+                    ));
+                }
+            }
         }
     }
     Ok(())
@@ -937,5 +970,50 @@ proxies:
         let mut value = serde_yaml::Value::String("external-ui".to_owned());
         remove_control_plane_keys(&mut value);
         assert_eq!(value.as_str().unwrap(), "external-ui");
+    }
+
+    #[test]
+    fn test_validate_path_within_dir_lexical() {
+        let base = Path::new("/var/app/profiles");
+
+        // Valid inside paths
+        assert!(validate_path_within_dir(Path::new("/var/app/profiles/profile.yaml"), base).is_ok());
+        assert!(validate_path_within_dir(Path::new("/var/app/profiles/sub/profile.yaml"), base).is_ok());
+        assert!(validate_path_within_dir(Path::new("/var/app/profiles/./profile.yaml"), base).is_ok());
+        assert!(validate_path_within_dir(Path::new("/var/app/profiles/sub/../profile.yaml"), base).is_ok());
+
+        // Rejection of sibling prefix collision (e.g. profiles_evil or profiles-bak)
+        assert!(validate_path_within_dir(Path::new("/var/app/profiles_evil/profile.yaml"), base).is_err());
+        assert!(validate_path_within_dir(Path::new("/var/app/profiles-bak/profile.yaml"), base).is_err());
+
+        // Rejection of traversal escaping base
+        assert!(validate_path_within_dir(Path::new("/var/app/profiles/../../etc/passwd"), base).is_err());
+        assert!(validate_path_within_dir(Path::new("/var/app/profiles/sub/../../other.yaml"), base).is_err());
+        assert!(validate_path_within_dir(Path::new("/var/app/other.yaml"), base).is_err());
+    }
+
+    #[test]
+    fn test_validate_path_within_dir_filesystem() {
+        let unique = format!("zephyr_test_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        let profiles_evil = temp_dir.join("profiles_evil");
+        std::fs::create_dir_all(&profiles).unwrap();
+        std::fs::create_dir_all(&profiles_evil).unwrap();
+
+        let valid_file = profiles.join("valid.yaml");
+        std::fs::write(&valid_file, "valid").unwrap();
+
+        let nonexistent_valid = profiles.join("new.yaml");
+        let evil_file = profiles_evil.join("evil.yaml");
+        let traversal_target = profiles.join("../profiles_evil/evil.yaml");
+
+        assert!(validate_path_within_dir(&valid_file, &profiles).is_ok());
+        assert!(validate_path_within_dir(&nonexistent_valid, &profiles).is_ok());
+        assert!(validate_path_within_dir(&evil_file, &profiles).is_err());
+        assert!(validate_path_within_dir(&traversal_target, &profiles).is_err());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
