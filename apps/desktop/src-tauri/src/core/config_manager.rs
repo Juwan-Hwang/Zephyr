@@ -400,9 +400,13 @@ pub async fn delete_config(app: AppHandle, name: String) -> Result<String, Strin
     let file_exists = target_path.exists();
 
     if !file_exists {
-        // Try with .yml extension as well
-        let yml_name = name.replace(".yaml", ".yml");
+        // Try with .yml extension as well. Build the fallback from the
+        // sanitized name, not the raw input, and validate it like the
+        // primary path: the raw name can carry a drive-relative or
+        // otherwise escaping path that `join` would keep.
+        let yml_name = clean_name.replace(".yaml", ".yml");
         let yml_path = paths.profiles_dir.join(&yml_name);
+        validate_path_within_dir(&yml_path, &paths.profiles_dir).map_err(|e| e.to_string())?;
 
         if yml_path.exists() {
             remove_profile_file_blocking(&yml_path).await?;
