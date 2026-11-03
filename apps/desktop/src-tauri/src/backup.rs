@@ -398,7 +398,7 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
     // Phase 1-4: Validate and stage (on blocking thread)
     let paths_clone = paths.clone();
     let staging_result =
-        tokio::task::spawn_blocking(move || -> Result<(BackupManifest, PathBuf), String> {
+        tokio::task::spawn_blocking(move || -> Result<(BackupManifest, PathBuf, Option<crate::Settings>), String> {
             // Open the archive
             let file = fs::File::open(&open_path)
                 .map_err(|e| format!("Failed to open backup file: {e}"))?;
@@ -437,7 +437,8 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
             // Extract and validate each file inside a closure so that any
             // error triggers a single, centralized cleanup of the staging dir.
             let mut total_uncompressed: u64 = 0;
-            let mut extract_all = || -> Result<(), String> {
+            let mut extract_all = || -> Result<Option<crate::Settings>, String> {
+                let mut staged_settings: Option<crate::Settings> = None;
                 for entry in &manifest.files {
                     if !is_safe_archive_path(&entry.path) {
                         return Err(format!("Unsafe path in backup archive: {}", entry.path));
@@ -566,9 +567,14 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
                         }
                     }
 
-                    // Validate settings.json structure before commit so a
-                    // corrupt archive doesn't overwrite the user's working
-                    // settings file.
+                    // Validate settings.json before commit so a corrupt
+                    // archive doesn't overwrite the user's working
+                    // settings file. Convert to `Settings` here, in the
+                    // staging phase: the migration chain runs on the
+                    // converted value (see `migrate_settings`), so a
+                    // type mismatch fails the import either way — doing
+                    // it here fails before any file is replaced, and the
+                    // file is parsed once instead of twice.
                     if entry.path == "settings.json" {
                         let content = fs::read_to_string(&dest_path)
                             .map_err(|e| format!("Failed to read extracted settings.json: {e}"))?;
@@ -596,17 +602,32 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
                                 format!("Failed to write cleaned settings.json: {e}")
                             })?;
                         }
+                        // Capture the staged settings after the strip above,
+                        // so they match what was actually written: the import
+                        // handler reads them to restore the disabled
+                        // subscription user-agent triple when the backup
+                        // carries one.
+                        staged_settings = Some(
+                            serde_json::from_value::<crate::Settings>(value).map_err(|e| {
+                                format!(
+                                    "Staged settings.json is incompatible with the current Settings schema: {e}"
+                                )
+                            })?,
+                        );
                     }
                 }
-                Ok(())
+                Ok(staged_settings)
             };
 
-            if let Err(e) = extract_all() {
-                let _ = fs::remove_dir_all(&staging_dir);
-                return Err(e);
-            }
+            let staged_settings = match extract_all() {
+                Ok(settings) => settings,
+                Err(e) => {
+                    let _ = fs::remove_dir_all(&staging_dir);
+                    return Err(e);
+                }
+            };
 
-            Ok((manifest, staging_dir))
+            Ok((manifest, staging_dir, staged_settings))
         })
         .await
         .map_err(|e| format!("Import task failed: {e}"))?;
@@ -615,17 +636,95 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
     // All blocking I/O (create_dir_all, atomic_rename, restore_rollback,
     // remove_dir_all) runs inside spawn_blocking to avoid blocking the
     // Tokio async executor.
-    let (manifest, staging_dir) = match staging_result {
+    let (manifest, staging_dir, validated_settings) = match staging_result {
         Ok(res) => res,
         Err(e) => return Err(e),
     };
 
     let file_count = manifest.files.len();
     let app_version = manifest.app_version.clone();
-    let has_settings = manifest.files.iter().any(|f| f.path == "settings.json");
+    // Only the profiles this import delivered are sanitized: when the
+    // reconciliation decrypts them (encryption off), and when it
+    // encrypts (encryption on, via `sanitize_imported_encrypted_profiles`
+    // — decrypt, strip, re-encrypt). Pre-existing encrypted profiles
+    // are the user's own configuration, encrypted from disk as-is —
+    // sanitizing them would strip keys the user configured and discard
+    // ordinary comments. Built from the same destination map the
+    // commit uses, so these are exactly the files the import placed.
+    // (Built here because the commit closure below moves `manifest`.)
+    let imported_profiles: std::collections::HashSet<PathBuf> = build_dest_map(&paths, &manifest)
+        .into_iter()
+        .filter(|(rel, _)| rel.starts_with("profiles/"))
+        .map(|(_, dest)| dest)
+        .collect();
+    // The staged settings were already converted to `Settings` during
+    // staging (see above), before any file was replaced: a field type
+    // incompatible with `Settings` fails the import before the commit
+    // instead of after it, and the file is parsed once. The validated
+    // value is reused for the reload below.
+    // Refuse to enable encryption when the machine key is session-only:
+    // `patch_settings` refuses the same toggle for the same reason (a
+    // session key is gone at the next start, so encrypting with it
+    // would make every plaintext profile unrecoverable), and the
+    // post-commit reconciliation can only warn and skip — the import
+    // would otherwise report success while the setting claims
+    // encryption is on and the profiles stay plaintext. The check
+    // looks only at the imported value and the key: whether
+    // encryption was already on before the import does not change
+    // anything — with no persisted key the imported on-state cannot
+    // be honored either way, so an already-on setting must not let
+    // the import slip past.
+    if let Some(settings) = &validated_settings {
+        if settings.encrypt_configs
+            && !crate::core_manager::core::crypto::is_machine_key_persisted()
+        {
+            let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+            return Err("Cannot enable config encryption: machine key is not persisted. Encrypted data would be lost on restart."
+                .to_owned());
+        }
+    }
     let paths_clone = paths.clone();
+    // Whether the backup carries settings: the post-commit
+    // reconciliation below runs inside the commit task, after
+    // `validated_settings` is moved into it, so the flag is captured
+    // here.
+    let import_carries_settings = validated_settings.is_some();
+    // The AppHandle for the reconciliation below, which reads the
+    // authoritative encryption setting from the in-memory state.
+    let reconcile_app = app.clone();
+    // The settings lock for the commit closure below; absent when the
+    // state was never registered (then there is nothing to serialize).
+    let commit_settings_arc = app
+        .try_state::<SettingsState>()
+        .map(|state| std::sync::Arc::clone(&state.0));
 
-    let commit_result = tokio::task::spawn_blocking(move || -> Result<(), String> {
+    let commit_result = tokio::task::spawn_blocking(move || -> Result<Option<String>, String> {
+        // Hold the profile-transform guard across the whole commit: a
+        // concurrent profile delete verifies the removal and retries
+        // under this guard, so publishing a restored profile mid-delete
+        // would let the retry delete the file the restore just reported
+        // as restored. The commit itself is only renames (the
+        // extraction already ran), so holding the guard here is cheap.
+        let _transform_guard = crate::lock_profile_transform();
+        // Serialize settings saves with the import: a save that lands
+        // after the settings.json backup but before the staged install
+        // would be overwritten by the import. Settings saves take the
+        // settings lock, so holding it across the commit (after the
+        // transform guard, matching every other writer) keeps them out
+        // until the new file is in place. The guard is held through
+        // the settings reload below, so no save can land between the
+        // file swap and the in-memory publish either.
+        let mut settings_guard = commit_settings_arc
+            .as_ref()
+            .map(|arc| arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        // Hold the metadata lock across the commit too: the import
+        // installs a new metadata.json, and a metadata writer (the
+        // listing cleanup, a subscription save) that lands mid-commit
+        // would read the old file and save it back over the imported
+        // one. Taken after the settings guard, matching the global
+        // transform → settings → metadata order.
+        let _metadata_guard = crate::core_manager::core::crypto::lock_metadata();
+
         // Back up current files, then swap — use UUID for the rollback
         // directory name to avoid collisions and improve predictability.
         let backup_dir = paths_clone
@@ -737,64 +836,192 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
         // Success — clean up
         let _ = fs::remove_dir_all(&staging_dir);
         let _ = fs::remove_dir_all(&backup_dir);
-        Ok(())
+
+        // Publish the validated settings (see the pre-commit
+        // validation above) while still holding the settings lock:
+        // a save landing between the commit and the reload would
+        // overwrite the imported file with stale in-memory values,
+        // and the reload would then publish those stale values as
+        // the import's result. The staged file was already converted
+        // to `Settings` before any file was replaced, so this step
+        // cannot fail on an incompatible schema; `migrate_settings`
+        // runs the schema migration and writes the result back to
+        // the installed file, as before.
+        if let Some(new_settings) = validated_settings {
+            if let Some(guard) = settings_guard.as_deref_mut() {
+                let settings_file = paths_clone.app_data_dir.join("settings.json");
+                *guard = crate::migrate_settings(new_settings, &settings_file);
+            }
+        }
+        // Release the settings lock explicitly: its last use is the
+        // reload assignment above, and holding it to the end of the
+        // closure would trip clippy's significant-drop-tightening lint.
+        drop(settings_guard);
+
+        // Reconcile the surviving profiles with the imported
+        // `encrypt_configs` setting: profiles omitted from the archive
+        // keep their old encryption state, so an import that enables
+        // encryption would otherwise report it as on while plaintext
+        // profiles remain (and vice versa). Both batches skip files
+        // already in the target state, so this is a no-op once they
+        // agree. Runs here, after the commit (the files are in place)
+        // and after the reload above (the authoritative value is the
+        // imported one), and the import only reports success once it
+        // completes. A failure only warns: the files were already
+        // committed, and the startup batch finishes the job on the
+        // next start. Runs whether or not the backup carries settings:
+        // a profile-only import leaves the current setting in force,
+        // and the restored plaintext profiles would otherwise stay
+        // plaintext while the app reports encryption as on.
+        //
+        // This runs inside the commit task, still holding the
+        // profile-transform guard from the top of this closure — no
+        // second acquisition here, the guard is not reentrant. That
+        // is the point: a concurrent `patch_settings` toggle cannot
+        // slip in between the commit and the sanitize/decrypt below
+        // and decrypt the just-imported encrypted profiles without
+        // sanitization (its transform takes the same guard).
+        let reconcile_warning: Option<String> = {
+            // Read under the transform lock, as `patch_settings` and
+            // the startup batch do, so a concurrent toggle cannot be
+            // undone by a stale value.
+            let encrypt =
+                crate::core_manager::core::crypto::authoritative_encrypt_configs(&reconcile_app);
+            // Same rule as `patch_settings`: a session-only key is
+            // gone at the next start, so encrypting with it would make
+            // every plaintext profile unrecoverable. Decrypting
+            // carries no such risk.
+            if encrypt && !crate::core_manager::core::crypto::is_machine_key_persisted() {
+                crate::emit_warn!(
+                    Config,
+                    CONFIG_ENCRYPT_FAILED,
+                    "Skipped profile encryption after import: the machine key is not persisted"
+                );
+                // Say so in the result, not only in the event log: the
+                // message below only appends a warning when this block
+                // returns one, and returning None here would report a
+                // plain success while the restored profiles stay plaintext
+                // under an encryption-on setting.
+                Some(
+                    "Skipped profile encryption after import: the machine key is not persisted"
+                        .to_owned(),
+                )
+            } else if !encrypt
+                && !import_carries_settings
+                && !settings_encrypt_authoritative(&paths_clone.app_data_dir, encrypt)
+            {
+                // The in-memory `encrypt_configs` value is only
+                // trustworthy when settings.json on disk agrees with
+                // it: after a startup that could not read
+                // settings.json, the in-memory value is the `false`
+                // default while the file may still say `true`, and
+                // decrypting every profile on that default would undo
+                // the user's encryption. The startup batch refuses
+                // the same transform for the same reason. A
+                // profile-only import carries no settings, so it
+                // cannot repair the disagreement — skip the decrypt
+                // branch and let the next start (once settings load)
+                // finish the job.
+                crate::emit_warn!(
+                    Config,
+                    CONFIG_DECRYPT_FAILED,
+                    "Skipped profile decryption after import: settings.json could not be read, so the encryption setting is not authoritative"
+                );
+                Some(
+                    "Skipped profile decryption after import: settings.json could not be read, so the encryption setting is not authoritative"
+                        .to_owned(),
+                )
+            } else {
+                // Warnings collected along the way: the encrypt branch below
+                // may add a sanitize failure, and the batch error below may
+                // add its own — all of them reach the result message.
+                let mut warning: Option<String> = None;
+                let result = if encrypt {
+                    // The staging sanitizer cannot see through an encrypted
+                    // profile, and this branch never decrypts: sanitize the
+                    // imported encrypted profiles (decrypt, strip, re-encrypt)
+                    // before encrypting the rest, or they would sit on disk
+                    // unsanitized until encryption is turned off — and then
+                    // decrypt onto disk as-is. A profile that cannot be
+                    // sanitized must not stay in the profiles dir: move it to
+                    // quarantine, where nothing loads it from, and say so —
+                    // warning and continuing would leave its dangerous content
+                    // live at runtime.
+                    let failed =
+                        crate::core_manager::core::crypto::sanitize_imported_encrypted_profiles(
+                            &imported_profiles,
+                        );
+                    if let Some(w) =
+                        quarantine_unsanitized(&paths_clone.app_data_dir, &failed)?
+                    {
+                        warning = Some(w);
+                    }
+                    crate::core_manager::core::crypto::encrypt_all_profiles(
+                        &paths_clone.profiles_dir,
+                    )
+                } else {
+                    // Only profiles this import delivered are sanitized on
+                    // decrypt (see `imported_profiles` above); pre-existing
+                    // encrypted profiles decrypt as-is.
+                    let (decrypt_result, refused) =
+                        crate::core_manager::core::crypto::decrypt_all_profiles(
+                            &paths_clone.profiles_dir,
+                            Some(&imported_profiles),
+                        );
+                    // A profile the sanitizer refused stays encrypted on
+                    // disk, and would decrypt onto disk as-is the next time
+                    // encryption is turned off: quarantine it the same way
+                    // the encrypt branch quarantines profiles it could not
+                    // sanitize, instead of warning and continuing.
+                    if let Some(w) =
+                        quarantine_unsanitized(&paths_clone.app_data_dir, &refused)?
+                    {
+                        warning = Some(w);
+                    }
+                    decrypt_result
+                };
+                if let Err(e) = result {
+                    if encrypt {
+                        crate::emit_warn!(
+                            Config,
+                            CONFIG_ENCRYPT_FAILED,
+                            "Failed to encrypt some profiles after import: {e}"
+                        );
+                    } else {
+                        crate::emit_warn!(
+                            Config,
+                            CONFIG_DECRYPT_FAILED,
+                            "Failed to decrypt some profiles after import: {e}"
+                        );
+                    }
+                    Some(match warning {
+                        Some(w) => format!("{w}; {e}"),
+                        None => e,
+                    })
+                } else {
+                    warning
+                }
+            }
+        };
+        Ok(reconcile_warning)
     })
     .await
     .map_err(|e| format!("Commit task failed: {e}"))?;
 
-    commit_result?;
+    let reconcile_warning = commit_result?;
 
-    // Reload SettingsState from the newly imported settings.json to
-    // prevent the in-memory state from overwriting the imported file.
-    // Run migrate_settings to handle backups from older schema versions.
-    //
-    // We deserialize to serde_json::Value first, then convert to Settings.
-    // This avoids a fragile dependency on direct deserialization: if a
-    // future schema migration introduces a breaking change (e.g., changing
-    // a field type), direct from_str::<Settings> would fail and bypass
-    // the migration chain entirely. Deserializing to Value first allows
-    // us to run migrations on the JSON before converting to Settings.
-    //
-    // All file I/O (read_to_string, migrate_settings write) runs inside
-    // spawn_blocking to avoid blocking the async executor.
-    if let Some(settings_state) = app.try_state::<SettingsState>() {
-        // Only reload SettingsState if the manifest actually contained
-        // settings.json. A backup may legitimately omit it (e.g., a fresh
-        // install that never persisted settings), and in that case the
-        // in-memory settings should remain unchanged.
-        if has_settings {
-            let settings_arc = std::sync::Arc::clone(&settings_state.0);
-            let settings_file = paths.app_data_dir.join("settings.json");
-
-            let reload_result =
-                tokio::task::spawn_blocking(move || -> Result<crate::Settings, String> {
-                    if !settings_file.exists() {
-                        return Err("settings.json does not exist after import".to_owned());
-                    }
-                    let content = fs::read_to_string(&settings_file)
-                        .map_err(|e| format!("Failed to read settings.json: {e}"))?;
-                    let value = serde_json::from_str::<serde_json::Value>(&content)
-                        .map_err(|e| format!("Failed to parse settings JSON: {e}"))?;
-                    // Try converting to Settings; if that fails (e.g., due
-                    // to a type mismatch in a future schema), return Err to
-                    // avoid overwriting the file on disk with defaults.
-                    let new_settings = serde_json::from_value::<crate::Settings>(value)
-                        .map_err(|e| format!("Failed to convert JSON to Settings: {e}"))?;
-                    Ok(crate::migrate_settings(new_settings, &settings_file))
-                })
-                .await
-                .map_err(|e| format!("Reload task panicked: {e}"))??;
-
-            let mut guard = settings_arc
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            *guard = reload_result;
-        }
-    }
-
-    Ok(format!(
-        "Backup restored successfully ({file_count} files from v{app_version})"
-    ))
+    // The files are restored either way, and the startup batch finishes
+    // the job on the next start — so this stays a success. But say so
+    // in the message, not only in the event log: otherwise the settings
+    // claim encryption is on while some profiles are still plaintext.
+    Ok(match reconcile_warning {
+        Some(warning) => format!(
+            "Backup restored successfully ({file_count} files from v{app_version}) — warning: {warning}"
+        ),
+        None => format!(
+            "Backup restored successfully ({file_count} files from v{app_version})"
+        ),
+    })
 }
 
 /// Drop an invalid `subscription_user_agent` from imported settings.
@@ -997,6 +1224,115 @@ fn map_rel_to_dest(rel: &Path, paths: &AppPaths) -> Option<PathBuf> {
     }
 }
 
+/// Pick a quarantine target that does not clobber an earlier copy:
+/// `rename` overwrites on Unix, so a second failed profile with the
+/// same file name would silently replace the first one. The first copy
+/// keeps its name; later ones get ` (1)`, ` (2)`, … before the
+/// extension.
+fn quarantine_target(quarantine_dir: &Path, name: &std::ffi::OsStr) -> PathBuf {
+    let target = quarantine_dir.join(name);
+    if !target.exists() {
+        return target;
+    }
+    let name_path = Path::new(name);
+    let stem = name_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| name.to_string_lossy().into_owned());
+    let ext = name_path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    let mut n = 1;
+    loop {
+        let candidate = quarantine_dir.join(format!("{stem} ({n}){ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+/// Whether the in-memory `encrypt_configs` value is confirmed by
+/// settings.json on disk: the file must parse, and its
+/// `encrypt_configs` must match the in-memory value. After a startup
+/// that could not read settings.json, the in-memory value is the
+/// `false` default while the file may still say `true` — decrypting
+/// on that default would undo the user's encryption, so the value
+/// counts as not authoritative. A missing or unparsable file says
+/// nothing about the profiles on disk, matching the startup batch.
+fn settings_encrypt_authoritative(app_data_dir: &Path, encrypt: bool) -> bool {
+    let settings_file = app_data_dir.join("settings.json");
+    match std::fs::read_to_string(&settings_file) {
+        Ok(content) => serde_json::from_str::<crate::Settings>(&content)
+            .is_ok_and(|on_disk| on_disk.encrypt_configs == encrypt),
+        Err(_) => false,
+    }
+}
+
+/// Move profiles the sanitizer refused into quarantine, where nothing
+/// loads them from, and describe what happened for the result message.
+/// Returns `None` when there is nothing to quarantine. A profile that
+/// could not be moved is removed from the live profiles dir instead:
+/// its original survives in the backup archive, and leaving it would
+/// keep its dangerous content live at runtime. When even the removal
+/// fails, the import fails: a refused profile must never be silently
+/// left live behind a success message.
+fn quarantine_unsanitized(
+    app_data_dir: &Path,
+    failed: &[PathBuf],
+) -> Result<Option<String>, String> {
+    if failed.is_empty() {
+        return Ok(None);
+    }
+    let quarantine_dir = app_data_dir.join("quarantine");
+    let mut quarantined = 0usize;
+    let mut removed = 0usize;
+    let mut left: Vec<PathBuf> = Vec::new();
+    for path in failed {
+        // `rename` overwrites on Unix: a second failed profile with the
+        // same file name would silently replace the first copy. Pick a
+        // free name first, so every failed profile is actually preserved.
+        let moved = match path.file_name() {
+            Some(name) => {
+                std::fs::create_dir_all(&quarantine_dir).is_ok()
+                    && std::fs::rename(path, quarantine_target(&quarantine_dir, name)).is_ok()
+            }
+            None => false,
+        };
+        if moved {
+            quarantined += 1;
+        } else if std::fs::remove_file(path).is_ok() {
+            removed += 1;
+        } else {
+            left.push(path.clone());
+        }
+    }
+    if !left.is_empty() {
+        return Err(format!(
+            "{} refused profile(s) could not be quarantined or removed and remain in the profiles directory: {}",
+            left.len(),
+            left.iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    Ok(Some(if removed == 0 {
+        format!(
+            "{} imported encrypted profile(s) could not be sanitized and were moved to quarantine",
+            failed.len()
+        )
+    } else {
+        format!(
+            "{} imported encrypted profile(s) could not be sanitized ({} moved to quarantine, {} removed from the profiles directory)",
+            failed.len(),
+            quarantined,
+            removed
+        )
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1044,6 +1380,148 @@ mod tests {
         assert!(!is_safe_archive_path("C:\\Windows\\system32"));
         assert!(!is_safe_archive_path("profiles\\sub.yaml"));
         assert!(!is_safe_archive_path("profiles/\0sub.yaml"));
+    }
+
+    #[test]
+    fn test_quarantine_target_uniquifies() {
+        // `rename` overwrites on Unix: without a free name, a second
+        // failed profile with the same file name would silently
+        // replace the first copy.
+        let dir =
+            std::env::temp_dir().join(format!("zephyr_test_quarantine_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = std::ffi::OsStr::new("profile.yaml");
+        assert_eq!(quarantine_target(&dir, name), dir.join("profile.yaml"));
+        std::fs::write(dir.join("profile.yaml"), b"").unwrap();
+        assert_eq!(quarantine_target(&dir, name), dir.join("profile (1).yaml"));
+        std::fs::write(dir.join("profile (1).yaml"), b"").unwrap();
+        assert_eq!(quarantine_target(&dir, name), dir.join("profile (2).yaml"));
+        // No extension: the counter goes at the end of the name.
+        let plain = std::ffi::OsStr::new("README");
+        std::fs::write(dir.join("README"), b"").unwrap();
+        assert_eq!(quarantine_target(&dir, plain), dir.join("README (1)"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_settings_encrypt_authoritative() {
+        let dir =
+            std::env::temp_dir().join(format!("zephyr_test_settings_auth_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write_settings = |encrypt: bool| {
+            let mut value = serde_json::to_value(crate::Settings::default()).unwrap();
+            value["encrypt_configs"] = serde_json::json!(encrypt);
+            std::fs::write(
+                dir.join("settings.json"),
+                serde_json::to_string(&value).unwrap(),
+            )
+            .unwrap();
+        };
+
+        // Missing file: nothing on disk confirms the in-memory value.
+        assert!(!settings_encrypt_authoritative(&dir, false));
+        assert!(!settings_encrypt_authoritative(&dir, true));
+
+        // File agrees with the in-memory value: authoritative.
+        write_settings(true);
+        assert!(settings_encrypt_authoritative(&dir, true));
+        assert!(!settings_encrypt_authoritative(&dir, false));
+
+        // File disagrees: the in-memory value is the
+        // unreadable-settings default, not the user's setting.
+        write_settings(false);
+        assert!(settings_encrypt_authoritative(&dir, false));
+        assert!(!settings_encrypt_authoritative(&dir, true));
+
+        // Unparsable file: not authoritative either way.
+        std::fs::write(dir.join("settings.json"), "{not json").unwrap();
+        assert!(!settings_encrypt_authoritative(&dir, false));
+        assert!(!settings_encrypt_authoritative(&dir, true));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_quarantine_unsanitized_moves_to_quarantine() {
+        let dir = std::env::temp_dir().join(format!(
+            "zephyr_test_quarantine_move_{}",
+            std::process::id()
+        ));
+        let profiles = dir.join("profiles");
+        std::fs::create_dir_all(&profiles).unwrap();
+        let bad = profiles.join("bad.yaml");
+        std::fs::write(&bad, b"danger").unwrap();
+
+        let result = quarantine_unsanitized(&dir, std::slice::from_ref(&bad));
+        assert!(result.is_ok());
+        let warning = result.unwrap();
+        assert!(warning.is_some());
+        assert!(warning.unwrap().contains("moved to quarantine"));
+        assert!(!bad.exists());
+        assert!(dir.join("quarantine").join("bad.yaml").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_quarantine_unsanitized_removes_when_move_fails() {
+        // `app_data_dir` as a file: creating the quarantine dir under
+        // it fails, so the move fails; the profile is removed instead
+        // and the import can still succeed with a warning.
+        let dir = std::env::temp_dir().join(format!(
+            "zephyr_test_quarantine_remove_{}",
+            std::process::id()
+        ));
+        let profiles = dir.join("profiles");
+        std::fs::create_dir_all(&profiles).unwrap();
+        let bad = profiles.join("bad.yaml");
+        std::fs::write(&bad, b"danger").unwrap();
+        let app_data_as_file = dir.join("app_data");
+        std::fs::write(&app_data_as_file, b"not a dir").unwrap();
+
+        let result = quarantine_unsanitized(&app_data_as_file, std::slice::from_ref(&bad));
+        assert!(result.is_ok());
+        let warning = result.unwrap().unwrap();
+        assert!(warning.contains("removed from the profiles directory"));
+        assert!(!bad.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_quarantine_unsanitized_fails_when_remove_fails() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!(
+            "zephyr_test_quarantine_fail_{}",
+            std::process::id()
+        ));
+        let profiles = dir.join("profiles");
+        std::fs::create_dir_all(&profiles).unwrap();
+        let bad = profiles.join("bad.yaml");
+        std::fs::write(&bad, b"danger").unwrap();
+        // A read-only profiles dir blocks both the move (rename out
+        // of it) and the removal: the refused profile cannot be taken
+        // out of the live dir, so the import must fail.
+        std::fs::set_permissions(&profiles, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // Root ignores the read-only bits: if a probe write still
+        // succeeds, permissions are not enforced here and the failure
+        // cannot be observed — skip rather than assert a false negative.
+        let probe = profiles.join(".probe");
+        if std::fs::write(&probe, b"").is_ok() {
+            let _ = std::fs::remove_file(&probe);
+            std::fs::set_permissions(&profiles, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let result = quarantine_unsanitized(&dir, std::slice::from_ref(&bad));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("remain in the profiles directory"));
+        assert!(bad.exists());
+        std::fs::set_permissions(&profiles, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
