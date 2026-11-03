@@ -455,7 +455,10 @@ fn normalize_path(path: &Path) -> PathBuf {
                 normalized.push(component);
             }
             Component::ParentDir => {
-                if matches!(normalized.components().next_back(), Some(Component::Normal(..))) {
+                if matches!(
+                    normalized.components().next_back(),
+                    Some(Component::Normal(..))
+                ) {
                     normalized.pop();
                 } else {
                     normalized.push(component);
@@ -484,11 +487,14 @@ pub fn validate_path_within_dir(
     if let Ok(canonical_base) = base_dir.canonicalize() {
         if resolved_path.exists() {
             let canonical_resolved = resolved_path.canonicalize().map_err(|e| {
-                crate::error::AppError::IoError(format!("Failed to canonicalize resolved path: {e}"))
+                crate::error::AppError::IoError(format!(
+                    "Failed to canonicalize resolved path: {e}"
+                ))
             })?;
             if !canonical_resolved.starts_with(&canonical_base) {
                 return Err(crate::error::AppError::ConfigError(
-                    "Path traversal detected: resolved path is outside allowed directory".to_owned(),
+                    "Path traversal detected: resolved path is outside allowed directory"
+                        .to_owned(),
                 ));
             }
         } else {
@@ -507,7 +513,8 @@ pub fn validate_path_within_dir(
                 })?;
                 if !canonical_ancestor.starts_with(&canonical_base) {
                     return Err(crate::error::AppError::ConfigError(
-                        "Path traversal detected: resolved path is outside allowed directory".to_owned(),
+                        "Path traversal detected: resolved path is outside allowed directory"
+                            .to_owned(),
                     ));
                 }
             }
@@ -977,18 +984,40 @@ proxies:
         let base = Path::new("/var/app/profiles");
 
         // Valid inside paths
-        assert!(validate_path_within_dir(Path::new("/var/app/profiles/profile.yaml"), base).is_ok());
-        assert!(validate_path_within_dir(Path::new("/var/app/profiles/sub/profile.yaml"), base).is_ok());
-        assert!(validate_path_within_dir(Path::new("/var/app/profiles/./profile.yaml"), base).is_ok());
-        assert!(validate_path_within_dir(Path::new("/var/app/profiles/sub/../profile.yaml"), base).is_ok());
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles/profile.yaml"), base).is_ok()
+        );
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles/sub/profile.yaml"), base).is_ok()
+        );
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles/./profile.yaml"), base).is_ok()
+        );
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles/sub/../profile.yaml"), base)
+                .is_ok()
+        );
 
         // Rejection of sibling prefix collision (e.g. profiles_evil or profiles-bak)
-        assert!(validate_path_within_dir(Path::new("/var/app/profiles_evil/profile.yaml"), base).is_err());
-        assert!(validate_path_within_dir(Path::new("/var/app/profiles-bak/profile.yaml"), base).is_err());
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles_evil/profile.yaml"), base)
+                .is_err()
+        );
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles-bak/profile.yaml"), base)
+                .is_err()
+        );
 
         // Rejection of traversal escaping base
-        assert!(validate_path_within_dir(Path::new("/var/app/profiles/../../etc/passwd"), base).is_err());
-        assert!(validate_path_within_dir(Path::new("/var/app/profiles/sub/../../other.yaml"), base).is_err());
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles/../../etc/passwd"), base)
+                .is_err()
+        );
+        assert!(validate_path_within_dir(
+            Path::new("/var/app/profiles/sub/../../other.yaml"),
+            base
+        )
+        .is_err());
         assert!(validate_path_within_dir(Path::new("/var/app/other.yaml"), base).is_err());
     }
 
