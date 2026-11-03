@@ -444,6 +444,50 @@ fn get_bundled_dir(app: &AppHandle) -> Option<PathBuf> {
     bundled_dir.exists().then_some(bundled_dir)
 }
 
+/// Record of legacy file names already migrated, kept in
+/// `app_data_dir` so a profile the user deleted is not copied back
+/// from its intact legacy source on the next `ensure_app_storage`
+/// call. The migration copies (it never removes the legacy source),
+/// and it runs on every storage lookup, so without this record a
+/// deleted profile would come back at the next start.
+const LEGACY_MIGRATED_RECORD: &str = ".legacy-migrated.json";
+
+fn load_legacy_migrated_record(
+    app_data_dir: &std::path::Path,
+) -> std::collections::HashSet<String> {
+    std::fs::read_to_string(app_data_dir.join(LEGACY_MIGRATED_RECORD))
+        .ok()
+        .and_then(|content| serde_json::from_str::<Vec<String>>(&content).ok())
+        .map(|names| names.into_iter().collect())
+        .unwrap_or_default()
+}
+
+fn save_legacy_migrated_record(
+    app_data_dir: &std::path::Path,
+    names: &std::collections::HashSet<String>,
+) {
+    let mut sorted: Vec<&String> = names.iter().collect();
+    sorted.sort();
+    // Best effort: a failed write only means the next run may copy a
+    // deleted profile back once, which is the previous behavior.
+    let Ok(content) = serde_json::to_string(&sorted) else {
+        return;
+    };
+    // Write to a temporary file and rename it into place: a crash
+    // mid-write would otherwise leave a truncated record, which the
+    // loader reads as empty — and every deleted profile would come
+    // back from its legacy source on the next run.
+    let record_path = app_data_dir.join(LEGACY_MIGRATED_RECORD);
+    let tmp_path = app_data_dir.join(format!("{LEGACY_MIGRATED_RECORD}.tmp"));
+    if std::fs::write(&tmp_path, &content).is_ok()
+        && std::fs::rename(&tmp_path, &record_path).is_ok()
+    {
+        return;
+    }
+    let _ = std::fs::remove_file(&tmp_path);
+    let _ = std::fs::write(&record_path, content);
+}
+
 fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String> {
     // Portable mode: no migration needed, core files are already in the exe directory
     if is_portable_mode() {
@@ -499,6 +543,12 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
         }
     }
 
+    // Names already migrated from a legacy directory (see the record
+    // helpers above): a profile the user deleted must not be copied
+    // back from its intact legacy source.
+    let mut migrated_record = load_legacy_migrated_record(&paths.app_data_dir);
+    let mut record_changed = false;
+
     // Then, check legacy core directories (for development)
     for candidate in legacy_core_candidates()? {
         if candidate == paths.core_dir || !candidate.exists() {
@@ -521,14 +571,20 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
                 None => continue,
             };
 
-            if file_name.eq_ignore_ascii_case("run_config.yaml") {
+            // Only the exact `run_config.yaml` is the generated
+            // runtime file: a case variant such as `RUN_CONFIG.YAML`
+            // is an ordinary user profile and must be migrated like
+            // any other.
+            if file_name == "run_config.yaml" {
                 continue;
             }
 
             let is_profile = source
                 .extension()
-                .map(|ext| ext == "yaml" || ext == "yml")
-                .unwrap_or(false);
+                .and_then(std::ffi::OsStr::to_str)
+                .is_some_and(|ext| {
+                    ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml")
+                });
 
             let target = if is_profile {
                 paths.profiles_dir.join(file_name)
@@ -537,11 +593,48 @@ fn migrate_legacy_assets(app: &AppHandle, paths: &AppPaths) -> Result<(), String
             };
 
             if target.exists() {
+                // Already present at the target: the legacy copy is
+                // redundant. Record it too, so a profile migrated by
+                // an older build (which kept no record) does not come
+                // back from the legacy source after the user deletes
+                // it. Only a file counts: a directory at the target
+                // path means the legacy file was never migrated, and
+                // recording it would skip the intact source if the
+                // directory is later removed.
+                if target.is_file() && migrated_record.insert(file_name.to_owned()) {
+                    record_changed = true;
+                }
                 continue;
             }
 
-            fs::copy(&source, &target).map_err(|e| format!("Failed to migrate {source:?}: {e}"))?;
+            // Already migrated once and since deleted: respect the
+            // deletion instead of copying the legacy source back.
+            // Only profiles get this treatment: a non-profile asset
+            // (such as the core binary) that is lost after migration
+            // must be restored from the legacy source, or an
+            // unbundled install would fail to start with no
+            // alternate binary.
+            if is_profile && migrated_record.contains(file_name) {
+                continue;
+            }
+
+            if let Err(e) = fs::copy(&source, &target) {
+                // Save what migrated so far before failing: otherwise
+                // a profile copied earlier in this run is not in the
+                // record, and deleting it would let the next run copy
+                // it back from its legacy source.
+                if record_changed {
+                    save_legacy_migrated_record(&paths.app_data_dir, &migrated_record);
+                }
+                return Err(format!("Failed to migrate {source:?}: {e}"));
+            }
+            migrated_record.insert(file_name.to_owned());
+            record_changed = true;
         }
+    }
+
+    if record_changed {
+        save_legacy_migrated_record(&paths.app_data_dir, &migrated_record);
     }
 
     Ok(())
@@ -651,8 +744,8 @@ pub(crate) fn first_available_profile(paths: &AppPaths) -> Option<PathBuf> {
         let path = entry.path();
         let is_yaml = path
             .extension()
-            .map(|ext| ext == "yaml" || ext == "yml")
-            .unwrap_or(false);
+            .and_then(std::ffi::OsStr::to_str)
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         let is_run_config = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -825,6 +918,14 @@ pub fn prepare_runtime_config(
     if !yaml_val.is_mapping() {
         return None;
     }
+
+    // Strip unauthenticated control surfaces before use: a profile
+    // (subscription, manual save, or a legacy file migrated from the
+    // old location) can carry `external-controller-unix`, which
+    // mihomo would serve without the secret check. The TCP
+    // `external-controller` and `secret` are managed below, so they
+    // are intentionally left alone here.
+    zephyr_core::config::sanitizer::remove_control_plane_keys(&mut yaml_val);
 
     let config_port = parse_external_controller_port(&yaml_val);
     if let Some(mapping) = yaml_val.as_mapping_mut() {
@@ -1013,8 +1114,8 @@ fn select_runtime_config(
         let path = entry.path();
         let is_yaml = path
             .extension()
-            .map(|ext| ext == "yaml" || ext == "yml")
-            .unwrap_or(false);
+            .and_then(std::ffi::OsStr::to_str)
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
         let is_run_config = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -2935,6 +3036,27 @@ mod tests {
     }
 
     #[test]
+    fn first_available_profile_recognizes_uppercase_extensions() {
+        let dir =
+            std::env::temp_dir().join(format!("zephyr-first-profile-upper-{}", std::process::id()));
+        let profiles_dir = dir.join("profiles");
+        fs::create_dir_all(&profiles_dir).unwrap();
+        fs::write(profiles_dir.join("bar.YAML"), "port: 7890\n").unwrap();
+        let paths = AppPaths {
+            app_data_dir: dir.clone(),
+            core_dir: dir.join("core"),
+            profiles_dir: profiles_dir.clone(),
+        };
+        // An uppercase-extension profile is a valid profile: it must
+        // be picked up as the replacement selection, not skipped.
+        assert_eq!(
+            first_available_profile(&paths).as_deref(),
+            Some(profiles_dir.join("bar.YAML").as_path())
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn test_core_binary_name() {
         let name = core_binary_name();
         #[cfg(target_os = "windows")]
@@ -2976,6 +3098,41 @@ mod tests {
         assert!(prepared.contains("external-controller: 127.0.0.1:7897"));
         assert!(prepared.contains("secret: new-secret"));
         assert!(!prepared.contains("secret: old"));
+    }
+
+    #[test]
+    fn prepare_runtime_config_strips_unauthenticated_control_surfaces() {
+        let config = "external-controller-unix: /tmp/evil.sock\nexternal-ui: /tmp/ui\nmode: rule\n";
+        let (prepared, api_port, _) = prepare_runtime_config(config, "s", None).unwrap();
+
+        assert_eq!(api_port, 9090);
+        assert!(!prepared.contains("external-controller-unix"));
+        assert!(!prepared.contains("/tmp/evil.sock"));
+        assert!(!prepared.contains("external-ui"));
+        assert!(prepared.contains("external-controller: 127.0.0.1:9090"));
+        assert!(prepared.contains("secret: s"));
+    }
+
+    #[test]
+    fn legacy_migrated_record_round_trips() {
+        let unique = format!("zephyr_test_migrated_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut names = std::collections::HashSet::new();
+        names.insert("Work.YAML".to_owned());
+        names.insert("foo.yaml".to_owned());
+        save_legacy_migrated_record(&dir, &names);
+        assert_eq!(load_legacy_migrated_record(&dir), names);
+        // The atomic write leaves no temporary file behind.
+        assert!(!dir.join(".legacy-migrated.json.tmp").exists());
+        // A missing or corrupt record loads as empty, not an error:
+        // the migration then proceeds as before (a deleted profile
+        // may be copied back once).
+        let _ = std::fs::remove_file(dir.join(".legacy-migrated.json"));
+        assert!(load_legacy_migrated_record(&dir).is_empty());
+        std::fs::write(dir.join(".legacy-migrated.json"), "not json").unwrap();
+        assert!(load_legacy_migrated_record(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

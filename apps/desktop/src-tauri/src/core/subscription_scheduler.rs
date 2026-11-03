@@ -277,7 +277,7 @@ async fn check_and_update_subscriptions(
         .unwrap_or(0);
 
     // Collect subscriptions that need updating, with per-subscription UA override
-    let to_update: Vec<(String, String, Option<String>)> = metadata
+    let mut to_update: Vec<(String, String, Option<String>)> = metadata
         .configs
         .iter()
         .filter_map(|(name, meta)| {
@@ -307,6 +307,24 @@ async fn check_and_update_subscriptions(
             })
         })
         .collect();
+
+    // One profile, one download: metadata can hold two keys for the
+    // same file (a case-variant alias left by an earlier overwrite),
+    // and both pass the exists() check above on a case-insensitive
+    // volume. Collapse them by filesystem identity so the same file
+    // is not downloaded twice in one pass.
+    {
+        let mut seen: std::collections::HashSet<std::path::PathBuf> =
+            std::collections::HashSet::new();
+        to_update.retain(|(name, _, _)| {
+            let resolved = paths
+                .profiles_dir
+                .join(name)
+                .canonicalize()
+                .unwrap_or_else(|_| paths.profiles_dir.join(name));
+            seen.insert(resolved)
+        });
+    }
 
     if to_update.is_empty() {
         return Ok(0);
