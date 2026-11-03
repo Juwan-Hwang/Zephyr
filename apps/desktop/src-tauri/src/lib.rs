@@ -1152,7 +1152,9 @@ fn patch_settings_blocking(
             let result = if authoritative {
                 encrypt_all_profiles(&profiles_dir)
             } else {
-                decrypt_all_profiles(&profiles_dir)
+                // No file is sanitized here (`None`), so the refused
+                // list is always empty; only the error matters.
+                decrypt_all_profiles(&profiles_dir, None).0
             };
             drop(transform_guard);
             match result {
@@ -1909,7 +1911,10 @@ pub fn run() {
                     let result = if encrypt {
                         encrypt_all_profiles(&profiles_dir)
                     } else {
-                        decrypt_all_profiles(&profiles_dir)
+                        // Startup reconciliation never sanitizes
+                        // (`None`), so the refused list is always
+                        // empty; only the error matters.
+                        decrypt_all_profiles(&profiles_dir, None).0
                     };
                     drop(transform_guard);
                     if let Err(e) = result {

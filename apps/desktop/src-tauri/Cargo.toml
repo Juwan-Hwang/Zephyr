@@ -63,6 +63,7 @@ toml = "1.1"
 dashmap = "6.0"
 minisign = "0.9"
 arboard = "3.3"
+unicode-normalization = "0.1"
 
 [target.'cfg(unix)'.dependencies]
 # Force upgrade glib to address known vulnerability (indirect dep via webkit2gtk/gtk on Linux/macOS)
