@@ -398,7 +398,7 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
     // Phase 1-4: Validate and stage (on blocking thread)
     let paths_clone = paths.clone();
     let staging_result =
-        tokio::task::spawn_blocking(move || -> Result<(BackupManifest, PathBuf), String> {
+        tokio::task::spawn_blocking(move || -> Result<(BackupManifest, PathBuf, Option<crate::Settings>), String> {
             // Open the archive
             let file = fs::File::open(&open_path)
                 .map_err(|e| format!("Failed to open backup file: {e}"))?;
@@ -437,7 +437,8 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
             // Extract and validate each file inside a closure so that any
             // error triggers a single, centralized cleanup of the staging dir.
             let mut total_uncompressed: u64 = 0;
-            let mut extract_all = || -> Result<(), String> {
+            let mut extract_all = || -> Result<Option<crate::Settings>, String> {
+                let mut staged_settings: Option<crate::Settings> = None;
                 for entry in &manifest.files {
                     if !is_safe_archive_path(&entry.path) {
                         return Err(format!("Unsafe path in backup archive: {}", entry.path));
@@ -566,31 +567,41 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
                         }
                     }
 
-                    // Validate settings.json structure before commit so a
-                    // corrupt archive doesn't overwrite the user's working
-                    // settings file.
+                    // Validate settings.json before commit so a corrupt
+                    // archive doesn't overwrite the user's working
+                    // settings file. Convert to `Settings` here, in the
+                    // staging phase: the migration chain runs on the
+                    // converted value (see `migrate_settings`), so a
+                    // type mismatch fails the import either way — doing
+                    // it here fails before any file is replaced, and the
+                    // file is parsed once instead of twice.
                     if entry.path == "settings.json" {
                         let content = fs::read_to_string(&dest_path)
                             .map_err(|e| format!("Failed to read extracted settings.json: {e}"))?;
-                        // Validate that settings.json is syntactically valid JSON.
-                        // We use serde_json::Value (not Settings) here because
-                        // older backups may have a different schema version that
-                        // wouldn't deserialize into Settings directly. The
-                        // migration chain handles schema upgrades during reload.
-                        if serde_json::from_str::<serde_json::Value>(&content).is_err() {
-                            return Err("Extracted settings.json is not valid JSON".to_owned());
-                        }
+                        let value = serde_json::from_str::<serde_json::Value>(&content).map_err(
+                            |e| format!("Extracted settings.json is not valid JSON: {e}"),
+                        )?;
+                        staged_settings = Some(
+                            serde_json::from_value::<crate::Settings>(value).map_err(|e| {
+                                format!(
+                                    "Staged settings.json is incompatible with the current Settings schema: {e}"
+                                )
+                            })?,
+                        );
                     }
                 }
-                Ok(())
+                Ok(staged_settings)
             };
 
-            if let Err(e) = extract_all() {
-                let _ = fs::remove_dir_all(&staging_dir);
-                return Err(e);
-            }
+            let staged_settings = match extract_all() {
+                Ok(settings) => settings,
+                Err(e) => {
+                    let _ = fs::remove_dir_all(&staging_dir);
+                    return Err(e);
+                }
+            };
 
-            Ok((manifest, staging_dir))
+            Ok((manifest, staging_dir, staged_settings))
         })
         .await
         .map_err(|e| format!("Import task failed: {e}"))?;
@@ -599,17 +610,85 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
     // All blocking I/O (create_dir_all, atomic_rename, restore_rollback,
     // remove_dir_all) runs inside spawn_blocking to avoid blocking the
     // Tokio async executor.
-    let (manifest, staging_dir) = match staging_result {
+    let (manifest, staging_dir, validated_settings) = match staging_result {
         Ok(res) => res,
         Err(e) => return Err(e),
     };
 
     let file_count = manifest.files.len();
     let app_version = manifest.app_version.clone();
-    let has_settings = manifest.files.iter().any(|f| f.path == "settings.json");
+    // Only the profiles this import delivered are sanitized when the
+    // reconciliation decrypts them: pre-existing encrypted profiles
+    // are the user's own configuration, encrypted from disk as-is —
+    // sanitizing them would strip keys the user configured and discard
+    // ordinary comments. Built from the same destination map the
+    // commit uses, so these are exactly the files the import placed.
+    // (Built here because the commit closure below moves `manifest`.)
+    let imported_profiles: std::collections::HashSet<PathBuf> = build_dest_map(&paths, &manifest)
+        .into_iter()
+        .filter(|(rel, _)| rel.starts_with("profiles/"))
+        .map(|(_, dest)| dest)
+        .collect();
+    // The staged settings were already converted to `Settings` during
+    // staging (see above), before any file was replaced: a field type
+    // incompatible with `Settings` fails the import before the commit
+    // instead of after it, and the file is parsed once. The validated
+    // value is reused for the reload below.
+    // Refuse to enable encryption when the machine key is session-only:
+    // `patch_settings` refuses the same toggle for the same reason (a
+    // session key is gone at the next start, so encrypting with it
+    // would make every plaintext profile unrecoverable), and the
+    // post-commit reconciliation can only warn and skip — the import
+    // would otherwise report success while the setting claims
+    // encryption is on and the profiles stay plaintext. The check
+    // looks only at the imported value and the key: whether
+    // encryption was already on before the import does not change
+    // anything — with no persisted key the imported on-state cannot
+    // be honored either way, so an already-on setting must not let
+    // the import slip past.
+    if let Some(settings) = &validated_settings {
+        if settings.encrypt_configs
+            && !crate::core_manager::core::crypto::is_machine_key_persisted()
+        {
+            let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+            return Err("Cannot enable config encryption: machine key is not persisted. Encrypted data would be lost on restart."
+                .to_owned());
+        }
+    }
     let paths_clone = paths.clone();
+    // The settings lock for the commit closure below; absent when the
+    // state was never registered (then there is nothing to serialize).
+    let commit_settings_arc = app
+        .try_state::<SettingsState>()
+        .map(|state| std::sync::Arc::clone(&state.0));
 
     let commit_result = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Hold the profile-transform guard across the whole commit: a
+        // concurrent profile delete verifies the removal and retries
+        // under this guard, so publishing a restored profile mid-delete
+        // would let the retry delete the file the restore just reported
+        // as restored. The commit itself is only renames (the
+        // extraction already ran), so holding the guard here is cheap.
+        let _transform_guard = crate::lock_profile_transform();
+        // Serialize settings saves with the import: a save that lands
+        // after the settings.json backup but before the staged install
+        // would be overwritten by the import. Settings saves take the
+        // settings lock, so holding it across the commit (after the
+        // transform guard, matching every other writer) keeps them out
+        // until the new file is in place. The guard is held through
+        // the settings reload below, so no save can land between the
+        // file swap and the in-memory publish either.
+        let mut settings_guard = commit_settings_arc
+            .as_ref()
+            .map(|arc| arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        // Hold the metadata lock across the commit too: the import
+        // installs a new metadata.json, and a metadata writer (the
+        // listing cleanup, a subscription save) that lands mid-commit
+        // would read the old file and save it back over the imported
+        // one. Taken after the settings guard, matching the global
+        // transform → settings → metadata order.
+        let _metadata_guard = crate::core_manager::core::crypto::lock_metadata();
+
         // Back up current files, then swap — use UUID for the rollback
         // directory name to avoid collisions and improve predictability.
         let backup_dir = paths_clone
@@ -721,6 +800,27 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
         // Success — clean up
         let _ = fs::remove_dir_all(&staging_dir);
         let _ = fs::remove_dir_all(&backup_dir);
+
+        // Publish the validated settings (see the pre-commit
+        // validation above) while still holding the settings lock:
+        // a save landing between the commit and the reload would
+        // overwrite the imported file with stale in-memory values,
+        // and the reload would then publish those stale values as
+        // the import's result. The staged file was already converted
+        // to `Settings` before any file was replaced, so this step
+        // cannot fail on an incompatible schema; `migrate_settings`
+        // runs the schema migration and writes the result back to
+        // the installed file, as before.
+        if let Some(new_settings) = validated_settings {
+            if let Some(guard) = settings_guard.as_deref_mut() {
+                let settings_file = paths_clone.app_data_dir.join("settings.json");
+                *guard = crate::migrate_settings(new_settings, &settings_file);
+            }
+        }
+        // Release the settings lock explicitly: its last use is the
+        // reload assignment above, and holding it to the end of the
+        // closure would trip clippy's significant-drop-tightening lint.
+        drop(settings_guard);
         Ok(())
     })
     .await
@@ -728,53 +828,71 @@ pub async fn import_backup(app: AppHandle) -> Result<String, String> {
 
     commit_result?;
 
-    // Reload SettingsState from the newly imported settings.json to
-    // prevent the in-memory state from overwriting the imported file.
-    // Run migrate_settings to handle backups from older schema versions.
-    //
-    // We deserialize to serde_json::Value first, then convert to Settings.
-    // This avoids a fragile dependency on direct deserialization: if a
-    // future schema migration introduces a breaking change (e.g., changing
-    // a field type), direct from_str::<Settings> would fail and bypass
-    // the migration chain entirely. Deserializing to Value first allows
-    // us to run migrations on the JSON before converting to Settings.
-    //
-    // All file I/O (read_to_string, migrate_settings write) runs inside
-    // spawn_blocking to avoid blocking the async executor.
-    if let Some(settings_state) = app.try_state::<SettingsState>() {
-        // Only reload SettingsState if the manifest actually contained
-        // settings.json. A backup may legitimately omit it (e.g., a fresh
-        // install that never persisted settings), and in that case the
-        // in-memory settings should remain unchanged.
-        if has_settings {
-            let settings_arc = std::sync::Arc::clone(&settings_state.0);
-            let settings_file = paths.app_data_dir.join("settings.json");
-
-            let reload_result =
-                tokio::task::spawn_blocking(move || -> Result<crate::Settings, String> {
-                    if !settings_file.exists() {
-                        return Err("settings.json does not exist after import".to_owned());
-                    }
-                    let content = fs::read_to_string(&settings_file)
-                        .map_err(|e| format!("Failed to read settings.json: {e}"))?;
-                    let value = serde_json::from_str::<serde_json::Value>(&content)
-                        .map_err(|e| format!("Failed to parse settings JSON: {e}"))?;
-                    // Try converting to Settings; if that fails (e.g., due
-                    // to a type mismatch in a future schema), return Err to
-                    // avoid overwriting the file on disk with defaults.
-                    let new_settings = serde_json::from_value::<crate::Settings>(value)
-                        .map_err(|e| format!("Failed to convert JSON to Settings: {e}"))?;
-                    Ok(crate::migrate_settings(new_settings, &settings_file))
-                })
-                .await
-                .map_err(|e| format!("Reload task panicked: {e}"))??;
-
-            let mut guard = settings_arc
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            *guard = reload_result;
+    // Reconcile the surviving profiles with the imported
+    // `encrypt_configs` setting: profiles omitted from the archive
+    // keep their old encryption state, so an import that enables
+    // encryption would otherwise report it as on while plaintext
+    // profiles remain (and vice versa). Both batches skip files
+    // already in the target state, so this is a no-op once they
+    // agree. Runs after the commit (the files are in place) and
+    // after the reload (the authoritative value is the imported
+    // one), and the import only reports success once it completes.
+    // A failure only warns: the files were already committed, and
+    // the startup batch finishes the job on the next start. Runs
+    // whether or not the backup carries settings: a profile-only
+    // import leaves the current setting in force, and the restored
+    // plaintext profiles would otherwise stay plaintext while the
+    // app reports encryption as on.
+    let reconcile_app = app.clone();
+    let reconcile_paths = paths.clone();
+    tokio::task::spawn_blocking(move || {
+        let _transform_guard = crate::lock_profile_transform();
+        // Read under the transform lock, as `patch_settings` and
+        // the startup batch do, so a concurrent toggle cannot be
+        // undone by a stale value.
+        let encrypt =
+            crate::core_manager::core::crypto::authoritative_encrypt_configs(&reconcile_app);
+        // Same rule as `patch_settings`: a session-only key is
+        // gone at the next start, so encrypting with it would make
+        // every plaintext profile unrecoverable. Decrypting
+        // carries no such risk.
+        if encrypt && !crate::core_manager::core::crypto::is_machine_key_persisted() {
+            crate::emit_warn!(
+                Config,
+                CONFIG_ENCRYPT_FAILED,
+                "Skipped profile encryption after import: the machine key is not persisted"
+            );
+            return;
         }
-    }
+        let result = if encrypt {
+            crate::core_manager::core::crypto::encrypt_all_profiles(&reconcile_paths.profiles_dir)
+        } else {
+            // Only profiles this import delivered are sanitized on
+            // decrypt (see `imported_profiles` above); pre-existing
+            // encrypted profiles decrypt as-is.
+            crate::core_manager::core::crypto::decrypt_all_profiles(
+                &reconcile_paths.profiles_dir,
+                Some(&imported_profiles),
+            )
+        };
+        if let Err(e) = result {
+            if encrypt {
+                crate::emit_warn!(
+                    Config,
+                    CONFIG_ENCRYPT_FAILED,
+                    "Failed to encrypt some profiles after import: {e}"
+                );
+            } else {
+                crate::emit_warn!(
+                    Config,
+                    CONFIG_DECRYPT_FAILED,
+                    "Failed to decrypt some profiles after import: {e}"
+                );
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("Encryption reconciliation task failed: {e}"))?;
 
     Ok(format!(
         "Backup restored successfully ({file_count} files from v{app_version})"
