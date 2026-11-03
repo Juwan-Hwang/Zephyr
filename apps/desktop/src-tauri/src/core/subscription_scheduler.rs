@@ -217,6 +217,129 @@ async fn run_scheduler_loop(app: AppHandle, state: Arc<SchedulerState>) {
 const RESTORE_DEFERRAL_ERROR: &str =
     "Deferred subscription update: global mode restore marker is still pending";
 
+/// Collect the subscriptions due for an update, with per-subscription UA override.
+///
+/// Metadata can hold two keys for the same file (a case-variant alias
+/// left by an earlier overwrite), and both pass the `exists()` check
+/// below on a case-insensitive volume. Group by filesystem identity
+/// first and keep, per file, the record stored under the spelling
+/// the file actually has on disk: an alias can carry a stale URL and
+/// interval, and downloading from it would also delete the current
+/// record. Only when no candidate matches the on-disk spelling is
+/// the first one seen kept.
+///
+/// A record with no URL or a zero interval still groups: it claims
+/// its file so a stale alias cannot win it — but it never downloads
+/// itself, so the due-check below drops it. (Skipping such records
+/// before grouping let a stale alias win the file and download over
+/// the disabled profile.) The due-check then runs on the winning
+/// record's values, so a stale alias can neither trigger a download
+/// of its old URL nor suppress the current record's own schedule.
+/// One metadata record competing for a file: (name, url, user agent,
+/// auto-update interval in seconds, last update timestamp).
+type SubscriptionCandidate = (String, Option<String>, Option<String>, u64, u64);
+
+fn collect_due_subscription_updates(
+    metadata: &super::crypto::ProfilesMetadata,
+    profiles_dir: &std::path::Path,
+    global_user_agent: &Option<String>,
+    now: u64,
+) -> Vec<(String, String, Option<String>)> {
+    let mut by_file: std::collections::HashMap<std::path::PathBuf, SubscriptionCandidate> =
+        std::collections::HashMap::new();
+    // Sort by name first: HashMap iteration order is arbitrary per
+    // process, and the alias fallback below keeps the first one seen,
+    // so an unsorted pass would pick a different winner on different
+    // runs. The lexicographically smallest alias wins deterministically.
+    let mut entries: Vec<_> = metadata.configs.iter().collect();
+    entries.sort_by_key(|(a, _)| *a);
+    for (name, meta) in entries {
+        // No URL or no interval does not skip the record here:
+        // it still groups below, so it can claim its file and keep
+        // a stale alias from winning it — the due-check at the end
+        // drops it, so it never downloads itself.
+        let url = meta.url.clone();
+        let interval_secs = meta.auto_update_interval.unwrap_or(0);
+
+        // Skip if file doesn't exist (stale metadata entry)
+        if !profiles_dir.join(name).exists() {
+            continue;
+        }
+
+        // Group by directory-entry identity, not by resolved target:
+        // a symlink entry is its own subscription (own URL and
+        // interval), so `alias.yaml -> target.yaml` must not group
+        // with the target — canonicalizing both onto one key would
+        // silently drop one of them, and the winner would rewrite
+        // the shared file with its own URL. Regular files still
+        // canonicalize, so NFC/NFD spellings of one entry group.
+        let resolved = {
+            let joined = profiles_dir.join(name);
+            if joined
+                .symlink_metadata()
+                .is_ok_and(|m| m.file_type().is_symlink())
+            {
+                // Group by the on-disk spelling, not the requested
+                // one: two case variants of one symlink entry (on a
+                // case-insensitive volume the same directory entry)
+                // would otherwise group apart and download the same
+                // subscription twice, the second rewrite winning by
+                // chance. `actual_entry_name` returns the link's own
+                // spelling for a symlink, never its target's.
+                profiles_dir.join(super::config_manager::actual_entry_name(profiles_dir, name))
+            } else {
+                joined.canonicalize().unwrap_or(joined)
+            }
+        };
+        // Per-subscription UA takes precedence over global UA
+        let ua = meta
+            .user_agent
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .or_else(|| global_user_agent.clone());
+        let on_disk = super::config_manager::actual_entry_name(profiles_dir, name);
+        let candidate = (
+            name.clone(),
+            url,
+            ua,
+            interval_secs,
+            meta.last_updated.unwrap_or(0),
+        );
+        match by_file.get(&resolved) {
+            None => {
+                by_file.insert(resolved, candidate);
+            }
+            Some(existing) => {
+                // The on-disk spelling wins over another spelling;
+                // between two spellings of the same file the first
+                // one seen stays (entries are sorted by name above,
+                // so the smallest spelling wins deterministically —
+                // neither is more current than the other).
+                if on_disk == *name && existing.0 != on_disk {
+                    by_file.insert(resolved, candidate);
+                }
+            }
+        }
+    }
+    by_file
+        .into_values()
+        .filter_map(|(name, url_opt, ua, interval_secs, last_updated)| {
+            // The winner may be a disabled record (no URL, or a
+            // zero interval): it claimed the file in the grouping
+            // above precisely so a stale alias cannot win it — but
+            // it must not itself trigger a download.
+            let url = url_opt?;
+            if interval_secs == 0 {
+                return None;
+            }
+            // Only include if interval has passed
+            let elapsed = now.saturating_sub(last_updated);
+            (elapsed >= interval_secs).then_some((name, url, ua))
+        })
+        .collect()
+}
+
 /// Check each subscription and update if its interval has passed.
 /// Downloads are serialized to avoid metadata.json write races.
 async fn check_and_update_subscriptions(
@@ -276,37 +399,9 @@ async fn check_and_update_subscriptions(
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    // Collect subscriptions that need updating, with per-subscription UA override
-    let to_update: Vec<(String, String, Option<String>)> = metadata
-        .configs
-        .iter()
-        .filter_map(|(name, meta)| {
-            // Skip if no URL or no interval set
-            let url = meta.url.as_ref()?;
-            let interval_secs = meta.auto_update_interval.filter(|&s| s > 0)?;
-
-            // Skip if file doesn't exist (stale metadata entry)
-            if !paths.profiles_dir.join(name).exists() {
-                return None;
-            }
-
-            // Calculate time since last update
-            let last_updated = meta.last_updated.unwrap_or(0);
-            let elapsed = now.saturating_sub(last_updated);
-
-            // Only include if interval has passed
-            (elapsed >= interval_secs).then(|| {
-                // Per-subscription UA takes precedence over global UA
-                let ua = meta
-                    .user_agent
-                    .as_ref()
-                    .filter(|s| !s.is_empty())
-                    .cloned()
-                    .or_else(|| global_user_agent.clone());
-                (name.clone(), url.clone(), ua)
-            })
-        })
-        .collect();
+    // Collect subscriptions that need updating, with per-subscription UA override.
+    let to_update =
+        collect_due_subscription_updates(&metadata, &paths.profiles_dir, &global_user_agent, now);
 
     if to_update.is_empty() {
         return Ok(0);
@@ -422,4 +517,116 @@ pub async fn trigger_auto_update(
 
     state.release_trigger();
     result
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::super::crypto::{ConfigMetadata, ProfilesMetadata};
+    use super::collect_due_subscription_updates;
+
+    fn meta_entry(
+        url: Option<&str>,
+        interval: Option<u64>,
+        last_updated: Option<u64>,
+    ) -> ConfigMetadata {
+        ConfigMetadata {
+            url: url.map(str::to_owned),
+            auto_update_interval: interval,
+            last_updated,
+            ..Default::default()
+        }
+    }
+
+    fn temp_profiles_dir(tag: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("zephyr_test_sched_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn disabled_record_does_not_block_other_files() {
+        let dir = temp_profiles_dir("disabled_other");
+        std::fs::write(dir.join("a.yaml"), "port: 7890\n").unwrap();
+        std::fs::write(dir.join("b.yaml"), "port: 7891\n").unwrap();
+        let mut metadata = ProfilesMetadata::default();
+        metadata
+            .configs
+            .insert("a.yaml".to_owned(), meta_entry(None, None, None));
+        metadata.configs.insert(
+            "b.yaml".to_owned(),
+            meta_entry(Some("https://example.com/b"), Some(60), Some(0)),
+        );
+        let due = collect_due_subscription_updates(&metadata, &dir, &None, 1000);
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].0, "b.yaml");
+        assert_eq!(due[0].1, "https://example.com/b");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn disabled_on_disk_record_blocks_stale_alias() {
+        let dir = temp_profiles_dir("disabled_alias");
+        // The on-disk spelling is the first write on a case-insensitive
+        // volume; on a case-sensitive one the two spellings are
+        // distinct files.
+        std::fs::write(dir.join("WORK.yaml"), "port: 7890\n").unwrap();
+        std::fs::write(dir.join("Work.yaml"), "port: 7890\n").unwrap();
+        let same_file =
+            dir.join("WORK.yaml").canonicalize().ok() == dir.join("Work.yaml").canonicalize().ok();
+        let mut metadata = ProfilesMetadata::default();
+        metadata
+            .configs
+            .insert("WORK.yaml".to_owned(), meta_entry(None, None, None));
+        metadata.configs.insert(
+            "Work.yaml".to_owned(),
+            meta_entry(Some("https://example.com/stale"), Some(60), Some(0)),
+        );
+        let due = collect_due_subscription_updates(&metadata, &dir, &None, 1000);
+        if same_file {
+            // The disabled on-disk record claims the file, so the
+            // stale alias must not trigger a download of its old URL.
+            assert!(due.is_empty(), "stale alias won the file: {due:?}");
+        } else {
+            // Distinct files: the disabled one drops out, the enabled
+            // one updates.
+            assert_eq!(due.len(), 1);
+            assert_eq!(due[0].0, "Work.yaml");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn on_disk_record_wins_over_stale_alias() {
+        let dir = temp_profiles_dir("ondisk_wins");
+        std::fs::write(dir.join("WORK.yaml"), "port: 7890\n").unwrap();
+        std::fs::write(dir.join("Work.yaml"), "port: 7890\n").unwrap();
+        let same_file =
+            dir.join("WORK.yaml").canonicalize().ok() == dir.join("Work.yaml").canonicalize().ok();
+        let mut metadata = ProfilesMetadata::default();
+        metadata.configs.insert(
+            "WORK.yaml".to_owned(),
+            meta_entry(Some("https://example.com/current"), Some(60), Some(0)),
+        );
+        metadata.configs.insert(
+            "Work.yaml".to_owned(),
+            meta_entry(Some("https://example.com/stale"), Some(60), Some(0)),
+        );
+        let mut due = collect_due_subscription_updates(&metadata, &dir, &None, 1000);
+        if same_file {
+            assert_eq!(due.len(), 1);
+            assert_eq!(due[0].0, "WORK.yaml");
+            assert_eq!(due[0].1, "https://example.com/current");
+        } else {
+            // Distinct files: both update; the grouping order is
+            // arbitrary, so sort before asserting.
+            due.sort_by(|a, b| a.0.cmp(&b.0));
+            assert_eq!(due.len(), 2);
+            assert_eq!(due[0].0, "WORK.yaml");
+            assert_eq!(due[1].0, "Work.yaml");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

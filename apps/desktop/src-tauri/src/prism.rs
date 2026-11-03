@@ -205,6 +205,17 @@ impl PrismState {
             // RAII Scope Guard: Guarantees TLS is cleared before execution and on early exit/Drop
             let guard = host::HttpStatusGuard::enter();
 
+            // Take the run-config lock before the Prism inner lock: the
+            // batch/write/rebuild paths already hold it when they call
+            // `ext.apply`, so the order is `RUN_CONFIG_LOCK` → inner →
+            // sequence everywhere. It is taken here, not inside
+            // `apply_config` — that runs under the inner lock, and the
+            // mutex is not re-entrant, so taking it there would deadlock
+            // on the callers that already hold it.
+            let _run_config = crate::prism::pipeline::RUN_CONFIG_LOCK
+                .lock()
+                .map_err(|e| format!("Run config lock poisoned: {e}"))?;
+
             let mut lock = lock_critical(&inner, BackendModule::Prism, codes::PRISM_LOCK_FAILED)?;
             let ext = lock
                 .extension
