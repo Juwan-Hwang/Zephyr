@@ -126,15 +126,22 @@ pub fn build_asset_download_url(version: &str, asset_name: &str) -> String {
     format!("https://github.com/MetaCubeX/mihomo/releases/download/{version}/{asset_name}")
 }
 
-/// Check if a URL points to a trusted update host.
+/// Check if a URL points to a trusted update host over HTTPS.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 #[must_use]
 pub fn is_trusted_update_url(url: &str) -> bool {
     if let Ok(parsed) = url::Url::parse(url) {
+        // Enforce HTTPS scheme to prevent MITM attacks on update downloads.
+        if parsed.scheme() != "https" {
+            return false;
+        }
         if let Some(host) = parsed.host_str() {
-            return TRUSTED_HOSTS
-                .iter()
-                .any(|&h| host == h || host.ends_with(&format!(".{h}")));
+            return TRUSTED_HOSTS.iter().any(|&h| {
+                host == h
+                    || host
+                        .strip_suffix(h)
+                        .is_some_and(|prefix| prefix.ends_with('.'))
+            });
         }
     }
     false
@@ -212,12 +219,12 @@ pub fn validate_version_format(version: &str) -> bool {
 }
 
 /// Parse a GitHub release download URL to extract version and asset name.
-/// Only allows official MetaCubeX/mihomo GitHub releases.
+/// Only allows official MetaCubeX/mihomo GitHub releases over HTTPS.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 #[must_use]
 pub fn parse_github_release_info(url: &str) -> Option<Vec<String>> {
     let parsed = url::Url::parse(url).ok()?;
-    if parsed.host_str() != Some("github.com") {
+    if parsed.scheme() != "https" || parsed.host_str() != Some("github.com") {
         return None;
     }
 
@@ -371,11 +378,48 @@ mod tests {
         assert!(is_trusted_update_url(
             "https://github.com/MetaCubeX/mihomo/releases/download/v1.18.0/mihomo-linux-amd64.gz"
         ));
+        assert!(is_trusted_update_url(
+            "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+        ));
+        assert!(is_trusted_update_url(
+            "https://objects.githubusercontent.com/asset.zip"
+        ));
+        assert!(is_trusted_update_url("https://sub.github.com/test"));
     }
 
     #[test]
-    fn test_is_trusted_update_url_untrusted() {
+    fn test_is_trusted_update_url_rejects_insecure_or_spoofed() {
+        // Enforce HTTPS: plaintext HTTP must be rejected
+        assert!(!is_trusted_update_url("http://github.com/release.zip"));
+        assert!(!is_trusted_update_url("http://api.github.com/test"));
+        // Domain suffix attacks: must not match attacker domains ending with github.com
+        assert!(!is_trusted_update_url("https://evilgithub.com/malware"));
+        assert!(!is_trusted_update_url("https://not-github.com/malware"));
+        assert!(!is_trusted_update_url(
+            "https://fakegithubusercontent.com/x"
+        ));
+        // Untrusted hosts and invalid schemes
         assert!(!is_trusted_update_url("https://evil.com/malware"));
+        assert!(!is_trusted_update_url("ftp://github.com/release.zip"));
+        assert!(!is_trusted_update_url("file:///etc/passwd"));
+        assert!(!is_trusted_update_url("javascript:alert(1)"));
+    }
+
+    #[test]
+    fn test_parse_github_release_info_https_enforced() {
+        let https_url =
+            "https://github.com/MetaCubeX/mihomo/releases/download/v1.18.0/mihomo-linux-amd64.gz";
+        let info = parse_github_release_info(https_url).unwrap();
+        assert_eq!(info, vec!["v1.18.0", "mihomo-linux-amd64.gz"]);
+
+        // Reject plaintext HTTP
+        let http_url =
+            "http://github.com/MetaCubeX/mihomo/releases/download/v1.18.0/mihomo-linux-amd64.gz";
+        assert_eq!(parse_github_release_info(http_url), None);
+
+        // Reject spoofed domain
+        let spoofed_url = "https://evilgithub.com/MetaCubeX/mihomo/releases/download/v1.18.0/mihomo-linux-amd64.gz";
+        assert_eq!(parse_github_release_info(spoofed_url), None);
     }
 
     #[test]
