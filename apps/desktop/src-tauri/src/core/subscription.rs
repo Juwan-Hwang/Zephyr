@@ -2497,11 +2497,20 @@ const PROFILE_SUFFIX_RESERVE_BYTES: usize = 11;
 /// boundary) to leave room for the widest suffix; the cut is the same for
 /// every call, so the suffix search stays consistent.
 fn next_free_profile_name(profiles_dir: &std::path::Path, clean_name: &str) -> String {
-    let full_stem = clean_name
-        .strip_suffix(".yaml")
-        .or_else(|| clean_name.strip_suffix(".yml"))
-        .unwrap_or(clean_name);
-    let ext = clean_name.strip_prefix(full_stem).unwrap_or(".yaml");
+    // Strip the YAML extension case-insensitively so the collision
+    // suffix lands before it (`Foo.YAML` → `Foo-1.YAML`): appending
+    // after it would make `Foo.YAML-1`, whose extension is not YAML
+    // and which the listing, backup, and encryption batches skip.
+    // The extension keeps its original case in the result.
+    let lower = clean_name.to_lowercase();
+    let full_stem = if lower.ends_with(".yaml") {
+        &clean_name[..clean_name.len() - 5]
+    } else if lower.ends_with(".yml") {
+        &clean_name[..clean_name.len() - 4]
+    } else {
+        clean_name
+    };
+    let ext = &clean_name[full_stem.len()..];
     let max_stem_bytes =
         MAX_PROFILE_FILE_NAME_BYTES.saturating_sub(ext.len() + PROFILE_SUFFIX_RESERVE_BYTES);
     let mut stem_end = full_stem.len().min(max_stem_bytes);
@@ -3106,7 +3115,8 @@ async fn download_sub_inner_raw(
 
     let paths = ensure_app_storage(app)?;
 
-    let mut clean_name = if safe_name.ends_with(".yaml") || safe_name.ends_with(".yml") {
+    let lower_safe = safe_name.to_lowercase();
+    let mut clean_name = if lower_safe.ends_with(".yaml") || lower_safe.ends_with(".yml") {
         safe_name.clone()
     } else {
         format!("{safe_name}.yaml")
@@ -3210,6 +3220,17 @@ async fn download_sub_inner_raw(
                 return Err(e.to_string());
             }
         }
+        // Resolve the stored spelling before the swap, while the old
+        // file is still at the target path: on a case-insensitive
+        // volume the request may differ in case from the file on disk,
+        // and the metadata is keyed under the stored spelling.
+        // Looking it up by the request spelling would lose the
+        // auto-update interval and User-Agent.
+        let stored_name = if overwrite {
+            super::config_manager::actual_entry_name(&paths.profiles_dir, &clean_name)
+        } else {
+            clean_name.clone()
+        };
         let backup_path = if target_path.exists() {
             if !overwrite {
                 // Still taken after picking a free suffix: refuse to clobber it.
@@ -3249,7 +3270,8 @@ async fn download_sub_inner_raw(
         let (preserved_interval, preserved_ua, preserved_url, preserved_sub_info) = if overwrite {
             metadata
                 .configs
-                .get(&clean_name)
+                .get(&stored_name)
+                .or_else(|| metadata.configs.get(&clean_name))
                 .map(|m| {
                     (
                         m.auto_update_interval,
