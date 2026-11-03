@@ -223,9 +223,12 @@ pub async fn prism_rebuild(
     let inner = std::sync::Arc::clone(&state.inner);
     let app = state.app.clone();
 
-    // Read the original profile config before entering spawn_blocking
-    // (AppHandle::state() is not available inside spawn_blocking closures)
-    let (raw_profile, current_secret, global_prefs) = {
+    // Read the original profile config before entering spawn_blocking:
+    // the `State` extractor cannot cross into the closure, so the
+    // profile text and prefs are read here. The secret is NOT read
+    // here: it is re-read inside, after the run-config lock and the
+    // start check (see below).
+    let (raw_profile, global_prefs) = {
         let mihomo = tauri::Manager::state::<crate::core_manager::MihomoState>(&app);
         let lock = lock_critical(&mihomo.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
         let Some(config_path) = lock.last_config_path().map(ToOwned::to_owned) else {
@@ -234,7 +237,6 @@ pub async fn prism_rebuild(
             drop(lock);
             return Ok(serde_json::json!({ "skipped": "no active profile" }));
         };
-        let secret = lock.last_secret().to_owned();
         drop(lock);
 
         let paths = crate::core_manager::ensure_app_storage(&app)?;
@@ -249,7 +251,7 @@ pub async fn prism_rebuild(
         let prefs = settings_lock.to_global_prefs();
         drop(settings_lock);
 
-        (content, secret, Some(prefs))
+        (content, Some(prefs))
     };
 
     tokio::task::spawn_blocking(move || {
@@ -259,6 +261,26 @@ pub async fn prism_rebuild(
         let _guard = crate::prism::pipeline::RUN_CONFIG_LOCK
             .lock()
             .map_err(|e| format!("Run config lock poisoned: {e}"))?;
+        // Refuse while a core start is in progress, before writing
+        // anything: the start is about to write the new run config with
+        // fresh credentials, and this clean base would overwrite it, so
+        // the startup health check would fail on the old credentials.
+        // `ext.apply` below is guard-checked against a start, but the
+        // base write here was not.
+        if crate::prism::pipeline::core_start_in_progress() {
+            return Err("Hot reload refused: a core start is in progress".to_owned());
+        }
+        // Re-read the secret here, under the lock and after the check: a
+        // start that finished between the outer read and this check would
+        // otherwise leave the clean base carrying the previous run's
+        // secret. (Same reason `apply_config` re-reads the endpoint just
+        // before injecting it; the lock order here — run-config lock,
+        // then the core-state lock — matches that path.)
+        let current_secret = {
+            let mihomo = tauri::Manager::state::<crate::core_manager::MihomoState>(&app);
+            let lock = lock_critical(&mihomo.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
+            lock.last_secret().to_owned()
+        };
         // Captures the core's answer to the reload `ext.apply` triggers
         // (set by `ZephyrPrismHost::apply_config` on this thread).
         let status_guard = super::host::HttpStatusGuard::enter();
