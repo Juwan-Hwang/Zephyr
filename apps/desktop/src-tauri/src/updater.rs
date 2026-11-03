@@ -796,6 +796,12 @@ async fn fetch_latest_release(app: Option<&tauri::AppHandle>) -> Result<GithubRe
 
 fn is_trusted_update_url(url: &str) -> bool {
     if let Ok(parsed) = reqwest::Url::parse(url) {
+        // Enforce HTTPS scheme, mirroring the core check: this is the gate
+        // that actually guards binary downloads, so it must reject plaintext
+        // URLs even though its host check was already dot-safe.
+        if parsed.scheme() != "https" {
+            return false;
+        }
         if let Some(host) = parsed.host_str() {
             return TRUSTED_HOSTS
                 .iter()
@@ -3026,5 +3032,20 @@ mod tests {
             "v1.19.28",
             "mihomo-windows-amd64-v3-v1.19.28.zip"
         ));
+    }
+
+    #[test]
+    fn test_is_trusted_update_url_requires_https() {
+        assert!(is_trusted_update_url(
+            "https://github.com/MetaCubeX/mihomo/releases/download/v1.18.0/mihomo-linux-amd64.gz"
+        ));
+        assert!(is_trusted_update_url(
+            "https://objects.githubusercontent.com/asset.zip"
+        ));
+        assert!(is_trusted_update_url("https://sub.github.com/test"));
+        assert!(!is_trusted_update_url("http://github.com/release.zip"));
+        assert!(!is_trusted_update_url("ftp://github.com/release.zip"));
+        assert!(!is_trusted_update_url("https://evilgithub.com/malware"));
+        assert!(!is_trusted_update_url("https://not-github.com/malware"));
     }
 }
