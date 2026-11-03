@@ -2,7 +2,7 @@
 //!
 //! Migrated from `src-tauri/src/core/config_sanitizer.rs` for cross-platform reuse.
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 /// Maximum recursion depth for YAML processing to prevent stack overflow attacks.
 const MAX_YAML_DEPTH: usize = 100;
@@ -458,12 +458,114 @@ pub fn sanitize_config_file_name(config_path: String) -> Result<String, crate::e
     Ok(config_file_name)
 }
 
+/// Lexically normalize a path to resolve '.', '..', and separators.
+/// A `..` directly under the root is dropped: on a filesystem `/..`
+/// resolves to `/`, so keeping it would falsely reject a path that
+/// actually points inside the base. A `..` after a drive prefix or at
+/// the start of a relative path is kept: it may genuinely escape.
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(..) | Component::RootDir | Component::Normal(..) => {
+                normalized.push(component);
+            }
+            Component::ParentDir => match normalized.components().next_back() {
+                Some(Component::Normal(..)) => {
+                    normalized.pop();
+                }
+                Some(Component::RootDir) => {}
+                _ => {
+                    normalized.push(component);
+                }
+            },
+            Component::CurDir => {}
+        }
+    }
+    normalized
+}
+
+/// Expand symlinks component by component, without requiring the path
+/// to exist. A dangling link is expanded too, since a later write would
+/// follow it. Scanning restarts after each replacement so chained links
+/// are followed; the cap stops symlink loops (a looped path cannot be
+/// written anyway, and any expansion that already left the base is
+/// rejected by the caller).
+fn expand_symlinks(path: &Path) -> Result<PathBuf, crate::error::AppError> {
+    let mut current = path.to_path_buf();
+    for _ in 0..40 {
+        let mut prefix = PathBuf::new();
+        let mut found: Option<(PathBuf, PathBuf)> = None;
+        let mut unreadable_link = false;
+        for component in current.components() {
+            prefix.push(component);
+            if let Ok(meta) = prefix.symlink_metadata() {
+                if meta.file_type().is_symlink() {
+                    if let Ok(target) = std::fs::read_link(&prefix) {
+                        let target_abs = if target.is_absolute() {
+                            target
+                        } else {
+                            prefix
+                                .parent()
+                                .unwrap_or_else(|| Path::new("/"))
+                                .join(target)
+                        };
+                        found = Some((prefix.clone(), target_abs));
+                        break;
+                    }
+                    // Fail closed: an unreadable link cannot be
+                    // proven to stay inside the base.
+                    unreadable_link = true;
+                    break;
+                }
+            }
+        }
+        if unreadable_link {
+            return Err(crate::error::AppError::ConfigError(
+                "Path traversal detected: unreadable symlink on path".to_owned(),
+            ));
+        }
+        match found {
+            None => break,
+            Some((link, target)) => {
+                let suffix = current
+                    .strip_prefix(&link)
+                    .unwrap_or_else(|_| Path::new(""));
+                current = target.join(suffix);
+            }
+        }
+    }
+    // The loop stops after 40 replacements: a longer chain still holds
+    // an unexpanded link, and returning it unchecked would let a later
+    // write follow that link outside the base. Fail closed instead.
+    let mut prefix = PathBuf::new();
+    for component in current.components() {
+        prefix.push(component);
+        if let Ok(meta) = prefix.symlink_metadata() {
+            if meta.file_type().is_symlink() {
+                return Err(crate::error::AppError::ConfigError(
+                    "Path traversal detected: symlink chain too long".to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(current)
+}
+
 /// Validates that the resolved path is within the expected base directory
 pub fn validate_path_within_dir(
     resolved_path: &Path,
     base_dir: &Path,
 ) -> Result<(), crate::error::AppError> {
-    // If the file exists, use canonicalize for definitive check
+    let traversal_err = || {
+        crate::error::AppError::ConfigError(
+            "Path traversal detected: resolved path is outside allowed directory".to_owned(),
+        )
+    };
+
+    // Existing files: canonical comparison is authoritative. It resolves
+    // symlinks and spelling differences (macOS /var vs /private/var,
+    // Windows \\?\ prefixes) that a lexical check would falsely reject.
     if resolved_path.exists() {
         let canonical_resolved = resolved_path.canonicalize().map_err(|e| {
             crate::error::AppError::IoError(format!("Failed to canonicalize resolved path: {e}"))
@@ -471,25 +573,30 @@ pub fn validate_path_within_dir(
         let canonical_base = base_dir.canonicalize().map_err(|e| {
             crate::error::AppError::IoError(format!("Failed to canonicalize base directory: {e}"))
         })?;
-
         if !canonical_resolved.starts_with(&canonical_base) {
-            return Err(crate::error::AppError::ConfigError(
-                "Path traversal detected: resolved path is outside allowed directory".to_owned(),
-            ));
+            return Err(traversal_err());
         }
-    } else {
-        // File doesn't exist yet, do string-level validation
-        let resolved_str = resolved_path.to_string_lossy();
-        let base_str = base_dir.to_string_lossy();
+        return Ok(());
+    }
 
-        // Normalize path separators for comparison
-        let resolved_normalized = resolved_str.replace('\\', "/");
-        let base_normalized = base_str.replace('\\', "/");
-
-        if !resolved_normalized.starts_with(&*base_normalized) {
-            return Err(crate::error::AppError::ConfigError(
-                "Path traversal detected: resolved path is outside allowed directory".to_owned(),
-            ));
+    // Not (yet) on disk: canonicalization is impossible, so validate
+    // lexically on the symlink-expanded path. exists() follows links,
+    // so without expansion a dangling leaf symlink would be skipped and
+    // a later write would follow it outside the base.
+    // Both sides must use the same spelling: expanding only the child
+    // rejects every new file under a symlinked base (for example a
+    // macOS temp dir below /var, which is a link to /private/var),
+    // because the expanded child no longer starts with the raw base.
+    let norm_base = normalize_path(&expand_symlinks(base_dir)?);
+    let expanded = normalize_path(&expand_symlinks(resolved_path)?);
+    if !expanded.starts_with(&norm_base) {
+        return Err(traversal_err());
+    }
+    if let Ok(canonical_base) = base_dir.canonicalize() {
+        if let Ok(canonical_expanded) = expanded.canonicalize() {
+            if !canonical_expanded.starts_with(&canonical_base) {
+                return Err(traversal_err());
+            }
         }
     }
     Ok(())
@@ -964,5 +1071,153 @@ proxies:
         let mut value = serde_yaml::Value::String("external-ui".to_owned());
         remove_control_plane_keys(&mut value);
         assert_eq!(value.as_str().unwrap(), "external-ui");
+    }
+
+    #[test]
+    fn test_validate_path_within_dir_lexical() {
+        let base = Path::new("/var/app/profiles");
+
+        // Valid inside paths
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles/profile.yaml"), base).is_ok()
+        );
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles/sub/profile.yaml"), base).is_ok()
+        );
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles/./profile.yaml"), base).is_ok()
+        );
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles/sub/../profile.yaml"), base)
+                .is_ok()
+        );
+
+        // Rejection of sibling prefix collision (e.g. profiles_evil or profiles-bak)
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles_evil/profile.yaml"), base)
+                .is_err()
+        );
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles-bak/profile.yaml"), base)
+                .is_err()
+        );
+
+        // Rejection of traversal escaping base
+        assert!(
+            validate_path_within_dir(Path::new("/var/app/profiles/../../etc/passwd"), base)
+                .is_err()
+        );
+        assert!(validate_path_within_dir(
+            Path::new("/var/app/profiles/sub/../../other.yaml"),
+            base
+        )
+        .is_err());
+        assert!(validate_path_within_dir(Path::new("/var/app/other.yaml"), base).is_err());
+    }
+
+    #[test]
+    fn test_validate_path_within_dir_filesystem() {
+        let unique = format!("zephyr_test_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        let profiles_evil = temp_dir.join("profiles_evil");
+        std::fs::create_dir_all(&profiles).unwrap();
+        std::fs::create_dir_all(&profiles_evil).unwrap();
+
+        let valid_file = profiles.join("valid.yaml");
+        std::fs::write(&valid_file, "valid").unwrap();
+
+        let nonexistent_valid = profiles.join("new.yaml");
+        let evil_file = profiles_evil.join("evil.yaml");
+        let traversal_target = profiles.join("../profiles_evil/evil.yaml");
+
+        assert!(validate_path_within_dir(&valid_file, &profiles).is_ok());
+        assert!(validate_path_within_dir(&nonexistent_valid, &profiles).is_ok());
+        assert!(validate_path_within_dir(&evil_file, &profiles).is_err());
+        assert!(validate_path_within_dir(&traversal_target, &profiles).is_err());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_validate_path_within_dir_root_parent() {
+        // `/..` resolves to `/`, so root-level `..` components must not
+        // push a genuinely inside path outside the base.
+        let base = Path::new("/var/app/profiles");
+        assert!(
+            validate_path_within_dir(Path::new("/../../var/app/profiles/profile.yaml"), base)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_dangling_symlinks() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_symlink_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        std::fs::create_dir_all(&profiles).unwrap();
+
+        // Dangling link pointing outside the base must be rejected even
+        // though exists() follows links and reports it as missing.
+        let link_out = profiles.join("link_out");
+        symlink(temp_dir.join("outside.yaml"), &link_out).unwrap();
+        assert!(validate_path_within_dir(&link_out, &profiles).is_err());
+
+        // Dangling link pointing inside the base stays allowed.
+        let link_in = profiles.join("link_in");
+        symlink(profiles.join("new.yaml"), &link_in).unwrap();
+        assert!(validate_path_within_dir(&link_in, &profiles).is_ok());
+
+        // Chained links: an inside link to another link that leaves the
+        // base must still be rejected.
+        let link_mid = profiles.join("link_mid");
+        symlink(&link_out, &link_mid).unwrap();
+        assert!(validate_path_within_dir(&link_mid, &profiles).is_err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_symlinked_base_new_file() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_symlink_base_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let real = temp_dir.join("real_profiles");
+        std::fs::create_dir_all(&real).unwrap();
+        // The base itself sits behind a symlink, as a macOS temp dir
+        // does below /var: a not-yet-existing child must still pass.
+        let linked_base = temp_dir.join("linked_profiles");
+        symlink(&real, &linked_base).unwrap();
+        let new_file = linked_base.join("new.yaml");
+        assert!(validate_path_within_dir(&new_file, &linked_base).is_ok());
+        assert!(validate_path_within_dir(&real.join("new.yaml"), &linked_base).is_ok());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_validate_path_within_dir_long_symlink_chain_rejected() {
+        use std::os::unix::fs::symlink;
+        let unique = format!("zephyr_test_long_chain_{}", std::process::id());
+        let temp_dir = std::env::temp_dir().join(&unique);
+        let profiles = temp_dir.join("profiles");
+        std::fs::create_dir_all(&profiles).unwrap();
+        // 41 links: past the 40-replacement cap, the last link still
+        // points outside the base and must not be returned unchecked.
+        let outside = temp_dir.join("outside.yaml");
+        let mut previous = outside;
+        for i in (0..41).rev() {
+            let link = profiles.join(format!("link{i}"));
+            symlink(&previous, &link).unwrap();
+            previous = link;
+        }
+        assert!(validate_path_within_dir(&previous, &profiles).is_err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

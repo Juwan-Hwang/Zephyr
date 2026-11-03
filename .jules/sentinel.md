@@ -30,6 +30,11 @@
 **Learning:** Commands in secondary modules that manipulate plugin permissions or settings can easily omit validation routines implemented in the primary plugin module.
 **Prevention:** Always enforce `validate_plugin_id` on every IPC handler accepting a `plugin_id` parameter regardless of module boundary.
 
+## 2026-07-19 - String Prefix Boundary Check Bypass in validate_path_within_dir
+**Vulnerability:** `validate_path_within_dir` used raw string `starts_with()` when validating paths that do not yet exist on disk, permitting traversal sequences (e.g. `/base/dir/../../etc/passwd`) and sibling directories that share a name prefix (e.g. `/base/dir_evil/file`).
+**Learning:** Comparing file paths via string prefix matching fails to enforce path component boundaries and fails to resolve relative path elements (`..` / `.`) when canonicalization cannot be performed on non-existent paths.
+**Prevention:** Always normalize paths lexically across components using `Path::components()` and verify boundary containment at the path component level (`Path::starts_with()`) rather than substring matching.
+
 ## 2026-11-02 - Enforce HTTPS Scheme and Strict Domain Suffix for Core Updaters
 **Vulnerability:** `is_trusted_update_url` and `parse_github_release_info` validated hostname strings against trusted GitHub hosts without verifying `parsed.scheme() == "https"`, allowing plaintext HTTP downloads of updater binaries and opening vectors for on-path adversary MITM attacks. Additionally, host check avoided allocation via suffix stripping with dot delimiter.
 **Learning:** Checking hostname patterns without enforcing encrypted transport protocol schemes permits silent fallback to plaintext traffic in updater workflows.
