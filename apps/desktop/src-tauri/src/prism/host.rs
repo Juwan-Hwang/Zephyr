@@ -203,9 +203,33 @@ impl PrismHost for ZephyrPrismHost {
         let paths = ensure_app_storage(&self.app)?;
         let run_config_path = paths.core_dir.join("run_config.yaml");
 
+        // A script may add an unauthenticated control surface (such as
+        // `external-controller-unix`) to the config it hands back; the
+        // strip in `prepare_runtime_config` never sees Prism output, so
+        // filter it here before the config is written and hot-reloaded.
+        // An unparsable input is written as-is (the reload rejects it,
+        // as before); a failed re-serialization falls back the same way.
+        let filtered;
+        let config_to_write: &str = match serde_yaml::from_str::<serde_yaml::Value>(config) {
+            Ok(mut value) => {
+                zephyr_core::config::sanitizer::remove_control_plane_keys(&mut value);
+                match serde_yaml::to_string(&value) {
+                    Ok(text) => {
+                        filtered = text;
+                        &filtered
+                    }
+                    Err(_) => config,
+                }
+            }
+            Err(_) => config,
+        };
+
         // Secure write (Unix 0600 / Windows DACL) through a temporary file:
         // a failed write leaves the config the core loaded intact.
-        crate::core_manager::core::secure_io::write_file_secure_atomic(&run_config_path, config)?;
+        crate::core_manager::core::secure_io::write_file_secure_atomic(
+            &run_config_path,
+            config_to_write,
+        )?;
 
         // Mihomo's PUT /configs expects a JSON body {"path": "..."} to reload
         // from disk — NOT the raw YAML config. Sending raw YAML with
@@ -363,11 +387,26 @@ None => "Config saved. Failed to apply via core REST API (connection or response
             .map_err(|e| format!("Failed to read profiles dir: {e}"))?;
 
         let mut profiles = Vec::new();
+        // Resolve the selected name to the stored entry: on a
+        // case-insensitive volume the selection may differ in case
+        // from the file on disk (`work.yaml` selects `Work.YAML`),
+        // and a plain string comparison would mark it as not current.
+        // On a case-sensitive volume the two spellings are distinct
+        // files, and the resolver prefers the exact match, so they
+        // are not conflated.
+        let current_entry = crate::core_manager::core::config_manager::actual_entry_name(
+            &paths.profiles_dir,
+            &current,
+        );
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            let is_yaml = name.ends_with(".yaml") || name.ends_with(".yml");
+            // Directories are not profiles, even when they carry a
+            // YAML extension.
+            let lower = name.to_lowercase();
+            let is_yaml =
+                entry.path().is_file() && (lower.ends_with(".yaml") || lower.ends_with(".yml"));
             if is_yaml {
-                let is_current = name == current;
+                let is_current = name == current_entry;
                 profiles.push(ProfileInfo {
                     id: name.clone(),
                     name,

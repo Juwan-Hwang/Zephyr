@@ -325,7 +325,13 @@ fn read_running_config(state: &PrismState) -> Result<serde_json::Value, String> 
 /// file: a failed write leaves the previous config whole, since the reload
 /// that follows a failed batch (for the Prism patches before it) loads it.
 fn write_running_config(state: &PrismState, config: &serde_json::Value) -> Result<(), String> {
-    let yaml_str = serde_yaml::to_string(config)
+    // A script may add an unauthenticated control surface (such as
+    // `external-controller-unix`) to the running config; the strip in
+    // `prepare_runtime_config` never sees script output, so filter it
+    // here, before the config is written back and hot-reloaded.
+    let mut stripped = config.clone();
+    zephyr_core::config::sanitizer::remove_control_plane_keys_json(&mut stripped);
+    let yaml_str = serde_yaml::to_string(&stripped)
         .map_err(|e| format!("Failed to serialize config to YAML: {e}"))?;
     state.with_ext(|_ext| {
         let paths = ensure_app_storage(&state.app)?;
