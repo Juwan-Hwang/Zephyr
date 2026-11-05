@@ -495,18 +495,18 @@ fn extract_name_from_rules_fast(content: &str) -> FastScan {
 /// Shared by the fast path and the full parser so the two cannot drift apart.
 fn rule_policy_name(rule_str: &str) -> Option<&str> {
     let name = rule_str.split(',').nth(2)?.trim();
-    let upper = name.to_uppercase();
-    if upper.is_empty()
-        || upper == "DIRECT"
-        || upper == "REJECT"
-        || upper == "MATCH"
-        || upper == "PROXY"
-        || upper == "PASS"
-        || upper == "DROP"
+    // Optimization: Check length and compare against fixed generic targets
+    // using `eq_ignore_ascii_case` on the borrowed `&str` instead of allocating
+    // an uppercase `String` via `name.to_uppercase()` for every scanned rule.
+    if name.is_empty()
+        || name.len() > 64
+        || name.eq_ignore_ascii_case("DIRECT")
+        || name.eq_ignore_ascii_case("REJECT")
+        || name.eq_ignore_ascii_case("MATCH")
+        || name.eq_ignore_ascii_case("PROXY")
+        || name.eq_ignore_ascii_case("PASS")
+        || name.eq_ignore_ascii_case("DROP")
     {
-        return None;
-    }
-    if name.len() > 64 {
         return None;
     }
     if !name
