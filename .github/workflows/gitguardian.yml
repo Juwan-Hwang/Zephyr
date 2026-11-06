@@ -54,7 +54,7 @@ jobs:
 
       - name: GitGuardian scan
         if: steps.guard.outputs.ready == 'true'
-        uses: GitGuardian/ggshield-action@10e9055712b4630c3d514ec16dca25c94b752b52 # v1.56.0
+        uses: GitGuardian/ggshield-action@5cc1ed2be3e8bf625d354c7170731880670f74de # v1.56.1
         env:
           GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
           GITHUB_PUSH_BASE_SHA: ${{ github.event.base }}
