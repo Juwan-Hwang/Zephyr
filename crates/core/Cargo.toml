@@ -9,7 +9,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 uniffi    = { version = "0.28", optional = true }
-thiserror = "1"
+thiserror = "2"
 serde     = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
