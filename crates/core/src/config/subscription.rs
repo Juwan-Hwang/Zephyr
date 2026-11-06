@@ -974,6 +974,19 @@ fn ends_with_ignore_ascii_case(s: &str, suffix: &str) -> bool {
         .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix_bytes))
 }
 
+/// Zero-allocation helper to strip `prefix` from `s` (ASCII case-insensitively).
+#[inline]
+fn strip_prefix_ignore_ascii_case<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let s_bytes = s.as_bytes();
+    let prefix_bytes = prefix.as_bytes();
+    let head = s_bytes.get(..prefix_bytes.len())?;
+    if head.eq_ignore_ascii_case(prefix_bytes) {
+        s.get(prefix_bytes.len()..)
+    } else {
+        None
+    }
+}
+
 /// Check if a host is a private or local address (SSRF protection)
 ///
 /// Optimization:
@@ -1162,10 +1175,13 @@ pub fn validate_subscription_url_basic(url: &str) -> Result<(String, u16, bool),
     // slashes (`HTTP:///sub`, `http:/sub` both parse with host `sub`), which
     // would turn a malformed URL into an authorized single-label intranet host.
     // Require exactly `//` followed by an authority.
-    let lower = trimmed.to_ascii_lowercase();
-    if let Some(rest) = lower
-        .strip_prefix("http:")
-        .or_else(|| lower.strip_prefix("https:"))
+    //
+    // Optimization:
+    // - Inspect borrowed string slices directly via `strip_prefix_ignore_ascii_case`
+    //   instead of allocating a lowercased `String` (`trimmed.to_ascii_lowercase()`).
+    // - Eliminates heap string allocations on this hot URL validation entry path.
+    if let Some(rest) = strip_prefix_ignore_ascii_case(trimmed, "http:")
+        .or_else(|| strip_prefix_ignore_ascii_case(trimmed, "https:"))
     {
         let mut chars = rest.chars();
         let slashes_ok = matches!((chars.next(), chars.next()), (Some('/'), Some('/')));
