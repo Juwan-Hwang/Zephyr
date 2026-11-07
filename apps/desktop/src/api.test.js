@@ -17,6 +17,7 @@ import {
     getConnections,
     closeConnection,
     abortLatencyTests,
+    resetLatencyTestController,
     testProxy,
     enableAutoStart,
     disableAutoStart,
@@ -413,6 +414,52 @@ describe('switchProxy', () => {
         await expect(switchProxy('Proxy', 'Bad')).rejects.toThrow();
         vi.unstubAllGlobals();
     });
+
+    it('counts a switch as started and in flight until it is answered', async () => {
+        const api = await import('./api.js');
+        /** @type {(v: any) => void} */
+        let answer = () => {};
+        vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { answer = resolve; })));
+        const mark = api.proxySwitchMark();
+        expect(api.proxySwitchedSince(mark)).toBe(false);
+        const pending = api.switchProxyResult('Proxy', 'node-a.example');
+        expect(api.proxySwitchedSince(mark)).toBe(true);
+        await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+        answer({ ok: true });
+        expect(await pending).toEqual({ ok: true, reason: null });
+        // Answered: only the newer start counts now.
+        expect(api.proxySwitchedSince(mark)).toBe(true);
+        expect(api.proxySwitchedSince(api.proxySwitchMark())).toBe(false);
+        // Not when it was the caller's own (answered) switch.
+        expect(api.proxySwitchedSince(mark, 1)).toBe(false);
+        vi.unstubAllGlobals();
+    });
+
+    it('sends switches of one group in the order they were made', async () => {
+        const api = await import('./api.js');
+        /** @type {Array<{ body: string, answer: (v: any) => void }>} */
+        const sent = [];
+        vi.stubGlobal('fetch', vi.fn((url, init) => new Promise((resolve) => {
+            sent.push({ body: `${url} ${init.body}`, answer: resolve });
+        })));
+        const first = api.switchProxyResult('Proxy', 'node-a.example');
+        const second = api.switchProxyResult('Proxy', 'node-b.example');
+        const other = api.switchProxyResult('Other', 'node-c.example');
+        await vi.waitFor(() => expect(sent).toHaveLength(2));
+        // The second switch of Proxy waits for the first; Other does not.
+        expect(sent.map((s) => s.body)).toEqual([
+            expect.stringContaining('/proxies/Proxy {"name":"node-a.example"}'),
+            expect.stringContaining('/proxies/Other {"name":"node-c.example"}'),
+        ]);
+        sent[0].answer({ ok: false, status: 500, statusText: 'Error', text: async () => '' });
+        await vi.waitFor(() => expect(sent).toHaveLength(3));
+        expect(sent[2].body).toContain('/proxies/Proxy {"name":"node-b.example"}');
+        sent[1].answer({ ok: true });
+        sent[2].answer({ ok: true });
+        expect((await first).ok).toBe(false);
+        expect((await second).ok).toBe(true);
+        expect((await other).ok).toBe(true);
+    });
 });
 
 describe('getConfig', () => {
@@ -496,6 +543,46 @@ describe('getConnections', () => {
         expect(result).toEqual(mockData);
         vi.unstubAllGlobals();
     });
+
+    it('gives up on a body that never arrives and aborts its request', async () => {
+        vi.useFakeTimers();
+        try {
+            /** @type {AbortSignal|undefined} */
+            let signal;
+            vi.stubGlobal('fetch', vi.fn((_url, init) => {
+                signal = init.signal;
+                // A real streaming body that stalls mid-JSON: res.json() locks it.
+                // Aborting the request errors the body, as fetch does.
+                const stream = new ReadableStream({
+                    start(c) {
+                        c.enqueue(new TextEncoder().encode('{"connections":['));
+                        signal?.addEventListener('abort', () => c.error(new DOMException('Aborted', 'AbortError')));
+                    },
+                });
+                return Promise.resolve(new Response(stream, { status: 200 }));
+            }));
+            const pending = getConnections();
+            const failed = expect(pending).rejects.toBeInstanceOf(ApiError);
+            await vi.advanceTimersByTimeAsync(10_000);
+            await failed;
+            expect(signal?.aborted).toBe(true);
+        } finally {
+            vi.useRealTimers();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('leaves a request whose body arrived alone', async () => {
+        /** @type {AbortSignal|undefined} */
+        let signal;
+        vi.stubGlobal('fetch', vi.fn((_url, init) => {
+            signal = init.signal;
+            return Promise.resolve(new Response('{"connections":[]}', { status: 200 }));
+        }));
+        await expect(getConnections()).resolves.toEqual({ connections: [] });
+        expect(signal?.aborted).toBe(false);
+        vi.unstubAllGlobals();
+    });
 });
 
 describe('closeConnection', () => {
@@ -569,6 +656,49 @@ describe('testProxy', () => {
 
         const result = await testProxy('BadProxy');
         expect(result).toBe(-1);
+        vi.unstubAllGlobals();
+    });
+
+    /** A delay answer whose body stalls mid-JSON until its request is aborted. */
+    function stallingDelayBody() {
+        /** @type {{ signal?: AbortSignal }} */
+        const seen = {};
+        vi.stubGlobal('fetch', vi.fn((_url, init) => {
+            seen.signal = init.signal;
+            const stream = new ReadableStream({
+                start(c) {
+                    c.enqueue(new TextEncoder().encode('{"delay":'));
+                    init.signal?.addEventListener('abort', () => c.error(new DOMException('Aborted', 'AbortError')));
+                },
+            });
+            return Promise.resolve(new Response(stream, { status: 200 }));
+        }));
+        return seen;
+    }
+
+    it('ends a test whose body stalls when its timeout passes', async () => {
+        vi.useFakeTimers();
+        try {
+            const seen = stallingDelayBody();
+            const pending = testProxy('Stalled', 1000);
+            await vi.advanceTimersByTimeAsync(2_000);
+            await expect(pending).resolves.toBe(-1);
+            expect(seen.signal?.aborted).toBe(true);
+        } finally {
+            vi.useRealTimers();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('ends a test whose body stalls when the tests are stopped', async () => {
+        const seen = stallingDelayBody();
+        resetLatencyTestController();
+        const pending = testProxy('Stalled', 60_000);
+        await vi.waitFor(() => expect(seen.signal).toBeDefined());
+        await new Promise((r) => setTimeout(r, 0));
+        abortLatencyTests();
+        await expect(pending).resolves.toBe(-1);
+        expect(seen.signal?.aborted).toBe(true);
         vi.unstubAllGlobals();
     });
 });

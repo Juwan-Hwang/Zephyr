@@ -52,7 +52,7 @@ function makeCallbacks() {
     const calls = [];
     const names = [
         'onProxies', 'onAdvanced', 'onHome', 'onConsole', 'onRuleLibrary', 'onConnections', 'onLogs',
-        'onLeaveLogs', 'onLeaveProxies', 'onLeaveConsole',
+        'onLeaveLogs', 'onLeaveProxies', 'onLeaveConsole', 'onLeaveConnections',
     ];
     /** @type {Record<string, import('vitest').Mock>} */
     const cbs = {};
@@ -123,9 +123,17 @@ describe('initNavigation', () => {
     it('does not fire a leave callback for pages without one', () => {
         const { cbs, calls } = makeCallbacks();
         nav.initNavigation(cbs);
+        nav.navigateTo('rule-library');
+        nav.navigateTo('connections');
+        expect(calls).toEqual(['onRuleLibrary', 'onConnections']);
+    });
+
+    it('fires the connections leave callback, so its in-flight requests are dropped', () => {
+        const { cbs, calls } = makeCallbacks();
+        nav.initNavigation(cbs);
         nav.navigateTo('connections');
         nav.navigateTo('rule-library');
-        expect(calls).toEqual(['onConnections', 'onRuleLibrary']);
+        expect(calls).toEqual(['onConnections', 'onLeaveConnections', 'onRuleLibrary']);
     });
 
     it('is a no-op when navigating to the current page', () => {
