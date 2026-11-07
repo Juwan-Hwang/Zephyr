@@ -39,9 +39,9 @@ tar = "0.4"
 futures-util = "0.3"
 tempfile = "3"
 rand = { version = "0.10.1", features = ["thread_rng", "alloc"] }
-base64 = "0.22"
+base64 = "0.23"
 serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
@@ -51,8 +51,8 @@ tokio = { version = "1", features = ["rt", "macros", "time", "sync", "fs"] }
 uuid = { version = "1", features = ["v4"] }
 url = "2"
 aes-gcm = "0.11"
-pbkdf2 = "0.12"
-hmac = "0.12"
+pbkdf2 = "0.13"
+hmac = "0.13"
 clash-prism-core = "0.1.5"
 clash-prism-extension = { version = "0.1.9", features = ["watcher"] }
 clash-prism-plugin = "0.1.1"
@@ -61,7 +61,7 @@ clash-prism-smart = "0.1.1"
 chrono = { version = "0.4", features = ["serde"] }
 toml = "1.1"
 dashmap = "6.0"
-minisign = "0.9"
+minisign = "0.10"
 arboard = "3.3"
 
 [target.'cfg(unix)'.dependencies]
@@ -72,7 +72,7 @@ glib = ">= 0.20, < 1"
 libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61", features = [
 "Win32_NetworkManagement_IpHelper",
 "Win32_NetworkManagement_Ndis",
 "Win32_Networking_WinSock",
@@ -91,7 +91,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi"
 ] }
-winreg = "0.52"
+winreg = "0.56"
 # webview2-com: direct dependency for ProcessFailed crash recovery.
 #
 # PINNED to match the transitive dependency via tauri → wry → webview2-com.

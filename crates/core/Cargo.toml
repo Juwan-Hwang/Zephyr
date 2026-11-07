@@ -8,14 +8,14 @@ license = "MIT"
 crate-type = ["rlib"]
 
 [dependencies]
-uniffi    = { version = "0.28", optional = true }
+uniffi    = { version = "0.32", optional = true }
 thiserror = "1"
 serde     = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
-base64    = "0.22"
-aes-gcm   = "0.10"
-rand      = { version = "0.9", features = ["thread_rng"] }
+base64    = "0.23"
+aes-gcm   = "0.11"
+rand      = { version = "0.10", features = ["thread_rng"] }
 uuid      = { version = "1", features = ["v4"] }
 tokio     = { version = "1", features = ["rt", "rt-multi-thread"], optional = true }
 url       = "2"
