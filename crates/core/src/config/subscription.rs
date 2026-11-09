@@ -694,7 +694,7 @@ pub fn try_decode_base64_content(content: &str) -> Option<String> {
 #[inline]
 #[must_use]
 pub fn is_mihomo_fake_ip(ip: IpAddr) -> bool {
-    FakeIpRanges::default().contains(ip)
+    FakeIpRanges::default_ref().contains(ip)
 }
 
 /// Synthetic fake-IP address ranges in effect for the active core configuration.
@@ -715,16 +715,25 @@ pub struct FakeIpRanges {
 
 impl Default for FakeIpRanges {
     fn default() -> Self {
-        Self {
-            // 198.18.0.0/15
-            v4: vec![(0xc612_0000, 15)],
-            // fdfe:dcba:9876::/64
-            v6: vec![(0xfdfe_dcba_9876_0000_0000_0000_0000_0000, 64)],
-        }
+        Self::default_ref().clone()
     }
 }
 
 impl FakeIpRanges {
+    /// Global singleton reference for default fake-IP ranges.
+    ///
+    /// Avoids 2 heap vector allocations per check when validating against default ranges.
+    #[inline]
+    #[must_use]
+    pub fn default_ref() -> &'static Self {
+        static INSTANCE: std::sync::LazyLock<FakeIpRanges> = std::sync::LazyLock::new(|| FakeIpRanges {
+            // 198.18.0.0/15
+            v4: vec![(0xc612_0000, 15)],
+            // fdfe:dcba:9876::/64
+            v6: vec![(0xfdfe_dcba_9876_0000_0000_0000_0000_0000, 64)],
+        });
+        &INSTANCE
+    }
     /// Parse the configured ranges from a `run_config.yaml` body.
     ///
     /// Absent, empty, or invalid values fall back to the built-in defaults,
@@ -1116,7 +1125,7 @@ pub fn validate_public_host_addrs(
     host: &str,
     addrs: &[std::net::SocketAddr],
 ) -> Result<(String, Option<std::net::SocketAddr>, bool), PublicHostAddrError> {
-    validate_public_host_addrs_with_ranges(host, addrs, &FakeIpRanges::default())
+    validate_public_host_addrs_with_ranges(host, addrs, FakeIpRanges::default_ref())
 }
 
 /// Like [`validate_public_host_addrs`], but classifies synthetic addresses
@@ -1240,7 +1249,7 @@ pub fn first_non_fake_addr(
 pub fn validate_subscription_url_with_ip(
     url: &str,
 ) -> Result<(String, Option<std::net::SocketAddr>, bool), String> {
-    validate_subscription_url_with_ip_with_ranges(url, &FakeIpRanges::default())
+    validate_subscription_url_with_ip_with_ranges(url, FakeIpRanges::default_ref())
 }
 
 /// [`validate_subscription_url_with_ip`] with the active fake-IP ranges.

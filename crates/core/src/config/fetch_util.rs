@@ -143,7 +143,10 @@ pub fn validate_url_basic(url: String) -> Result<UrlValidationResult, AppError> 
     // A literal inside the core's fake-IP ranges is a synthetic TUN address, not
     // a LAN destination: refuse it before the private-host classification
     // authorizes it.
-    if FakeIpRanges::default().contains_host_literal(&host) {
+    //
+    // Optimization:
+    // - Uses `FakeIpRanges::default_ref()` to avoid allocating heap vectors on this hot validation path.
+    if FakeIpRanges::default_ref().contains_host_literal(&host) {
         return Err(AppError::ConfigError(
             "Invalid URL: host is a synthetic fake-IP address".to_owned(),
         ));
@@ -171,7 +174,7 @@ pub fn validate_public_host_addrs_str(
     host: String,
     addrs: Vec<String>,
 ) -> Result<UrlResolvePin, AppError> {
-    validate_public_host_addrs_str_with_ranges(host, addrs, &FakeIpRanges::default())
+    validate_public_host_addrs_str_with_ranges(host, addrs, FakeIpRanges::default_ref())
 }
 
 /// [`validate_public_host_addrs_str`] with the active fake-IP ranges.
