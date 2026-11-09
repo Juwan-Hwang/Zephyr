@@ -726,12 +726,13 @@ impl FakeIpRanges {
     #[inline]
     #[must_use]
     pub fn default_ref() -> &'static Self {
-        static INSTANCE: std::sync::LazyLock<FakeIpRanges> = std::sync::LazyLock::new(|| FakeIpRanges {
-            // 198.18.0.0/15
-            v4: vec![(0xc612_0000, 15)],
-            // fdfe:dcba:9876::/64
-            v6: vec![(0xfdfe_dcba_9876_0000_0000_0000_0000_0000, 64)],
-        });
+        static INSTANCE: std::sync::LazyLock<FakeIpRanges> =
+            std::sync::LazyLock::new(|| FakeIpRanges {
+                // 198.18.0.0/15
+                v4: vec![(0xc612_0000, 15)],
+                // fdfe:dcba:9876::/64
+                v6: vec![(0xfdfe_dcba_9876_0000_0000_0000_0000_0000, 64)],
+            });
         &INSTANCE
     }
     /// Parse the configured ranges from a `run_config.yaml` body.
