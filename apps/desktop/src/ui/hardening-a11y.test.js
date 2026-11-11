@@ -439,3 +439,35 @@ describe('subscription action buttons accessibility', () => {
         expect(src).toMatch(/updateBtn\.setAttribute\('aria-label',\s*`\$\{t\?\.update \|\| 'Update'\}: \$\{displayName\}`\)/);
     });
 });
+
+describe('tunnel item delete button accessibility and confirmation', () => {
+    it('tunnel item delete button sets both title and aria-label', () => {
+        const src = read('ui/settings/tunnels.js');
+        expect(src).toContain("delBtn.title = t.delete || 'Delete'");
+        expect(src).toMatch(/delBtn\.setAttribute\('aria-label',\s*`\$\{\(.*?translations\)\[.*?\] \|\| \{\}\)\.delete \|\| 'Delete'\} \$\{tunnel\.address\}`\)/);
+    });
+
+    it('tunnel item delete button requests confirmation before saving', async () => {
+        const { initTunnelSettings } = await import('./settings/tunnels.js');
+        const list = document.createElement('div');
+        const empty = document.createElement('div');
+        const saveMock = vi.fn().mockResolvedValue(true);
+
+        const tunnels = [
+            { network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' }
+        ];
+
+        initTunnelSettings({
+            addTunnelBtn: null,
+            tunnelsList: list,
+            tunnelsEmpty: empty,
+            initialTunnels: tunnels,
+            saveConfigToCore: saveMock,
+        });
+
+        const delBtn = list.querySelector('.btn-delete-icon');
+        expect(delBtn).toBeTruthy();
+        expect(delBtn?.getAttribute('aria-label')).toBe('Delete 127.0.0.1:8080');
+        expect(delBtn?.getAttribute('title')).toBe('Delete');
+    });
+});

@@ -9,7 +9,7 @@
  */
 
 import { appStore } from '../state.js';
-import { showModal, showNotification } from '../notifications.js';
+import { showModal, showConfirmModal, showNotification } from '../notifications.js';
 import { SVG_ICONS } from '../icons.js';
 import { pasteWithFeedback, renderPasteButtonHtml } from '../../utils/clipboard.js';
 import { translations } from '../../i18n.js';
@@ -115,10 +115,17 @@ export function initTunnelSettings({
             const delBtn = document.createElement('button');
             delBtn.className = 'btn-delete-icon';
             delBtn.type = 'button';
+            delBtn.title = t.delete || 'Delete';
             delBtn.setAttribute('aria-label', `${(/** @type {any} */ (translations)[appStore.get('currentLang')] || {}).delete || 'Delete'} ${tunnel.address}`);
             // eslint-disable-next-line no-unsanitized/property -- static SVG constant
             delBtn.innerHTML = SVG_ICONS.trash; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             delBtn.onclick = async () => {
+                const confirmed = await showConfirmModal(
+                    `${t.delete || 'Delete'} ${tunnel.address}?`,
+                    tunnel.target ? `${tunnel.address} → ${tunnel.target}` : tunnel.address,
+                    { danger: true, confirmText: t.delete || 'Delete' }
+                );
+                if (!confirmed) return;
                 const deleted = currentTunnels[index];
                 currentTunnels.splice(index, 1);
                 const ok = await saveConfigToCore({ tunnels: currentTunnels });
