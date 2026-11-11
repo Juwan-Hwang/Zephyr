@@ -9,7 +9,7 @@
  */
 
 import { appStore } from '../state.js';
-import { showModal, showNotification } from '../notifications.js';
+import { showModal, showConfirmModal, showNotification } from '../notifications.js';
 import { SVG_ICONS } from '../icons.js';
 import { pasteWithFeedback, renderPasteButtonHtml } from '../../utils/clipboard.js';
 import { translations } from '../../i18n.js';
@@ -82,7 +82,7 @@ export function initTunnelSettings({
         if (tunnelsEmpty) tunnelsEmpty.style.display = 'none';
         tunnelsList.replaceChildren();
 
-        currentTunnels.forEach((tunnel, index) => {
+        currentTunnels.forEach((tunnel) => {
             const item = document.createElement('div');
             item.className = 'flex items-center justify-between bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg p-3 hover:border-[var(--zephyr-border-strong)] transition-[border-color]';
 
@@ -115,14 +115,43 @@ export function initTunnelSettings({
             const delBtn = document.createElement('button');
             delBtn.className = 'btn-delete-icon';
             delBtn.type = 'button';
-            delBtn.setAttribute('aria-label', `${(/** @type {any} */ (translations)[appStore.get('currentLang')] || {}).delete || 'Delete'} ${tunnel.address}`);
+            // Tooltip and accessible name carry the same row-specific text,
+            // matching the other icon-only row buttons in this app.
+            const deleteLabel = `${(/** @type {any} */ (translations)[appStore.get('currentLang')] || {}).delete || 'Delete'} ${tunnel.address}`;
+            delBtn.title = deleteLabel;
+            delBtn.setAttribute('aria-label', deleteLabel);
             // eslint-disable-next-line no-unsanitized/property -- static SVG constant
             delBtn.innerHTML = SVG_ICONS.trash; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             delBtn.onclick = async () => {
-                const deleted = currentTunnels[index];
-                currentTunnels.splice(index, 1);
+                const confirmed = await showConfirmModal(
+                    `${t.delete || 'Delete'} ${tunnel.address}?`,
+                    tunnel.target ? `${tunnel.address} → ${tunnel.target}` : tunnel.address,
+                    { danger: true, confirmText: t.delete || 'Delete' }
+                );
+                if (!confirmed) return;
+                // The list may have changed while the confirmation waited
+                // (another deletion, or setTunnels/resetTunnels replacing
+                // the array): find this tunnel again by identity instead
+                // of trusting the rendered index, and stop if it is gone.
+                const currentIndex = currentTunnels.indexOf(tunnel);
+                if (currentIndex === -1) return;
+                const deleted = currentTunnels[currentIndex];
+                // Remember which list this deletion came from:
+                // setTunnels/resetTunnels replace the array wholesale,
+                // so a restore after a failed save must only touch
+                // this list.
+                const listAtDelete = currentTunnels;
+                currentTunnels.splice(currentIndex, 1);
                 const ok = await saveConfigToCore({ tunnels: currentTunnels });
-                if (!ok) { currentTunnels.splice(index, 0, deleted); return; }
+                if (!ok) {
+                    // Only restore into the list this deletion came from:
+                    // if the array was replaced while the save was in
+                    // flight, that list is authoritative — splicing the
+                    // deleted tunnel back into it at the old index would
+                    // corrupt it.
+                    if (currentTunnels === listAtDelete) currentTunnels.splice(currentIndex, 0, deleted);
+                    return;
+                }
                 renderTunnels();
             };
 
