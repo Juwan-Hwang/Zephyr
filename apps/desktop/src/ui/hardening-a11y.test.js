@@ -1,7 +1,10 @@
 // @ts-check
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
-const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn().mockResolvedValue([]) }));
+const { invokeMock, confirmMock } = vi.hoisted(() => ({
+    invokeMock: vi.fn().mockResolvedValue([]),
+    confirmMock: vi.fn(),
+}));
 
 vi.mock('../api.js', () => ({
     invoke: invokeMock,
@@ -11,6 +14,15 @@ vi.mock('../api.js', () => ({
     SPECIAL_PROXY_NAMES: new Set(),
 }));
 
+vi.mock('./notifications.js', async (importOriginal) => ({
+    ...(await importOriginal()),
+    showConfirmModal: (
+        /** @type {string} */ title,
+        /** @type {string} */ message,
+        /** @type {any} */ options,
+    ) => confirmMock(title, message, options),
+}));
+
 import { updateModeUI } from './modes.js';
 import { pluginExecuteHook } from './prism.js';
 import { readSrc as read, parseIndex } from '../test/index-dom.js';
@@ -18,6 +30,7 @@ import { readSrc as read, parseIndex } from '../test/index-dom.js';
 afterEach(() => {
     document.body.innerHTML = '';
     invokeMock.mockClear();
+    confirmMock.mockClear();
 });
 
 describe('home and settings page switches and theme swatches accessibility', () => {
@@ -437,5 +450,291 @@ describe('subscription action buttons accessibility', () => {
         expect(src).toMatch(/editBtn\.setAttribute\('aria-label',\s*`\$\{t\.editSubscription \|\| 'Edit'\}: \$\{displayName\}`\)/);
         expect(src).toMatch(/delBtn\.setAttribute\('aria-label',\s*`\$\{t\.delete \|\| 'Delete'\}: \$\{displayName\}`\)/);
         expect(src).toMatch(/updateBtn\.setAttribute\('aria-label',\s*`\$\{t\?\.update \|\| 'Update'\}: \$\{displayName\}`\)/);
+    });
+});
+
+describe('tunnel item delete button accessibility and confirmation', () => {
+    it('tunnel item delete button sets the same row-specific title and aria-label', () => {
+        const src = read('ui/settings/tunnels.js');
+        expect(src).toContain('delBtn.title = deleteLabel;');
+        expect(src).toContain("delBtn.setAttribute('aria-label', deleteLabel);");
+        expect(src).toMatch(/const deleteLabel = .*\.delete \|\| 'Delete'.*\$\{tunnel\.address\}/);
+    });
+
+    /**
+     * Render tunnels and return the list plus the settings API.
+     * @param {any[]} initialTunnels
+     * @param {any} saveMock
+     */
+    async function renderTunnels(initialTunnels, saveMock) {
+        const { initTunnelSettings } = await import('./settings/tunnels.js');
+        const list = document.createElement('div');
+        const empty = document.createElement('div');
+        const api = initTunnelSettings({
+            addTunnelBtn: null,
+            tunnelsList: list,
+            tunnelsEmpty: empty,
+            initialTunnels,
+            saveConfigToCore: saveMock,
+        });
+        return { api, list, empty };
+    }
+
+    /** Let the async delete handler run to its next await point. */
+    async function flush() {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    /**
+     * Click a delete button and hold its confirmation open.
+     * @param {Element | null} delBtn
+     * @returns {(value: boolean) => void} call it to resolve the pending confirmation
+     */
+    function clickAndHoldConfirm(delBtn) {
+        /** @type {(value: boolean) => void} */
+        let resolveConfirm = () => {};
+        confirmMock.mockImplementationOnce(
+            () => new Promise((resolve) => { resolveConfirm = resolve; }),
+        );
+        expect(delBtn).toBeTruthy();
+        delBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        return (value) => resolveConfirm(value);
+    }
+
+    it('tunnel item delete button carries the tunnel address in title and aria-label', async () => {
+        const saveMock = vi.fn().mockResolvedValue(true);
+        const { list } = await renderTunnels(
+            [{ network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' }],
+            saveMock,
+        );
+
+        const delBtn = list.querySelector('.btn-delete-icon');
+        expect(delBtn).toBeTruthy();
+        expect(delBtn?.getAttribute('aria-label')).toBe('Delete 127.0.0.1:8080');
+        expect(delBtn?.getAttribute('title')).toBe('Delete 127.0.0.1:8080');
+    });
+
+    it('cancelling the confirmation leaves the tunnel and saves nothing', async () => {
+        confirmMock.mockResolvedValue(false);
+        const saveMock = vi.fn().mockResolvedValue(true);
+        const { list } = await renderTunnels(
+            [{ network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' }],
+            saveMock,
+        );
+
+        list.querySelector('.btn-delete-icon')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await flush();
+
+        expect(confirmMock).toHaveBeenCalledTimes(1);
+        expect(saveMock).not.toHaveBeenCalled();
+        expect(list.querySelector('.btn-delete-icon')).toBeTruthy();
+    });
+
+    it('confirming the deletion saves the shortened list', async () => {
+        confirmMock.mockResolvedValue(true);
+        const saveMock = vi.fn().mockResolvedValue(true);
+        const { list, empty } = await renderTunnels(
+            [{ network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' }],
+            saveMock,
+        );
+
+        list.querySelector('.btn-delete-icon')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));
+
+        expect(saveMock).toHaveBeenCalledWith({ tunnels: [] });
+        expect(list.querySelector('.btn-delete-icon')).toBeNull();
+        expect(empty.style.display).toBe('block');
+    });
+
+    it('a tunnel replaced while confirmation waits is not deleted', async () => {
+        const saveMock = vi.fn().mockResolvedValue(true);
+        const tunnelA = { network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' };
+        const tunnelB = { network: ['tcp'], address: '127.0.0.1:9090', target: '2.2.2.2:80' };
+        const { api, list } = await renderTunnels([tunnelA, tunnelB], saveMock);
+
+        const resolveConfirm = clickAndHoldConfirm(list.querySelector('.btn-delete-icon'));
+        await flush();
+        expect(confirmMock).toHaveBeenCalledTimes(1);
+
+        // The list is replaced from outside (e.g. settings reload) while
+        // the confirmation is still waiting: tunnel A is gone entirely.
+        api.setTunnels([{ network: ['tcp'], address: '10.0.0.1:9000', target: '3.3.3.3:80' }]);
+        resolveConfirm(true);
+        await flush();
+
+        expect(saveMock).not.toHaveBeenCalled();
+        expect(list.textContent).toContain('10.0.0.1:9000');
+    });
+
+    it('a tunnel that moved while confirmation waits is still the one deleted', async () => {
+        const saveMock = vi.fn().mockResolvedValue(true);
+        const tunnelA = { network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' };
+        const tunnelB = { network: ['tcp'], address: '127.0.0.1:9090', target: '2.2.2.2:80' };
+        const { api, list } = await renderTunnels([tunnelA, tunnelB], saveMock);
+
+        const buttons = list.querySelectorAll('.btn-delete-icon');
+        const resolveConfirm = clickAndHoldConfirm(buttons[1]);
+        await flush();
+
+        // Same tunnels, swapped order: B now sits at index 0.
+        api.setTunnels([tunnelB, tunnelA]);
+        resolveConfirm(true);
+        await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));
+
+        expect(saveMock).toHaveBeenCalledWith({ tunnels: [tunnelA] });
+    });
+
+    it('a tunnel replaced by an identical copy while confirmation waits is still deleted', async () => {
+        // A settings reload replaces the list objects while the
+        // confirmation is open, but the same rule is still there: the
+        // confirmed deletion must go through, not silently give up
+        // because the object identity changed.
+        const saveMock = vi.fn().mockResolvedValue(true);
+        const tunnelA = { network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' };
+        const tunnelB = { network: ['tcp'], address: '127.0.0.1:9090', target: '2.2.2.2:80' };
+        const { api, list } = await renderTunnels([tunnelA, tunnelB], saveMock);
+
+        const resolveConfirm = clickAndHoldConfirm(list.querySelector('.btn-delete-icon'));
+        await flush();
+
+        // Fresh objects, same values: identity fails, value match finds A.
+        api.setTunnels([
+            { network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' },
+            { network: ['tcp'], address: '127.0.0.1:9090', target: '2.2.2.2:80' },
+        ]);
+        resolveConfirm(true);
+        await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));
+
+        expect(saveMock).toHaveBeenCalledWith({
+            tunnels: [{ network: ['tcp'], address: '127.0.0.1:9090', target: '2.2.2.2:80' }],
+        });
+    });
+
+    it('a confirmed deletion is abandoned when the value match is ambiguous', async () => {
+        // Two identical rules: after a reload the confirmed button no
+        // longer identifies one row, so the deletion must not pick one
+        // at random.
+        const saveMock = vi.fn().mockResolvedValue(true);
+        const tunnel = { network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' };
+        const { api, list } = await renderTunnels([tunnel, { ...tunnel }], saveMock);
+
+        const resolveConfirm = clickAndHoldConfirm(list.querySelector('.btn-delete-icon'));
+        await flush();
+
+        api.setTunnels([{ ...tunnel }, { ...tunnel }]);
+        resolveConfirm(true);
+        await flush();
+
+        expect(saveMock).not.toHaveBeenCalled();
+    });
+
+    it('a failed save restores the tunnel at its old place, not its stale index', async () => {
+        // Two deletions overlap: B (middle) is deleted first, then A
+        // (before it) while B's save is still pending. B's save fails:
+        // A is already gone, so B's captured index now points past C —
+        // the restore must go back before its surviving neighbour C,
+        // not to the stale index.
+        const tunnelA = { network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' };
+        const tunnelB = { network: ['tcp'], address: '127.0.0.1:9090', target: '2.2.2.2:80' };
+        const tunnelC = { network: ['tcp'], address: '127.0.0.1:7070', target: '3.3.3.3:80' };
+        /** @type {((value: boolean) => void)[]} */
+        const resolveSaves = [];
+        const saveMock = vi.fn(() => new Promise((resolve) => { resolveSaves.push(resolve); }));
+        const { list } = await renderTunnels([tunnelA, tunnelB, tunnelC], saveMock);
+
+        confirmMock.mockResolvedValue(true);
+        const buttons = list.querySelectorAll('.btn-delete-icon');
+        buttons[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await flush();
+        expect(saveMock).toHaveBeenCalledTimes(1);
+
+        buttons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await flush();
+        expect(saveMock).toHaveBeenCalledTimes(2);
+
+        resolveSaves[0](false);
+        await flush();
+        resolveSaves[1](true);
+        await flush();
+
+        const remaining = list.querySelectorAll('.btn-delete-icon');
+        expect(remaining).toHaveLength(2);
+        expect(remaining[0]?.getAttribute('aria-label')).toBe('Delete 127.0.0.1:9090');
+        expect(remaining[1]?.getAttribute('aria-label')).toBe('Delete 127.0.0.1:7070');
+    });
+
+    it('switching language re-renders the tunnel delete labels', async () => {
+        // The labels are built from the current language at render time:
+        // after a language switch they must follow without waiting for
+        // the next add or delete.
+        const { appStore } = await import('./state.js');
+        const { Bus, Events } = await import('./events.js');
+        const previousLang = appStore.get('currentLang');
+        appStore.set('currentLang', 'en');
+        try {
+            const saveMock = vi.fn().mockResolvedValue(true);
+            const { list } = await renderTunnels(
+                [{ network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' }],
+                saveMock,
+            );
+            expect(list.querySelector('.btn-delete-icon')?.getAttribute('aria-label')).toBe('Delete 127.0.0.1:8080');
+
+            appStore.set('currentLang', 'zh');
+            Bus.emit(Events.I18N_APPLIED);
+            expect(list.querySelector('.btn-delete-icon')?.getAttribute('aria-label')).toBe('删除 127.0.0.1:8080');
+            expect(list.querySelector('.btn-delete-icon')?.getAttribute('title')).toBe('删除 127.0.0.1:8080');
+        } finally {
+            appStore.set('currentLang', previousLang);
+        }
+    });
+
+    it('tunnel item delete button uses the current language for title and aria-label', async () => {
+        // The label is built from the current language at render time: a
+        // lookup stuck on English would pass the default-language checks
+        // above while showing the wrong text to other locales.
+        const { appStore } = await import('./state.js');
+        const previousLang = appStore.get('currentLang');
+        appStore.set('currentLang', 'zh');
+        try {
+            const saveMock = vi.fn().mockResolvedValue(true);
+            const { list } = await renderTunnels(
+                [{ network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' }],
+                saveMock,
+            );
+            const delBtn = list.querySelector('.btn-delete-icon');
+            expect(delBtn?.getAttribute('aria-label')).toBe('删除 127.0.0.1:8080');
+            expect(delBtn?.getAttribute('title')).toBe('删除 127.0.0.1:8080');
+        } finally {
+            appStore.set('currentLang', previousLang);
+        }
+    });
+
+    it('a failed save does not reinsert the tunnel into a replaced list', async () => {
+        // The list is replaced from outside (e.g. settings reload) while
+        // the delete's save is still pending, and the save then fails:
+        // the deleted tunnel must not be spliced back into the new list
+        // at its stale index — that list is authoritative.
+        const tunnelA = { network: ['tcp'], address: '127.0.0.1:8080', target: '1.1.1.1:80' };
+        const tunnelB = { network: ['tcp'], address: '127.0.0.1:9090', target: '2.2.2.2:80' };
+        /** @type {(value: boolean) => void} */
+        let resolveSave = () => {};
+        const saveMock = vi.fn(() => new Promise((resolve) => { resolveSave = resolve; }));
+        const { api, list } = await renderTunnels([tunnelA, tunnelB], saveMock);
+
+        confirmMock.mockResolvedValue(true);
+        list.querySelector('.btn-delete-icon')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await flush();
+        expect(saveMock).toHaveBeenCalledTimes(1);
+
+        api.setTunnels([tunnelB]);
+        resolveSave(false);
+        await flush();
+
+        // The new list is authoritative: re-rendering it shows only B.
+        api.renderTunnels();
+        const buttons = list.querySelectorAll('.btn-delete-icon');
+        expect(buttons).toHaveLength(1);
+        expect(buttons[0]?.getAttribute('aria-label')).toBe('Delete 127.0.0.1:9090');
     });
 });
