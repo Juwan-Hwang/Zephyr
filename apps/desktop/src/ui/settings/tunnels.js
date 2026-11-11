@@ -9,11 +9,28 @@
  */
 
 import { appStore } from '../state.js';
-import { showModal, showNotification } from '../notifications.js';
+import { showModal, showConfirmModal, showNotification } from '../notifications.js';
 import { SVG_ICONS } from '../icons.js';
 import { pasteWithFeedback, renderPasteButtonHtml } from '../../utils/clipboard.js';
 import { translations } from '../../i18n.js';
 import { escapeHtml } from '../../utils/sanitize.js';
+import { Bus, Events } from '../events.js';
+
+/**
+ * Two tunnel rows are the same rule when address, target and network
+ * all match (network is a list — compare it sorted, so order does not
+ * matter). Used when a reload replaced the list objects while a
+ * confirmation waited: identity no longer works, but the rule is
+ * still recognisable.
+ * @param {any} a
+ * @param {any} b
+ * @returns {boolean}
+ */
+function sameTunnel(a, b) {
+    if (a.address !== b.address || a.target !== b.target) return false;
+    const networks = (/** @type {any} */ t) => (Array.isArray(t.network) ? t.network : [t.network]).map(String).sort().join(',');
+    return networks(a) === networks(b);
+}
 
 /**
  * Validate an address string (IPv4:port, [IPv6]:port, hostname:port).
@@ -69,6 +86,26 @@ export function initTunnelSettings({
     /** @type {any[]} */
     let currentTunnels = initialTunnels;
 
+    // Tunnel-list saves run one at a time, in action order: two
+    // overlapping saves can otherwise land out of order, and the stale
+    // one overwrites the newer list the backend already holds. Each
+    // save sends the list as it stands when its turn comes, so a
+    // failed earlier save's restore is already in the next payload.
+    let saveChain = Promise.resolve();
+    /**
+     * Save the current tunnel list after all earlier tunnel saves
+     * have settled, in action order.
+     * @returns {Promise<boolean|'restart'>}
+     */
+    function saveTunnels() {
+        const run = saveChain.then(() => saveConfigToCore({ tunnels: currentTunnels }));
+        saveChain = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        return run;
+    }
+
     function renderTunnels() {
         if (!tunnelsList) return;
 
@@ -82,7 +119,7 @@ export function initTunnelSettings({
         if (tunnelsEmpty) tunnelsEmpty.style.display = 'none';
         tunnelsList.replaceChildren();
 
-        currentTunnels.forEach((tunnel, index) => {
+        currentTunnels.forEach((tunnel) => {
             const item = document.createElement('div');
             item.className = 'flex items-center justify-between bg-[var(--zephyr-bg-input)] border border-[var(--zephyr-border-subtle)] rounded-lg p-3 hover:border-[var(--zephyr-border-strong)] transition-[border-color]';
 
@@ -115,14 +152,82 @@ export function initTunnelSettings({
             const delBtn = document.createElement('button');
             delBtn.className = 'btn-delete-icon';
             delBtn.type = 'button';
-            delBtn.setAttribute('aria-label', `${(/** @type {any} */ (translations)[appStore.get('currentLang')] || {}).delete || 'Delete'} ${tunnel.address}`);
+            // Tooltip and accessible name carry the same row-specific text,
+            // matching the other icon-only row buttons in this app.
+            const deleteLabel = `${(/** @type {any} */ (translations)[appStore.get('currentLang')] || {}).delete || 'Delete'} ${tunnel.address}`;
+            delBtn.title = deleteLabel;
+            delBtn.setAttribute('aria-label', deleteLabel);
             // eslint-disable-next-line no-unsanitized/property -- static SVG constant
             delBtn.innerHTML = SVG_ICONS.trash; // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
             delBtn.onclick = async () => {
-                const deleted = currentTunnels[index];
-                currentTunnels.splice(index, 1);
-                const ok = await saveConfigToCore({ tunnels: currentTunnels });
-                if (!ok) { currentTunnels.splice(index, 0, deleted); return; }
+                const confirmed = await showConfirmModal(
+                    `${t.delete || 'Delete'} ${tunnel.address}?`,
+                    tunnel.target ? `${tunnel.address} → ${tunnel.target}` : tunnel.address,
+                    { danger: true, confirmText: t.delete || 'Delete' }
+                );
+                if (!confirmed) return;
+                // The list may have changed while the confirmation waited
+                // (another deletion, or setTunnels/resetTunnels replacing
+                // the array): find this tunnel again instead of trusting
+                // the rendered index. Identity first; a reload replaces
+                // the objects, so identity fails even when the same rule
+                // is still there — fall back to a value match, but only
+                // when exactly one current tunnel matches. Zero or
+                // several matches means the rule is gone or ambiguous:
+                // leave the list untouched rather than delete the wrong
+                // row.
+                let currentIndex = currentTunnels.indexOf(tunnel);
+                if (currentIndex === -1) {
+                    const matches = [];
+                    for (let i = 0; i < currentTunnels.length; i += 1) {
+                        if (sameTunnel(currentTunnels[i], tunnel)) matches.push(i);
+                    }
+                    if (matches.length !== 1) return;
+                    currentIndex = matches[0];
+                }
+                const deleted = currentTunnels[currentIndex];
+                // Remember which list this deletion came from:
+                // setTunnels/resetTunnels replace the array wholesale,
+                // so a restore after a failed save must only touch
+                // this list. And remember the neighbours: another
+                // deletion can shift this same array while the save is
+                // in flight, so the captured index may no longer be the
+                // deleted row's place — the restore goes back before the
+                // next row (or after the previous one) to keep the order.
+                const listAtDelete = currentTunnels;
+                const nextTunnel = currentTunnels[currentIndex + 1] ?? null;
+                const prevTunnel = currentTunnels[currentIndex - 1] ?? null;
+                currentTunnels.splice(currentIndex, 1);
+                const ok = await saveTunnels();
+                if (!ok) {
+                    // Only restore into the list this deletion came from:
+                    // if the array was replaced while the save was in
+                    // flight, that list is authoritative — splicing the
+                    // deleted tunnel back into it at the old index would
+                    // corrupt it.
+                    if (currentTunnels === listAtDelete) {
+                        const nextIndex = nextTunnel ? currentTunnels.indexOf(nextTunnel) : -1;
+                        let target;
+                        if (nextIndex !== -1) target = nextIndex;
+                        else {
+                            const prevIndex = prevTunnel ? currentTunnels.indexOf(prevTunnel) : -1;
+                            if (prevIndex !== -1) target = prevIndex + 1;
+                            else target = Math.min(currentIndex, currentTunnels.length);
+                        }
+                        // Never restore past the row's own place: when
+                        // several deletions fail together, the neighbour
+                        // anchor is shared, and restoring at the anchor
+                        // alone would stack the rows in failure order
+                        // instead of their original order.
+                        target = Math.min(target, currentIndex);
+                        currentTunnels.splice(target, 0, deleted);
+                    }
+                    // The list changed under the save: re-render, or a
+                    // language apply that ran while the save was pending
+                    // leaves the restored row missing onscreen.
+                    renderTunnels();
+                    return;
+                }
                 renderTunnels();
             };
 
@@ -268,7 +373,7 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
                     const newTunnel = { network, address, target };
                     currentTunnels.push(newTunnel);
                     try {
-                        const ok = await saveConfigToCore({ tunnels: currentTunnels });
+                        const ok = await saveTunnels();
                         if (!ok) { currentTunnels.pop(); confirmBtn.disabled = false; return; }
                         closeModal(null);
                         renderTunnels();
@@ -284,6 +389,17 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
 
     // Initial render
     renderTunnels();
+
+    // Row labels (listen line, delete tooltip) are read from the current
+    // language at render time: re-render when the language changes, or
+    // the rows keep the old language until the next add or delete.
+    // I18N_APPLIED fires while the dropdown is still applying
+    // translations — the store still holds the old language then — so
+    // that render alone never picks up the new labels; the store is
+    // updated right after, and LANGUAGE_CHANGED is the event that
+    // actually carries the switch.
+    Bus.on(Events.I18N_APPLIED, renderTunnels);
+    Bus.on(Events.LANGUAGE_CHANGED, renderTunnels);
 
     return {
         renderTunnels,
