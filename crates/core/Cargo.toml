@@ -30,7 +30,7 @@ uniffi = ["dep:uniffi"]
 tokio-async = ["tokio"]
 
 [dev-dependencies]
-divan = { version = "5.0.3", package = "codspeed-divan-compat" }
+divan = { version = "6.0.0", package = "codspeed-divan-compat" }
 insta = { version = "1", features = ["filters"] }
 
 # 继承 workspace 根 Cargo.toml 的 [workspace.lints] 统一配置，
