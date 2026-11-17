@@ -5,9 +5,9 @@ use super::fetch_util::fetch_url_content;
 use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
 use zephyr_core::config::subscription::{
     classify_sub_error, disposition_profile_stem, extract_name_from_rules, is_literal_private_host,
-    is_private_ip, parse_content_disposition_filename, quote_short_id_values, redact_url_in_string,
-    select_global_candidate, try_decode_base64_content, validate_subscription_name,
-    validate_subscription_url_basic,
+    is_private_ip, parse_content_disposition_filename, parse_json_clash_config,
+    quote_short_id_values, redact_url_in_string, select_global_candidate,
+    try_decode_base64_content, validate_subscription_name, validate_subscription_url_basic,
 };
 
 use super::core_process::ensure_app_storage;
@@ -2503,15 +2503,272 @@ pub(crate) async fn download_sub_inner_with_budget(
 
 /// Whether `content` may supply a rule-derived name: either it went through
 /// the YAML parse-and-reserialize step below, or it parses on its own as a
-/// mapping with a `rules` sequence. The second arm matters because content
-/// accepted as a node list (anything starting with `http`) may still be a
-/// Clash YAML config (e.g. one starting with `http-port:`); genuine node
-/// lists fail this parse and keep `None`, matching the full parser.
+/// mapping with a `rules` sequence. Content kept unparsed is a node list,
+/// which fails this parse and keeps `None`, matching the full parser.
 fn content_may_supply_rule_name(content_is_parsed_yaml: bool, content: &str) -> bool {
     content_is_parsed_yaml
         || serde_yaml::from_str::<serde_yaml::Value>(content)
             .ok()
             .is_some_and(|v| v.get("rules").is_some_and(serde_yaml::Value::is_sequence))
+}
+
+/// Turn a downloaded subscription body into the text saved as the profile.
+///
+/// Base64-wrapped configs are decoded first. A Clash config, whether YAML
+/// or JSON, is parsed, stripped of dangerous keys and written back as YAML:
+/// the profile is a `.yaml` file and every later reader (the editor, the
+/// rule and provider readers, the runtime config merge) expects YAML text.
+/// Only a node list of URLs (see [`is_url_list`]) is kept as is. Other
+/// content that has a Clash marker, or whose first key starts with `http`
+/// (`http-port:`), must parse to a mapping; anything else, valid JSON that
+/// is not a Clash config included, is rejected.
+///
+/// Returns the text and whether it went through the parse step, which is
+/// what [`content_may_supply_rule_name`] needs.
+fn normalize_subscription_content(mut content: String) -> Result<(String, bool), String> {
+    // Base64 content is decoded only when it holds a mapping with a
+    // `proxies` or `proxy-groups` list, so the decoded text is a config
+    // even when it spells its keys in a way the markers below miss
+    // (`"proxy-groups":`, `proxies :`).
+    let mut decoded_config = false;
+    if !content.contains("proxies:") && !content.contains("port:") {
+        if let Some(decoded) = try_decode_base64_content(&content) {
+            content = decoded;
+            decoded_config = true;
+        }
+    }
+
+    // A JSON body is checked first: its text has no `proxies:` marker, and
+    // when a value happens to contain one, the JSON parser still reads the
+    // whole document exactly. JSON that is not a Clash config (a sing-box
+    // config, an API reply) is not read again as YAML, where a `proxies:`
+    // inside one of its strings would let it through.
+    let mut yaml_val = if let Some(json_config) = parse_json_clash_config(&content) {
+        json_config
+    } else if is_json_document(&content) {
+        return Err(UNSUPPORTED_SUBSCRIPTION_CONTENT.to_owned());
+    } else if is_url_list(&content) {
+        // Checked before the markers: a URL may contain `proxies:`.
+        return Ok((content, false));
+    } else if decoded_config
+        || content.contains("proxies:")
+        || content.contains("proxy-groups:")
+        || content.trim_start().starts_with("http")
+    {
+        // Quote short-id values before parsing to prevent scientific
+        // notation corruption. A config must parse to a mapping, so its
+        // dangerous keys can be removed.
+        match serde_yaml::from_str::<serde_yaml::Value>(&quote_short_id_values(&content)) {
+            Ok(value) if value.is_mapping() => value,
+            Ok(_) => return Err(UNSUPPORTED_SUBSCRIPTION_CONTENT.to_owned()),
+            Err(e) => return Err(format!("Invalid YAML structure in subscription: {e}")),
+        }
+    } else if content.trim().is_empty() {
+        return Ok((content, false));
+    } else {
+        return Err(UNSUPPORTED_SUBSCRIPTION_CONTENT.to_owned());
+    };
+
+    // Use module-level function to remove dangerous keys
+    remove_dangerous_keys(&mut yaml_val, false);
+    let content = serde_yaml::to_string(&yaml_val)
+        .map_err(|e| format!("Failed to serialize sanitized subscription: {e}"))?;
+    // Only parsed YAML may supply a rule-derived name: unvalidated
+    // node-list content never yielded one from the full parser, and
+    // must not gain one from the fast path. See
+    // `content_may_supply_rule_name`.
+    Ok((content, true))
+}
+
+/// Whether `content` is a JSON object or array (a leading byte order mark
+/// and surrounding whitespace aside).
+fn is_json_document(content: &str) -> bool {
+    let body = content.trim_start_matches('\u{feff}').trim();
+    body.starts_with(['{', '[']) && serde_json::from_str::<serde::de::IgnoredAny>(body).is_ok()
+}
+
+/// The error for content that is neither a Clash config nor a node list.
+const UNSUPPORTED_SUBSCRIPTION_CONTENT: &str =
+    "The subscription content is neither a valid Clash YAML nor a supported node list";
+
+/// Whether `content` is a node list, the one kind of content that is saved
+/// as downloaded: it starts with an `http://` or `https://` URL (the scheme
+/// in any case), and every other line that is not blank or a `#` comment
+/// is a URL too (`scheme://...`, see [`is_url_line`]). Lines end where the
+/// YAML parser ends them: at LF, CR, NEL, LS and PS.
+///
+/// Content that only starts with a URL may still be a YAML mapping
+/// (`https://x: 1` is a key) followed by any keys, which must be cleaned.
+/// When every line starts with a URL, every top-level key does too, so none
+/// of them is a key that has to be removed.
+fn is_url_list(content: &str) -> bool {
+    let start = content.trim_start();
+    let starts_with_scheme = |scheme: &str| {
+        start
+            .get(..scheme.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
+    };
+    if !(starts_with_scheme("http://") || starts_with_scheme("https://")) {
+        return false;
+    }
+    start
+        .split(['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'])
+        .map(str::trim)
+        .all(|line| line.is_empty() || line.starts_with('#') || is_url_line(line))
+}
+
+/// Whether a node list line is a URL: a scheme, `://` and something after
+/// it. An `http` or `https` URL must also parse and name a host.
+fn is_url_line(line: &str) -> bool {
+    let Some((scheme, rest)) = line.split_once("://") else {
+        return false;
+    };
+    let scheme_ok = scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    if !scheme_ok || rest.is_empty() {
+        return false;
+    }
+    if scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https") {
+        return url::Url::parse(line)
+            .is_ok_and(|url| url.host_str().is_some_and(|h| !h.is_empty()));
+    }
+    true
+}
+
+/// Read a profile file dropped on the window. Only a regular file of at
+/// most [`MAX_RESPONSE_SIZE`] bytes is read, the same cap a downloaded
+/// subscription has; the read itself also stops past the cap, in case the
+/// file grows after the size check. Returns `None` for anything else, or
+/// for text that is not UTF-8.
+pub(crate) fn read_dropped_profile(path: &std::path::Path) -> Option<String> {
+    use std::io::Read as _;
+
+    let metadata = std::fs::metadata(path).ok()?;
+    let fits = usize::try_from(metadata.len()).is_ok_and(|len| len <= MAX_RESPONSE_SIZE);
+    if !metadata.is_file() || !fits {
+        return None;
+    }
+    let limit = u64::try_from(MAX_RESPONSE_SIZE)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(limit)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() > MAX_RESPONSE_SIZE {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+
+/// Save a dropped profile as `name` at `target` and drop any metadata
+/// still kept for that name, under the metadata lock new subscriptions use.
+///
+/// `name` was free when it was chosen, but the metadata can still hold an
+/// entry for it (a profile deleted outside the app), and that entry would
+/// make the local file look like a subscription with a URL to update from.
+/// An entry spelled another way counts too when it now resolves to the
+/// written file (a file system that ignores case or Unicode normalization);
+/// an entry that is a symlink is a separate profile and stays. When the
+/// metadata cannot be saved, the written file is removed again.
+pub(crate) fn save_dropped_profile(
+    paths: &super::AppPaths,
+    target: &std::path::Path,
+    name: &str,
+    content: &str,
+    encrypt: bool,
+) -> Result<(), String> {
+    let _metadata_guard = lock_metadata();
+    write_profile_file(target, content, encrypt)?;
+    let mut metadata = load_metadata(paths);
+    let written = target.canonicalize().ok();
+    let before = metadata.configs.len();
+    metadata.configs.retain(|key, _| {
+        if key == name {
+            return false;
+        }
+        let path = paths.profiles_dir.join(key);
+        let is_link = path
+            .symlink_metadata()
+            .is_ok_and(|meta| meta.file_type().is_symlink());
+        is_link || written.is_none() || path.canonicalize().ok() != written
+    });
+    if metadata.configs.len() != before {
+        if let Err(e) = save_metadata(paths, &metadata) {
+            // The stale entry still points at this name: take the file back
+            // out, so no profile is left that an update would overwrite
+            // from the old URL. The drop can be retried later.
+            return Err(match std::fs::remove_file(target) {
+                Ok(()) => e,
+                Err(remove) => format!("{e}; the dropped profile could not be removed: {remove}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// The name and text a profile file dropped on the window is saved under,
+/// or `None` when the file is not a config this import takes.
+///
+/// `.yaml`/`.yml` files and Clash configs saved as `.json` are taken; a
+/// JSON config is saved as `<stem>.yaml`. The file must parse to a mapping
+/// (an empty or broken file is skipped rather than saved as `null`), and it
+/// is cleaned like a downloaded subscription: short-id values are quoted
+/// before parsing so a hex-like id is not read as a number, and dangerous
+/// keys are removed.
+pub(crate) fn dropped_profile_import(file_name: &str, content: &str) -> Option<(String, String)> {
+    let path = std::path::Path::new(file_name);
+    let ext = dropped_profile_extension(file_name)?;
+    let (name, mut value) = match ext.as_str() {
+        "yaml" | "yml" => (
+            file_name.to_owned(),
+            serde_yaml::from_str::<serde_yaml::Value>(&quote_short_id_values(content)).ok()?,
+        ),
+        "json" => (
+            format!("{}.yaml", path.file_stem()?.to_str()?),
+            parse_json_clash_config(content)?,
+        ),
+        _ => return None,
+    };
+    if !value.is_mapping() {
+        return None;
+    }
+    remove_dangerous_keys(&mut value, false);
+    let text = serde_yaml::to_string(&value).ok()?;
+    Some((name, text))
+}
+
+/// The lowercase extension of a dropped file that may be a profile
+/// (`yaml`, `yml` or `json`), or `None` for any other file, which is skipped
+/// without being read.
+pub(crate) fn dropped_profile_extension(file_name: &str) -> Option<String> {
+    let ext = std::path::Path::new(file_name)
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase();
+    matches!(ext.as_str(), "yaml" | "yml" | "json").then_some(ext)
+}
+
+/// The file name a dropped profile is saved under in `profiles_dir`:
+/// `safe_name` when it is free, otherwise the next free `-{n}` variant (see
+/// [`next_free_profile_name`]). A drop adds a profile: it never replaces an
+/// existing one, which may be a subscription whose next update would
+/// download over the dropped content, and never takes the reserved runtime
+/// config name, which the profile list hides. The caller holds the
+/// profile-transform lock from this call through the write, so two drops at
+/// once cannot both take the same free name.
+pub(crate) fn dropped_profile_file_name(profiles_dir: &std::path::Path, safe_name: &str) -> String {
+    if safe_name.eq_ignore_ascii_case(RUN_CONFIG_FILE_NAME)
+        || profile_entry_exists(&profiles_dir.join(safe_name))
+    {
+        next_free_profile_name(profiles_dir, safe_name)
+    } else {
+        safe_name.to_owned()
+    }
 }
 
 /// File name of the generated runtime config. It lives in the core
@@ -2549,6 +2806,13 @@ const MAX_PROFILE_FILE_NAME_BYTES: usize = 255;
 /// Bytes kept free for a `-{n}` suffix: the dash plus the ten digits of
 /// `u32::MAX`.
 const PROFILE_SUFFIX_RESERVE_BYTES: usize = 11;
+
+/// Whether `path` names an existing directory entry. Unlike
+/// [`std::path::Path::exists`], a symlink whose target is missing counts:
+/// writing over its name would replace the link.
+fn profile_entry_exists(path: &std::path::Path) -> bool {
+    path.symlink_metadata().is_ok()
+}
 
 /// Return `{stem}-{n}{ext}` for the smallest `n` above every numeric suffix
 /// already used for `clean_name` in `profiles_dir` (starting at 1), so a new
@@ -2607,7 +2871,7 @@ fn next_free_profile_name(profiles_dir: &std::path::Path, clean_name: &str) -> S
     // and otherwise take the next free suffix, wrapping to the low gaps.
     let free_name = |n: u32| {
         let name = format!("{stem}-{n}{ext}");
-        (!profiles_dir.join(&name).exists()).then_some(name)
+        (!profile_entry_exists(&profiles_dir.join(&name))).then_some(name)
     };
     (max_suffix..=u32::MAX)
         .chain(1..max_suffix)
@@ -3294,50 +3558,18 @@ async fn download_sub_inner_raw(
         }
     })?;
 
-    let mut content = String::from_utf8(bytes)
+    let body = String::from_utf8(bytes)
         .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
 
     // Reject empty responses — typically caused by expired subscriptions,
     // server-side errors, or CDN edge returning an empty 200.
-    if content.trim().is_empty() {
+    if body.trim().is_empty() {
         return Err(
             "Subscription returned empty content. The subscription may have expired or the server is unavailable.".to_owned(),
         );
     }
 
-    if !content.contains("proxies:") && !content.contains("port:") {
-        if let Some(decoded) = try_decode_base64_content(&content) {
-            content = decoded;
-        }
-    }
-
-    // Only parsed YAML may supply a rule-derived name: unvalidated
-    // node-list content never yielded one from the full parser, and must
-    // not gain one from the fast path. See `content_may_supply_rule_name`.
-    let mut content_is_parsed_yaml = false;
-    if content.contains("proxies:") || content.contains("proxy-groups:") {
-        // Quote short-id values before parsing to prevent scientific notation corruption
-        content = quote_short_id_values(&content);
-
-        match serde_yaml::from_str::<serde_yaml::Value>(&content) {
-            Ok(mut yaml_val) => {
-                // Use module-level function to remove dangerous keys
-                remove_dangerous_keys(&mut yaml_val, false);
-
-                content = serde_yaml::to_string(&yaml_val)
-                    .map_err(|e| format!("Failed to serialize sanitized subscription: {e}"))?;
-                content_is_parsed_yaml = true;
-            }
-            Err(e) => {
-                return Err(format!("Invalid YAML structure in subscription: {e}"));
-            }
-        }
-    } else if !content.trim().starts_with("http") && !content.trim().is_empty() {
-        return Err(
-            "The subscription content is neither a valid Clash YAML nor a supported node list"
-                .to_owned(),
-        );
-    }
+    let (content, content_is_parsed_yaml) = normalize_subscription_content(body)?;
 
     let paths = ensure_app_storage(app)?;
 
@@ -3376,7 +3608,7 @@ async fn download_sub_inner_raw(
 
     // When overwrite is true (updating an existing subscription), write directly.
     // When false (adding a new subscription), auto-append numeric suffix to avoid collisions.
-    if !overwrite && paths.profiles_dir.join(&clean_name).exists() {
+    if !overwrite && profile_entry_exists(&paths.profiles_dir.join(&clean_name)) {
         clean_name = next_free_profile_name(&paths.profiles_dir, &base_name);
     }
 
@@ -3430,7 +3662,7 @@ async fn download_sub_inner_raw(
 
         // Decide overwrite-vs-new *under the lock*: the pre-lock probe can
         // be invalidated by a concurrent delete or create.
-        if !overwrite && target_path.exists() {
+        if !overwrite && profile_entry_exists(&target_path) {
             // A config with this name was created concurrently between the
             // pre-lock collision check and here (e.g. two new downloads whose
             // server suggested the same name). Pick the next free suffix now:
@@ -3818,6 +4050,419 @@ mod tests {
         );
     }
 
+    /// The Clash subscription BPB Worker Panel serves: `JSON.stringify(config,
+    /// null, 4)` of its config builder, with WebSocket VLESS and Trojan
+    /// nodes, Reality chain nodes, DNS policy, rule providers and rules.
+    const BPB_CLASH_JSON: &str = include_str!("testdata/bpb_normal_clash.json");
+
+    fn yaml_names(value: &serde_yaml::Value, key: &str) -> Vec<String> {
+        value
+            .get(key)
+            .and_then(serde_yaml::Value::as_sequence)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.get("name")?.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn test_normalize_subscription_content_converts_json_config_to_yaml() {
+        use super::normalize_subscription_content;
+
+        let source: serde_json::Value = serde_json::from_str(BPB_CLASH_JSON).unwrap();
+        let (saved, parsed) = normalize_subscription_content(BPB_CLASH_JSON.to_owned()).unwrap();
+        assert!(parsed);
+        // Saved as block YAML, not as the JSON text.
+        assert!(!saved.trim_start().starts_with('{'));
+        assert!(saved.contains("\nproxies:\n"));
+        assert!(saved.contains("\nproxy-groups:\n"));
+        assert!(saved.contains("\nrules:\n"));
+
+        let value: serde_yaml::Value = serde_yaml::from_str(&saved).unwrap();
+        let source_names = |key: &str| -> Vec<String> {
+            source[key]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["name"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(yaml_names(&value, "proxies").len(), 12);
+        assert_eq!(yaml_names(&value, "proxies"), source_names("proxies"));
+        assert_eq!(
+            yaml_names(&value, "proxy-groups"),
+            source_names("proxy-groups")
+        );
+        assert_eq!(
+            serde_yaml::to_value(&source["rules"]).unwrap(),
+            value.get("rules").cloned().unwrap()
+        );
+
+        // Values keep their JSON types: a hex-like Reality short-id stays a
+        // string, ports stay numbers, and an empty string stays empty.
+        let chain = &value.get("proxies").unwrap().as_sequence().unwrap()[1];
+        assert_eq!(
+            chain
+                .get("reality-opts")
+                .and_then(|opts| opts.get("short-id"))
+                .and_then(serde_yaml::Value::as_str),
+            Some("34010e92")
+        );
+        assert_eq!(
+            chain.get("port").and_then(serde_yaml::Value::as_u64),
+            Some(443)
+        );
+        assert_eq!(
+            chain.get("encryption").and_then(serde_yaml::Value::as_str),
+            Some("")
+        );
+        assert_eq!(
+            chain
+                .get("dialer-proxy")
+                .and_then(serde_yaml::Value::as_str),
+            Some("💦 1. VL - Domain : 443")
+        );
+
+        // The same sanitizing as a YAML subscription: dashboard keys and
+        // rule-provider paths are removed, everything else is kept.
+        assert!(value.get("external-ui").is_none());
+        assert!(value.get("external-ui-url").is_none());
+        assert!(value.get("external-controller-cors").is_none());
+        let providers = value.get("rule-providers").unwrap().as_mapping().unwrap();
+        assert_eq!(providers.len(), 5);
+        for provider in providers.values() {
+            assert!(provider.get("path").is_none());
+            assert!(provider.get("url").is_some());
+        }
+        assert_eq!(
+            value
+                .get("dns")
+                .and_then(|dns| dns.get("hosts"))
+                .and_then(|hosts| hosts.get("rule-set:malware"))
+                .and_then(serde_yaml::Value::as_str),
+            Some("rcode://refused")
+        );
+
+        // Saving the JSON gives exactly what saving the same config written
+        // as YAML gives.
+        let as_yaml = serde_yaml::to_string(&source).unwrap();
+        assert_eq!(
+            normalize_subscription_content(as_yaml).unwrap(),
+            (saved.clone(), true)
+        );
+
+        // A base64-wrapped JSON config is decoded and converted the same way.
+        let encoded = {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD.encode(BPB_CLASH_JSON)
+        };
+        assert_eq!(
+            normalize_subscription_content(encoded).unwrap(),
+            (saved.clone(), true)
+        );
+
+        // The converted text names a new profile like any parsed config.
+        assert!(super::content_may_supply_rule_name(parsed, &saved));
+    }
+
+    #[test]
+    fn test_normalize_subscription_content_decoded_config_with_odd_keys() {
+        use super::normalize_subscription_content;
+        // Base64 content the decoder accepted is a config, also when its
+        // keys are spelled so the text markers miss them.
+        let groups = "\"proxy-groups\": [{name: Auto, type: select, proxies : [DIRECT]}]\nscript: {code: x}\n";
+        let encoded = {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD.encode(groups)
+        };
+        let (saved, parsed) = normalize_subscription_content(encoded).unwrap();
+        assert!(parsed);
+        assert!(
+            saved.contains("proxy-groups:") && !saved.contains("script"),
+            "{saved}"
+        );
+    }
+
+    #[test]
+    fn test_is_url_list_unicode_line_breaks() {
+        // NEL, LS and PS end lines for the YAML parser, so a key after one
+        // is not part of the URL before it.
+        for line_break in ["\u{85}", "\u{2028}", "\u{2029}"] {
+            let body = format!("http://a:1/x:{line_break}script: {{code: x}}\n");
+            assert!(!super::is_url_list(&body), "{body:?}");
+            let urls = format!("https://a.example.com/x{line_break}vmess://abc\n");
+            assert!(super::is_url_list(&urls), "{urls:?}");
+        }
+    }
+
+    #[test]
+    fn test_normalize_subscription_content_keeps_other_formats() {
+        use super::normalize_subscription_content;
+
+        let yaml = "proxies:\n  - name: a\n    type: vless\n    server: a.example.com\n    port: 443\n    reality-opts:\n      short-id: 34010e92\nrules:\n  - MATCH,a\n";
+        let (saved, parsed) = normalize_subscription_content(yaml.to_owned()).unwrap();
+        assert!(parsed);
+        let value: serde_yaml::Value = serde_yaml::from_str(&saved).unwrap();
+        assert_eq!(
+            value["proxies"][0]["reality-opts"]["short-id"].as_str(),
+            Some("34010e92")
+        );
+
+        let node_list = "https://a.example.com/one\nhttps://b.example.com/two\n";
+        assert_eq!(
+            normalize_subscription_content(node_list.to_owned()).unwrap(),
+            (node_list.to_owned(), false)
+        );
+
+        // A config without `proxies:` whose first key starts with `http` is
+        // not a node list: it is parsed and cleaned like any config.
+        let http_port = "http-port: 7890\nscript:\n  code: evil\nproxy-providers:\n  p:\n    type: http\n    url: https://p.example.com/list\n    path: ../../outside.yaml\nrules:\n  - MATCH,DIRECT\n";
+        let (saved, parsed) = normalize_subscription_content(http_port.to_owned()).unwrap();
+        assert!(parsed);
+        let value: serde_yaml::Value = serde_yaml::from_str(&saved).unwrap();
+        assert!(value.get("script").is_none(), "{saved}");
+        assert!(
+            value
+                .get("proxy-providers")
+                .and_then(|providers| providers.get("p"))
+                .is_some_and(|provider| provider.get("path").is_none()),
+            "{saved}"
+        );
+        assert_eq!(
+            value.get("http-port").and_then(serde_yaml::Value::as_u64),
+            Some(7890)
+        );
+        // One that does not parse, or is not a mapping, is rejected rather
+        // than saved with its dangerous keys.
+        for broken in [
+            "http-port: 7890\nscript:\n  code: evil\nport: [unclosed\n",
+            "httpfoo\n",
+        ] {
+            assert!(
+                normalize_subscription_content(broken.to_owned()).is_err(),
+                "{broken}"
+            );
+        }
+        // A list of URLs is still kept as downloaded, also with other
+        // schemes, blank lines and comments in it.
+        for urls in [
+            "https://a.example.com/x#HK: 01\nhttp://b.example.com/y\n",
+            "https://a.example.com/x\n\n# more\n  vmess://eyJhZGQiOiIxIn0=\n",
+        ] {
+            assert_eq!(
+                normalize_subscription_content(urls.to_owned()).unwrap(),
+                (urls.to_owned(), false),
+                "{urls}"
+            );
+        }
+        // The scheme of the first URL may be in any case.
+        for urls in [
+            "httpS://a.example.com/x\nHTTP://b.example.com/y\n",
+            "HTTPS://a.example.com/x\rvmess://eyJhZGQiOiIxIn0=\r",
+        ] {
+            assert_eq!(
+                normalize_subscription_content(urls.to_owned()).unwrap(),
+                (urls.to_owned(), false),
+                "{urls}"
+            );
+        }
+        // A line that is not a URL makes it a config again, and an `http`
+        // URL with no host is not a URL.
+        for not_list in ["https://a.example.com/x\nscript: 1\n", "https://\n"] {
+            assert!(!super::is_url_list(not_list), "{not_list}");
+        }
+        // Lines split by a bare CR are lines to YAML too: the keys after it
+        // are not hidden in the first URL's line.
+        let lone_cr = "https://a: 1\rscript:\r  code: evil\r";
+        let (saved, parsed) = normalize_subscription_content(lone_cr.to_owned()).unwrap();
+        assert!(parsed);
+        let value: serde_yaml::Value = serde_yaml::from_str(&saved).unwrap();
+        assert!(value.get("script").is_none(), "{saved}");
+        // A mapping whose first key is a URL is a config, not a list: its
+        // dangerous keys are removed.
+        let url_key = "https://x: 1\nscript:\n  code: evil\nproxy-providers: {p: {type: http, url: https://p.example.com/l, path: ../../x.yaml}}\n";
+        let (saved, parsed) = normalize_subscription_content(url_key.to_owned()).unwrap();
+        assert!(parsed);
+        let value: serde_yaml::Value = serde_yaml::from_str(&saved).unwrap();
+        assert!(value.get("script").is_none(), "{saved}");
+        assert!(
+            value
+                .get("proxy-providers")
+                .and_then(|providers| providers.get("p"))
+                .is_some_and(|provider| provider.get("path").is_none()),
+            "{saved}"
+        );
+
+        let err = normalize_subscription_content("proxies: [unclosed".to_owned()).unwrap_err();
+        assert!(
+            err.starts_with("Invalid YAML structure in subscription"),
+            "{err}"
+        );
+
+        // JSON that is not a Clash config (a sing-box config) is still
+        // rejected, also when one of its strings holds a Clash marker.
+        for other in [
+            r#"{"outbounds":[{"type":"direct","tag":"direct"}]}"#,
+            r#"{"outbounds":[{"tag":"proxies: x"}],"script":{"code":"evil"}}"#,
+            "just some text",
+        ] {
+            let err = normalize_subscription_content(other.to_owned()).unwrap_err();
+            assert!(err.contains("neither a valid Clash YAML"), "{err}");
+        }
+    }
+
+    #[test]
+    fn test_dropped_profile_import() {
+        use super::dropped_profile_import;
+
+        // A Clash config saved as JSON is taken and saved as YAML.
+        let (name, text) = dropped_profile_import("BPB-normal-clash.json", BPB_CLASH_JSON).unwrap();
+        assert_eq!(name, "BPB-normal-clash.yaml");
+        let (converted, _) =
+            super::normalize_subscription_content(BPB_CLASH_JSON.to_owned()).unwrap();
+        assert_eq!(text, converted);
+
+        // A YAML file keeps its name, and a hex-like short-id stays a string.
+        let yaml = "proxies:\n  - name: a\n    type: vless\n    reality-opts:\n      short-id: 34010e92\nexternal-ui: ui\n";
+        let (name, text) = dropped_profile_import("Mine.YML", yaml).unwrap();
+        assert_eq!(name, "Mine.YML");
+        let value: serde_yaml::Value = serde_yaml::from_str(&text).unwrap();
+        assert_eq!(
+            value["proxies"][0]["reality-opts"]["short-id"].as_str(),
+            Some("34010e92")
+        );
+        assert!(value.get("external-ui").is_none());
+
+        // Files that do not parse to a config are skipped, not saved as `null`.
+        for (file, content) in [
+            ("broken.yaml", "proxies: [unclosed"),
+            ("empty.yaml", ""),
+            ("list.yaml", "- a\n- b\n"),
+            ("sing-box.json", r#"{"outbounds":[]}"#),
+            ("notes.txt", "proxies:\n  - name: a\n"),
+            ("no-extension", "proxies: []\n"),
+        ] {
+            assert!(dropped_profile_import(file, content).is_none(), "{file}");
+        }
+    }
+
+    #[test]
+    fn test_pick_new_subscription_file_name_drops_json_extension() {
+        use super::pick_new_subscription_file_name;
+        assert_eq!(
+            pick_new_subscription_file_name(Some("BPB-normal-clash.json"), || None),
+            Some("BPB-normal-clash.yaml".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_read_dropped_profile_caps_size() {
+        use super::{read_dropped_profile, MAX_RESPONSE_SIZE};
+        let dir = tempfile::tempdir().unwrap();
+        let small = dir.path().join("a.yaml");
+        std::fs::write(&small, "proxies: []\n").unwrap();
+        assert_eq!(
+            read_dropped_profile(&small).as_deref(),
+            Some("proxies: []\n")
+        );
+        // A file over the download cap is not read.
+        let big = dir.path().join("big.yaml");
+        let file = std::fs::File::create(&big).unwrap();
+        file.set_len(u64::try_from(MAX_RESPONSE_SIZE).unwrap() + 1)
+            .unwrap();
+        assert_eq!(read_dropped_profile(&big), None);
+        // Neither is a directory, a missing file, or text that is not UTF-8.
+        assert_eq!(read_dropped_profile(dir.path()), None);
+        assert_eq!(read_dropped_profile(&dir.path().join("missing.yaml")), None);
+        let binary = dir.path().join("bin.yaml");
+        std::fs::write(&binary, [0xff, 0xfe, 0x00]).unwrap();
+        assert_eq!(read_dropped_profile(&binary), None);
+    }
+
+    #[test]
+    fn test_save_dropped_profile_clears_stale_metadata() {
+        use super::super::crypto::{
+            load_metadata, save_metadata, ConfigMetadata, ProfilesMetadata,
+        };
+        use super::save_dropped_profile;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = super::super::AppPaths {
+            app_data_dir: dir.path().to_path_buf(),
+            core_dir: dir.path().join("core"),
+            profiles_dir: dir.path().join("profiles"),
+        };
+        std::fs::create_dir_all(&paths.profiles_dir).unwrap();
+        // The metadata still holds an entry for a name whose file is gone,
+        // and one for another profile.
+        let mut metadata = ProfilesMetadata::default();
+        for name in ["foo.yaml", "other.yaml"] {
+            metadata.configs.insert(
+                name.to_owned(),
+                ConfigMetadata {
+                    url: Some(format!("https://sub.example.com/{name}")),
+                    ..Default::default()
+                },
+            );
+        }
+        save_metadata(&paths, &metadata).unwrap();
+
+        let target = paths.profiles_dir.join("foo.yaml");
+        save_dropped_profile(&paths, &target, "foo.yaml", "proxies: []\n", false).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "proxies: []\n");
+        let metadata = load_metadata(&paths);
+        assert!(!metadata.configs.contains_key("foo.yaml"));
+        assert!(metadata.configs.contains_key("other.yaml"));
+    }
+
+    #[test]
+    fn test_dropped_profile_file_name() {
+        use super::dropped_profile_file_name;
+        let dir = tempfile::tempdir().unwrap();
+        // Only YAML and JSON files are read at all.
+        assert_eq!(
+            super::dropped_profile_extension("a.JSON").as_deref(),
+            Some("json")
+        );
+        assert_eq!(super::dropped_profile_extension("movie.mp4"), None);
+        assert_eq!(super::dropped_profile_extension("yaml"), None);
+        // A free name is kept.
+        assert_eq!(
+            dropped_profile_file_name(dir.path(), "foo.yaml"),
+            "foo.yaml"
+        );
+        // A taken name (e.g. `foo.yaml` when `foo.json` is dropped) gets
+        // the next free suffix instead of being overwritten.
+        std::fs::write(dir.path().join("foo.yaml"), "proxies: []\n").unwrap();
+        assert_eq!(
+            dropped_profile_file_name(dir.path(), "foo.yaml"),
+            "foo-1.yaml"
+        );
+        std::fs::write(dir.path().join("foo-1.yaml"), "proxies: []\n").unwrap();
+        assert_eq!(
+            dropped_profile_file_name(dir.path(), "foo.yaml"),
+            "foo-2.yaml"
+        );
+        // A symlink whose target is missing still takes its name.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(dir.path().join("gone.yaml"), dir.path().join("link.yaml"))
+                .unwrap();
+            assert_eq!(
+                dropped_profile_file_name(dir.path(), "link.yaml"),
+                "link-1.yaml"
+            );
+        }
+        // The generated runtime config name is never used, in any case.
+        for reserved in ["run_config.yaml", "RUN_CONFIG.YAML"] {
+            let name = dropped_profile_file_name(dir.path(), reserved);
+            assert!(!name.eq_ignore_ascii_case("run_config.yaml"), "{name}");
+        }
+    }
+
     #[test]
     fn test_pick_new_subscription_file_name_prefers_disposition() {
         use super::pick_new_subscription_file_name;
@@ -4044,9 +4689,8 @@ mod tests {
     fn test_content_may_supply_rule_name() {
         use super::{content_may_supply_rule_name, extract_name_from_rules};
 
-        // A Clash YAML config starting with `http-port:` is accepted as a
-        // node list by the branch above, but it is still parsed YAML with
-        // a rules sequence, so it keeps its rule-derived name.
+        // A Clash YAML config starting with `http-port:` is parsed YAML
+        // with a rules sequence, so it keeps its rule-derived name.
         let http_port_yaml = "http-port: 7890\nrules:\n  - DOMAIN-SUFFIX,example.com,Airport-1\n";
         assert!(content_may_supply_rule_name(false, http_port_yaml));
         assert_eq!(
