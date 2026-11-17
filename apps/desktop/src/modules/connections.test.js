@@ -17,7 +17,7 @@ vi.mock('../utils/logger.js', () => ({
     connectionsLogger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { getConnections } from '../api.js';
+import { getConnections, closeConnection, closeAllConnections } from '../api.js';
 
 const mockedGetConnections = /** @type {import('vitest').Mock} */ (/** @type {unknown} */ (getConnections));
 
@@ -57,6 +57,28 @@ function rows() {
 /** @param {HTMLElement} row */
 function hostOf(row) {
     return row.querySelector('span')?.textContent;
+}
+
+/** Opens the detail dialog of the first row from the keyboard. */
+function openFirstRow() {
+    const row = rows()[0];
+    row.focus();
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    return row;
+}
+
+/**
+ * Clicks `buttonId` with `close` held open; returns what finishes that close.
+ * @param {any} close
+ * @param {string} buttonId
+ */
+async function holdClose(close, buttonId) {
+    /** @type {(value?: any) => void} */
+    let finishClose = () => {};
+    vi.mocked(close).mockImplementationOnce(() => new Promise((resolve) => { finishClose = resolve; }));
+    /** @type {HTMLElement} */ (document.getElementById(buttonId)).click();
+    await flush();
+    return (/** @type {any} */ value) => finishClose(value);
 }
 /** @param {HTMLElement} row */
 function dlTotalOf(row) {
@@ -256,9 +278,7 @@ describe('connections page list rendering', () => {
         mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
         initConnectionsPage();
         await flush();
-        const row = rows()[0];
-        row.focus();
-        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        const row = openFirstRow();
         const panel = document.getElementById('conn-detail-panel');
         expect(panel?.getAttribute('role')).toBe('dialog');
         expect(panel?.getAttribute('aria-modal')).toBe('true');
@@ -272,9 +292,7 @@ describe('connections page list rendering', () => {
         mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
         initConnectionsPage();
         await flush();
-        const row = rows()[0];
-        row.focus();
-        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        const row = openFirstRow();
         /** @type {HTMLElement} */ (document.activeElement).blur();
         const ev = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
         document.body.dispatchEvent(ev);
@@ -300,9 +318,7 @@ describe('connections page list rendering', () => {
         mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
         initConnectionsPage();
         await flush();
-        const row = rows()[0];
-        row.focus();
-        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        const row = openFirstRow();
         row.remove();
         document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
         expect(document.activeElement?.id).toBe('conn-tab-active');
@@ -312,9 +328,7 @@ describe('connections page list rendering', () => {
         mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
         initConnectionsPage();
         await flush();
-        const row = rows()[0];
-        row.focus();
-        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        openFirstRow();
         mockedGetConnections.mockResolvedValue({ connections: [] });
         /** @type {HTMLElement} */ (document.getElementById('detail-close-btn')).click();
         await flush();
@@ -335,6 +349,30 @@ describe('connections page list rendering', () => {
         expect(active?.dataset.connId).toBe('2');
     });
 
+    it('moves focus to the selected tab when the focused row was the last one', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        rows()[0].focus();
+        mockedGetConnections.mockResolvedValue({ connections: [] });
+        await refresh();
+        expect(document.activeElement).toBe(document.querySelector('.conn-tab[aria-selected="true"]'));
+    });
+
+    it('closes the detail dialog and lets go of the keyboard when the page is left', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        openFirstRow();
+        destroyConnectionsPage();
+        vi.advanceTimersByTime(200);
+        expect(document.getElementById('conn-detail-bg')?.classList.contains('hidden')).toBe(true);
+        // Tab on the next page is no longer pulled back into the dialog.
+        const ev = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+        document.body.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(false);
+    });
+
     it('closes the detail dialog on a backdrop click after a click inside the panel', async () => {
         mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
         initConnectionsPage();
@@ -353,9 +391,7 @@ describe('connections page list rendering', () => {
         mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
         initConnectionsPage();
         await flush();
-        const row = rows()[0];
-        row.focus();
-        row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        const row = openFirstRow();
         document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
         row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
         vi.advanceTimersByTime(200);
@@ -391,5 +427,396 @@ describe('connections page list rendering', () => {
         hostHeader.click(); // descending
         expect(rows().map(hostOf)).toEqual(['b.example', 'a.example']);
         for (const r of rows()) expect(r).toBe(byHost.get(hostOf(r)));
+    });
+
+    it('old request returns after new page init', async () => {
+        /** @type {(value: any) => void} */
+        let resolveOld = () => {};
+        mockedGetConnections.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+        initConnectionsPage();
+        await flush();
+        expect(mockedGetConnections).toHaveBeenCalledTimes(1);
+
+        // Leave the page while the first request is still in flight, then come back.
+        destroyConnectionsPage();
+        mockedGetConnections.mockResolvedValue({ connections: [conn('2', 'new.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        // The stale request does not hold back the new page's first fetch.
+        expect(mockedGetConnections).toHaveBeenCalledTimes(2);
+        expect(rows().map(hostOf)).toEqual(['new.example']);
+
+        // The old response arrives late: it is dropped, not rendered or archived.
+        resolveOld({ connections: [conn('1', 'old.example', 0)] });
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['new.example']);
+        const closedTab = /** @type {HTMLElement|null} */ (document.getElementById('conn-tab-closed'));
+        expect(closedTab).not.toBeNull();
+        closedTab?.click();
+        await flush();
+        expect(rows().map(hostOf)).not.toContain('old.example');
+        expect(rows().map(hostOf)).not.toContain('new.example');
+    });
+
+    it('the row close button closes that connection and moves it to Closed, also when the refresh fails', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0), conn('2', 'b.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        mockedGetConnections.mockRejectedValue(new Error('core unreachable'));
+        // Only this row's click counts, not an earlier test's close.
+        vi.mocked(closeConnection).mockClear();
+        const btn = /** @type {HTMLElement} */ (rows()[0].querySelector('[data-close-conn]'));
+        btn.click();
+        await flush();
+        await flush();
+        expect(closeConnection).toHaveBeenCalledWith('1');
+        expect(rows().map(hostOf)).toEqual(['b.example']);
+        expect(document.getElementById('conn-tab-closed-count')?.textContent).toBe(' · 1');
+        /** @type {HTMLElement} */ (document.getElementById('conn-tab-closed')).click();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['a.example']);
+    });
+
+    it('a refresh answered without a connection list keeps the rows instead of closing them all', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['a.example']);
+        mockedGetConnections.mockResolvedValue({});
+        await vi.advanceTimersByTimeAsync(3000);
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['a.example']);
+        // Totals without the list are no answer either.
+        mockedGetConnections.mockResolvedValue({ downloadTotal: 10, uploadTotal: 0 });
+        await vi.advanceTimersByTimeAsync(3000);
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['a.example']);
+        // The core's empty list (Go's nil slice) still empties it.
+        mockedGetConnections.mockResolvedValue({ downloadTotal: 0, uploadTotal: 0, connections: null });
+        await vi.advanceTimersByTimeAsync(3000);
+        await flush();
+        expect(rows()).toHaveLength(0);
+    });
+
+    it('the row close button keeps focus while its close runs and is not sent twice', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0), conn('2', 'b.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        vi.mocked(closeConnection).mockClear();
+        /** @type {(v?: any) => void} */
+        let finish = () => {};
+        vi.mocked(closeConnection).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+        const btn = /** @type {HTMLButtonElement} */ (rows()[0].querySelector('[data-close-conn]'));
+        btn.focus();
+        btn.click();
+        btn.click();
+        // Not `disabled`, which would drop focus to <body> while the close runs.
+        expect(btn.disabled).toBe(false);
+        expect(btn.getAttribute('aria-disabled')).toBe('true');
+        expect(document.activeElement).toBe(btn);
+        expect(closeConnection).toHaveBeenCalledTimes(1);
+        finish();
+        await flush();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['b.example']);
+        expect(document.activeElement).not.toBe(document.body);
+    });
+
+    it('a connection closed from its detail dialog goes to Closed, also when the refresh fails', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0), conn('2', 'b.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const row = openFirstRow();
+        mockedGetConnections.mockRejectedValue(new Error('core unreachable'));
+        /** @type {HTMLElement} */ (document.getElementById('detail-close-btn')).click();
+        await flush();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['b.example']);
+        // The count drops with the row although the refresh failed.
+        expect(document.getElementById('stat-total')?.textContent).toContain('1');
+        /** @type {HTMLElement} */ (document.getElementById('conn-tab-closed')).click();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['a.example']);
+        // The Closed tab counts it although the refresh failed.
+        expect(document.getElementById('conn-tab-closed-count')?.textContent).toBe(' · 1');
+        // The failed refresh says so in place of the summary.
+        expect(document.getElementById('conn-load-error')?.textContent).toBe('Failed to load connections');
+        expect(document.getElementById('conn-load-error')?.hidden).toBe(false);
+        expect(document.getElementById('conn-summary')?.hidden).toBe(true);
+        // The next fetch that works brings the summary back with its count.
+        mockedGetConnections.mockResolvedValue({ connections: [conn('2', 'b.example', 0)] });
+        /** @type {HTMLElement} */ (document.getElementById('conn-tab-active')).click();
+        await vi.advanceTimersByTimeAsync(2000);
+        await flush();
+        expect(document.getElementById('conn-summary')?.hidden).toBe(false);
+        expect(document.getElementById('conn-load-error')?.hidden).toBe(true);
+        expect(document.getElementById('stat-total')?.textContent).toContain('1');
+    });
+
+    it('a request in flight when the page is destroyed does not render', async () => {
+        /** @type {(value: any) => void} */
+        let resolveOld = () => {};
+        mockedGetConnections.mockResolvedValueOnce({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['a.example']);
+
+        mockedGetConnections.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+        await vi.advanceTimersByTimeAsync(2000);
+        destroyConnectionsPage();
+        resolveOld({ connections: [conn('9', 'late.example', 0)] });
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['a.example']);
+    });
+    it('a close that finishes after the page was left does not refresh it', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        openFirstRow();
+        const finishClose = await holdClose(closeConnection, 'detail-close-btn');
+        const fetchesBefore = mockedGetConnections.mock.calls.length;
+        destroyConnectionsPage();
+        mockedGetConnections.mockResolvedValue({ connections: [conn('9', 'late.example', 0)] });
+        finishClose(undefined);
+        await flush();
+        await flush();
+        expect(mockedGetConnections.mock.calls.length).toBe(fetchesBefore);
+        expect(rows().map(hostOf)).not.toContain('late.example');
+    });
+
+    it('a Close All that finishes after the page was opened again keeps its new list', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const finishClose = await holdClose(closeAllConnections, 'close-all-conns-btn');
+        destroyConnectionsPage();
+        mockedGetConnections.mockResolvedValue({ connections: [conn('2', 'new.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['new.example']);
+        finishClose(undefined);
+        await flush();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['new.example']);
+    });
+
+    it.each([
+        ['an empty list', []],
+        ['null, the core\'s empty list', null],
+    ])('a Close All also drops a connection a poll of the same visit listed while it ran (%s)', async (_label, emptied) => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const finishClose = await holdClose(closeAllConnections, 'close-all-conns-btn');
+        // A poll during the DELETE lists a connection opened meanwhile.
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0), conn('3', 'meanwhile.example', 0)] });
+        await vi.advanceTimersByTimeAsync(2000);
+        await flush();
+        // The core no longer lists it after the close; the refresh after
+        // that cannot read the core.
+        mockedGetConnections.mockRejectedValue(new Error('core unreachable'));
+        mockedGetConnections.mockResolvedValueOnce({ connections: emptied });
+        finishClose(undefined);
+        await flush();
+        await flush();
+        await flush();
+        expect(rows().map(hostOf)).not.toContain('meanwhile.example');
+    });
+
+    it('a connection opened during a Close All is archived as closed after it started', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const finishClose = await holdClose(closeAllConnections, 'close-all-conns-btn');
+        await vi.advanceTimersByTimeAsync(1000);
+        // Opened a second after the close began, listed by the next poll.
+        const late = { ...conn('3', 'meanwhile.example', 0), start: new Date(Date.now()).toISOString() };
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0), late] });
+        await vi.advanceTimersByTimeAsync(2000);
+        await flush();
+        mockedGetConnections.mockResolvedValue({ connections: [] });
+        finishClose(undefined);
+        await flush();
+        await flush();
+        await flush();
+        /** @type {HTMLElement} */ (document.getElementById('conn-tab-closed')).click();
+        await flush();
+        const row = rows().find((r) => hostOf(r) === 'meanwhile.example');
+        expect(row).toBeTruthy();
+        // Closed at the confirmation (two seconds after it started), not
+        // at the time the close began (before it started: a duration of 0).
+        expect(row?.textContent).toMatch(/2\s*s/);
+    });
+
+    it('a Close All keeps a connection opened while it ran that the core still lists', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const finishClose = await holdClose(closeAllConnections, 'close-all-conns-btn');
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0), conn('3', 'meanwhile.example', 0)] });
+        await vi.advanceTimersByTimeAsync(2000);
+        await flush();
+        // The close missed it: the core still lists it afterwards.
+        mockedGetConnections.mockRejectedValue(new Error('core unreachable'));
+        mockedGetConnections.mockResolvedValueOnce({ connections: [conn('3', 'meanwhile.example', 0)] });
+        finishClose(undefined);
+        await flush();
+        await flush();
+        await flush();
+        expect(rows().map(hostOf)).toContain('meanwhile.example');
+    });
+
+    it('a Close All that finishes after the page was opened again fetches that page anew', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const finishClose = await holdClose(closeAllConnections, 'close-all-conns-btn');
+        destroyConnectionsPage();
+        // The new page reads a connection the pending Close All then closes.
+        mockedGetConnections.mockResolvedValue({ connections: [conn('2', 'new.example', 0), conn('3', 'doomed.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['new.example', 'doomed.example']);
+        mockedGetConnections.mockResolvedValue({ connections: [conn('2', 'new.example', 0)] });
+        finishClose(undefined);
+        await flush();
+        await flush();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['new.example']);
+    });
+
+    it('a close that finishes after the page was left drops its row from the kept list', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0), conn('2', 'b.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const row = openFirstRow();
+        const finishClose = await holdClose(closeConnection, 'detail-close-btn');
+        destroyConnectionsPage();
+        finishClose(undefined);
+        await flush();
+        // Back on the page, the core cannot be read: the closed row stays gone.
+        mockedGetConnections.mockRejectedValue(new Error('core unreachable'));
+        initConnectionsPage();
+        await flush();
+        expect(rows().map(hostOf)).toEqual(['b.example']);
+    });
+
+    it('a close from a dialog that finishes late leaves a dialog opened since alone', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0), conn('2', 'b.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const open = (/** @type {string} */ host) => {
+            const row = rows().find((r) => hostOf(r) === host);
+            row?.focus();
+            row?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        };
+        open('a.example');
+        const finishClose = await holdClose(closeConnection, 'detail-close-btn');
+        destroyConnectionsPage();
+        mockedGetConnections.mockResolvedValue({ connections: [conn('2', 'b.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        open('b.example');
+        finishClose(undefined);
+        await flush();
+        vi.advanceTimersByTime(200);
+        expect(document.getElementById('conn-detail-bg')?.classList.contains('hidden')).toBe(false);
+    });
+
+    it('a late close leaves a new dialog for the same connection open', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const open = () => {
+            const row = rows()[0];
+            row?.focus();
+            row?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        };
+        open();
+        const finishClose = await holdClose(closeConnection, 'detail-close-btn');
+        // The page is left and opened again; the same connection gets a new dialog.
+        destroyConnectionsPage();
+        initConnectionsPage();
+        await flush();
+        open();
+        finishClose(undefined);
+        await flush();
+        vi.advanceTimersByTime(200);
+        expect(document.getElementById('conn-detail-bg')?.classList.contains('hidden')).toBe(false);
+    });
+
+    it('a close whose refresh outlives the page moves no focus on the new page', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        openFirstRow();
+        /** @type {(value: any) => void} */
+        let finishRefresh = () => {};
+        mockedGetConnections.mockImplementationOnce(() => new Promise((resolve) => { finishRefresh = resolve; }));
+        /** @type {HTMLElement} */ (document.getElementById('detail-close-btn')).click();
+        await flush();
+        destroyConnectionsPage();
+        mockedGetConnections.mockResolvedValue({ connections: [] });
+        initConnectionsPage();
+        await flush();
+        const outside = document.createElement('button');
+        document.body.appendChild(outside);
+        outside.focus();
+        outside.remove(); // focus falls back to the body
+        finishRefresh({ connections: [] });
+        await flush();
+        await flush();
+        expect(document.activeElement?.id).not.toBe('conn-tab-active');
+    });
+
+    it('a close that lands after the page was left closes its dialog without moving focus', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        const row = openFirstRow();
+        /** @type {(value?: any) => void} */
+        let finishClose = () => {};
+        const mockedClose = /** @type {import('vitest').Mock} */ (/** @type {unknown} */ (closeConnection));
+        mockedClose.mockImplementationOnce(() => new Promise((resolve) => { finishClose = resolve; }));
+        /** @type {HTMLElement} */ (document.getElementById('detail-close-btn')).click();
+        await flush();
+        // Left and opened again: the same connection has a fresh row on the new page.
+        destroyConnectionsPage();
+        initConnectionsPage();
+        await flush();
+        expect(rows().some((r) => r.dataset.connId === '1')).toBe(true);
+        const outside = document.createElement('button');
+        document.body.appendChild(outside);
+        outside.focus();
+        finishClose(undefined);
+        await flush();
+        await flush();
+        expect(document.activeElement).toBe(outside);
+        vi.advanceTimersByTime(200);
+        expect(document.getElementById('conn-detail-bg')?.classList.contains('hidden')).toBe(true);
+        outside.remove();
+    });
+
+    it('moves focus to the tab after a dialog close that lands during a poll', async () => {
+        mockedGetConnections.mockResolvedValue({ connections: [conn('1', 'a.example', 0)] });
+        initConnectionsPage();
+        await flush();
+        openFirstRow();
+        // A poll is in flight when the close finishes.
+        /** @type {(value: any) => void} */
+        let finishPoll = () => {};
+        mockedGetConnections.mockImplementationOnce(() => new Promise((resolve) => { finishPoll = resolve; }));
+        await vi.advanceTimersByTimeAsync(2000);
+        const fetchesBefore = mockedGetConnections.mock.calls.length;
+        mockedGetConnections.mockResolvedValue({ connections: [] });
+        /** @type {HTMLElement} */ (document.getElementById('detail-close-btn')).click();
+        await flush();
+        finishPoll({ connections: [] });
+        await flush();
+        await flush();
+        // The poll may have read the core before the close: one fresh fetch follows it.
+        expect(mockedGetConnections.mock.calls.length).toBe(fetchesBefore + 1);
+        expect(rows()).toHaveLength(0);
+        expect(document.activeElement?.id).toBe('conn-tab-active');
     });
 });

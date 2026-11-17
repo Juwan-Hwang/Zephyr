@@ -16,7 +16,15 @@ export const trayTestApi = {
     getConfig: vi.fn(async () => ({})),
     invoke: vi.fn(),
     getProxies: vi.fn(async () => ({ proxies: {} })),
-    switchProxy: vi.fn(async () => true),
+    // Runs the caller's `prepare` as the real queue does, so what tray.js
+    // records there (the core it sends to) is set in the default case.
+    switchProxyResult: vi.fn(async (_group, _node, options) => {
+        const prepared = await options?.prepare?.();
+        return { ok: true, reason: null, seq: 1, prepared };
+    }),
+    isLatestSwitch: vi.fn(() => true),
+    coreReplacements: vi.fn(() => 0),
+    SWITCH_BUSY: 'busy',
     closeAllConnections: vi.fn(async () => {}),
     listen: vi.fn(async (name, fn) => { trayTestHandlers[name] = fn; return () => {}; }),
 };

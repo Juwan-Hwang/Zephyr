@@ -31,6 +31,12 @@ ignore = [
   # Transitive via hyper/h2; upgrade blocked by Tauri's reqwest/hyper stack.
   # Track: https://rustsec.org/advisories/RUSTSEC-2026-0258.html
   "RUSTSEC-2026-0258",
+  # chrono unmaintained (RUSTSEC-2026-0543): maintenance notice only, no
+  # vulnerability and no fixed release. It is a direct dependency (local
+  # timestamps in logs, backups and events) and also comes in through
+  # clash-prism-*, so replacing the direct uses would not remove it. Listed
+  # because `unmaintained = "workspace"` fails on direct dependencies.
+  "RUSTSEC-2026-0543",
   # Unmaintained-only advisories (bincode, proc-macro-error, paste, unic-*)
   # are NOT listed here — `unmaintained = "workspace"` below handles them:
   # transitive unmaintained deps are allowed (non-failing) automatically.
@@ -61,6 +67,10 @@ ignore = [
 #   Transitive via hyper/h2 (Tauri's reqwest stack); upgrade to h2 >=0.4.16 blocked
 #   by current hyper/reqwest versions. Tracked until upstream stack updates.
 #   Track: https://rustsec.org/advisories/RUSTSEC-2026-0258.html
+#
+# RUSTSEC-2026-0543: chrono unmaintained, no fixed release
+#   Direct dependency and transitive via clash-prism-*, so the crate stays in
+#   the tree either way. Re-evaluate with the other review-by entries.
 #
 # RUSTSEC-2026-0221: event-listener unsound StackSlot (Send/Soundness)
 #   RESOLVED: upgraded event-listener to 5.4.2 (fixed version) in both lockfiles.
