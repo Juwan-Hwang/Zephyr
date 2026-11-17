@@ -1887,13 +1887,19 @@ pub fn run() {
             // Initialize app log writer if log persistence is enabled
             {
                 let settings_state = app.state::<SettingsState>();
-                let guard = settings_state.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let guard = settings_state
+                    .0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if guard.log_app_enabled {
                     let app_log_dir = config_dir.join("logs").join("app");
                     let app_log_dir_clone = app_log_dir.clone();
                     let retention_days = guard.log_retention_days;
                     std::thread::spawn(move || {
-                        core_manager::core::log_writer::cleanup_old_logs(&app_log_dir_clone, retention_days);
+                        core_manager::core::log_writer::cleanup_old_logs(
+                            &app_log_dir_clone,
+                            retention_days,
+                        );
                     });
                     backend_event::init_app_log_writer(app_log_dir, guard.log_max_file_mb);
                 }
@@ -1902,11 +1908,18 @@ pub fn run() {
                     let _ = fs::create_dir_all(&core_log_dir);
                     let retention_days = guard.log_retention_days;
                     std::thread::spawn(move || {
-                        core_manager::core::log_writer::cleanup_old_logs(&core_log_dir, retention_days);
+                        core_manager::core::log_writer::cleanup_old_logs(
+                            &core_log_dir,
+                            retention_days,
+                        );
                     });
-                    core_manager::core::LOG_CORE_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
-                    core_manager::core::LOG_MAX_FILE_MB.store(guard.log_max_file_mb, std::sync::atomic::Ordering::Relaxed);
+                    core_manager::core::LOG_CORE_ENABLED
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
                 }
+                // Also with core logging off: turning it on later only sets
+                // the enabled flag, and must find the saved size limit.
+                core_manager::core::LOG_MAX_FILE_MB
+                    .store(guard.log_max_file_mb, std::sync::atomic::Ordering::Relaxed);
             }
             // The relaunch wait ran before logging existed: log what it did now.
             #[cfg(target_os = "windows")]
@@ -1934,8 +1947,9 @@ pub fn run() {
                     let transform_guard = lock_profile_transform();
                     // Read under the transform lock, as `patch_settings` does, so a
                     // concurrent toggle cannot be undone by a stale value.
-                    let encrypt =
-                        crate::core_manager::core::crypto::authoritative_encrypt_configs(&app_handle);
+                    let encrypt = crate::core_manager::core::crypto::authoritative_encrypt_configs(
+                        &app_handle,
+                    );
                     // Same rule as `patch_settings`: a session-only key is gone at
                     // the next start, so encrypting with it would make every
                     // plaintext profile unrecoverable. Decrypting carries no
@@ -2048,15 +2062,15 @@ pub fn run() {
                         app.exit(0);
                     }
                 }
-tauri::WindowEvent::Destroyed => {
-// Only invalidate the heartbeat if the main window is
-// actually gone.  This prevents an asynchronous destroy
-// event from the old window from invalidating the
-// heartbeat of a newly recreated window.
-if window.app_handle().get_webview_window("main").is_none() {
-invalidate_heartbeat(window.app_handle());
-}
-}
+                tauri::WindowEvent::Destroyed => {
+                    // Only invalidate the heartbeat if the main window is
+                    // actually gone.  This prevents an asynchronous destroy
+                    // event from the old window from invalidating the
+                    // heartbeat of a newly recreated window.
+                    if window.app_handle().get_webview_window("main").is_none() {
+                        invalidate_heartbeat(window.app_handle());
+                    }
+                }
                 // Only Windows picks the idle tray glyph by colour mode
                 // (macOS uses a template image the system re-tints itself,
                 // Linux does not depend on the theme). The status lookup
@@ -2089,57 +2103,118 @@ invalidate_heartbeat(window.app_handle());
                     }
                 }
                 tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
-                    // Off the main thread: `save_profile_file` waits on the
+                    // Off the main thread: the save waits on the
                     // profile-transform lock, which an encryption batch holds
                     // while it rewrites every profile.
                     let app_handle = window.app_handle().clone();
                     let dropped = paths.clone();
                     tauri::async_runtime::spawn_blocking(move || {
-                    let app = &app_handle;
-                    if let Ok(storage_paths) = core_manager::ensure_app_storage(app) {
-                        let mut imported_count = 0;
-                        for path in &dropped {
-                            let ext = std::path::Path::new(&path)
-                                .extension()
-                                .and_then(|e| e.to_str())
-                                .unwrap_or("")
-                                .to_lowercase();
-                            if ext == "yaml" || ext == "yml" {
-                                if let Ok(content) = std::fs::read_to_string(path) {
-                                    if let Some(file_name) = std::path::Path::new(&path)
-                                        .file_name()
-                                        .and_then(|n| n.to_str())
-                                    {
-                                        // Sanitize file name to prevent path traversal
-                                        let safe_name = match zephyr_core::config::sanitizer::sanitize_config_file_name(file_name.to_owned()) {
-                                            Ok(name) => name,
-                                            Err(_) => continue,
-                                        };
-                                        let target_path =
-                                            storage_paths.profiles_dir.join(&safe_name);
-                                        // Validate path stays within profiles dir
-                                        if zephyr_core::config::sanitizer::validate_path_within_dir(&target_path, &storage_paths.profiles_dir).is_err() {
-                                            continue;
-                                        }
-                                        // Sanitize dangerous keys (same as subscription import)
-                                        let mut yaml_value: serde_yaml::Value = serde_yaml::from_str(&content)
-                                            .unwrap_or(serde_yaml::Value::Null);
-                                        zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub(&mut yaml_value, false);
-                                        let sanitized_content = serde_yaml::to_string(&yaml_value)
-                                            .unwrap_or(content);
-                                        if core_manager::save_profile_file(app, &target_path, &sanitized_content)
-                                            .is_ok()
-                                        {
-                                            imported_count += 1;
-                                        }
+                        let app = &app_handle;
+                        if let Ok(storage_paths) = core_manager::ensure_app_storage(app) {
+                            let mut imported_count = 0;
+                            for path in &dropped {
+                                let Some(file_name) = path.file_name().and_then(|n| n.to_str())
+                                else {
+                                    continue;
+                                };
+                                // Only YAML files and Clash configs saved as JSON are
+                                // taken; one that cannot be read or does not parse is
+                                // skipped with a warning. Other files are not read at
+                                // all.
+                                if core_manager::core::subscription::dropped_profile_extension(
+                                    file_name,
+                                )
+                                .is_none()
+                                {
+                                    continue;
+                                }
+                                let Some(content) =
+                                    core_manager::core::subscription::read_dropped_profile(path)
+                                else {
+                                    emit_warn!(
+                                        Config,
+                                        CONFIG_PARSE_FAILED,
+                                        "Dropped profile {file_name} was not imported: it is not a readable file, or it is larger than the size limit"
+                                    );
+                                    continue;
+                                };
+                                let Some((profile_name, sanitized_content)) =
+                                    core_manager::core::subscription::dropped_profile_import(
+                                        file_name, &content,
+                                    )
+                                else {
+                                    emit_warn!(
+                                        Config,
+                                        CONFIG_PARSE_FAILED,
+                                        "Dropped profile {file_name} was not imported: it is not a Clash config"
+                                    );
+                                    continue;
+                                };
+                                // Sanitize file name to prevent path traversal.
+                                // The name must also survive a second pass
+                                // unchanged, as the profile list and the editor
+                                // sanitize it again (`a%252520.json` would be
+                                // saved as `a%20.yaml` and opened as `a .yaml`).
+                                let Some(safe_name) =
+                                    core_manager::core::subscription::stable_profile_file_name(
+                                        profile_name,
+                                    )
+                                else {
+                                    continue;
+                                };
+                                // A drop adds a profile: a taken or reserved
+                                // name gets a free `-{n}` variant. The name is
+                                // chosen and written under one hold of the
+                                // profile-transform lock, so two drops at once
+                                // cannot both take the same free name.
+                                let transform_guard = crate::lock_profile_transform();
+                                let target_path = storage_paths.profiles_dir.join(
+                                    core_manager::core::subscription::dropped_profile_file_name(
+                                        &storage_paths.profiles_dir,
+                                        &safe_name,
+                                    ),
+                                );
+                                // Validate path stays within profiles dir
+                                if zephyr_core::config::sanitizer::validate_path_within_dir(
+                                    &target_path,
+                                    &storage_paths.profiles_dir,
+                                )
+                                .is_err()
+                                {
+                                    continue;
+                                }
+                                let target_name = target_path
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or_default()
+                                    .to_owned();
+                                let saved = core_manager::core::subscription::save_dropped_profile(
+                                    &storage_paths,
+                                    &target_path,
+                                    &target_name,
+                                    &sanitized_content,
+                                    core_manager::core::crypto::authoritative_encrypt_configs(app),
+                                );
+                                drop(transform_guard);
+                                match saved {
+                                    Ok(()) => imported_count += 1,
+                                    Err(error) => {
+                                        emit_warn!(
+                                            Config,
+                                            CONFIG_SAVE_FAILED,
+                                            "Dropped profile {target_name} was not imported: {error}"
+                                        );
                                     }
                                 }
                             }
+                            if imported_count > 0 {
+                                crate::backend_event::emit_to_main(
+                                    app,
+                                    "profiles-imported",
+                                    imported_count,
+                                );
+                            }
                         }
-                        if imported_count > 0 {
-                            crate::backend_event::emit_to_main(app, "profiles-imported", imported_count);
-                        }
-                    }
                     });
                 }
                 _ => {}
@@ -2232,7 +2307,7 @@ invalidate_heartbeat(window.app_handle());
             switch_global_node,
             switch_mode,
             heartbeat,
-write_frontend_log,
+            write_frontend_log,
             // Prism Engine commands
             prism::prism_apply,
             prism::prism_status,
