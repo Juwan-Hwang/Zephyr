@@ -1,0 +1,499 @@
+{
+    "mixed-port": 7890,
+    "ipv6": true,
+    "allow-lan": false,
+    "unified-delay": false,
+    "log-level": "warning",
+    "mode": "rule",
+    "disable-keep-alive": false,
+    "keep-alive-idle": 10,
+    "keep-alive-interval": 15,
+    "tcp-concurrent": true,
+    "geo-auto-update": true,
+    "geo-update-interval": 168,
+    "external-controller": "127.0.0.1:9090",
+    "external-controller-cors": {
+        "allow-origins": [
+            "*"
+        ],
+        "allow-private-network": true
+    },
+    "external-ui": "ui",
+    "external-ui-url": "https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip",
+    "profile": {
+        "store-selected": true,
+        "store-fake-ip": true
+    },
+    "dns": {
+        "enable": true,
+        "respect-rules": true,
+        "use-system-hosts": false,
+        "listen": "127.0.0.1:1053",
+        "ipv6": true,
+        "hosts": {
+            "rule-set:malware": "rcode://refused",
+            "rule-set:phishing": "rcode://refused",
+            "+.ads.example.com": "rcode://refused"
+        },
+        "nameserver": [
+            "https://8.8.8.8/dns-query#💦 Best Ping 🚀"
+        ],
+        "proxy-server-nameserver": [
+            "8.8.8.8#DIRECT"
+        ],
+        "direct-nameserver": [
+            "8.8.8.8#DIRECT"
+        ],
+        "direct-nameserver-follow-policy": true,
+        "nameserver-policy": {
+            "chain.example.net": "https://8.8.8.8/dns-query#💦 Best Ping 🚀",
+            "rule-set:ir": "8.8.8.8#DIRECT",
+            "+.ir": "8.8.8.8#DIRECT"
+        },
+        "enhanced-mode": "fake-ip",
+        "fake-ip-range": "198.18.0.1/16",
+        "fake-ip-filter-mode": "blacklist",
+        "fake-ip-filter": [
+            "+.lan",
+            "+.local"
+        ]
+    },
+    "tun": {
+        "enable": true,
+        "stack": "mixed",
+        "auto-route": true,
+        "strict-route": true,
+        "auto-detect-interface": true,
+        "dns-hijack": [
+            "any:53",
+            "tcp://any:53"
+        ],
+        "mtu": 9000
+    },
+    "sniffer": {
+        "enable": true,
+        "force-dns-mapping": true,
+        "parse-pure-ip": true,
+        "override-destination": true,
+        "sniff": {
+            "HTTP": {
+                "ports": [
+                    80,
+                    8080,
+                    8880,
+                    2052,
+                    2082,
+                    2086,
+                    2095
+                ]
+            },
+            "TLS": {
+                "ports": [
+                    443,
+                    8443,
+                    2053,
+                    2083,
+                    2087,
+                    2096
+                ]
+            }
+        }
+    },
+    "proxies": [
+        {
+            "name": "💦 1. VL - Domain : 443",
+            "type": "vless",
+            "server": "bpb-panel.example.workers.dev",
+            "port": 443,
+            "ip-version": "ipv4",
+            "tfo": false,
+            "udp": false,
+            "uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4",
+            "packet-encoding": "",
+            "encryption": "",
+            "tls": true,
+            "servername": "bpb-panel.example.workers.dev",
+            "client-fingerprint": "chrome",
+            "skip-cert-verify": false,
+            "alpn": [
+                "http/1.1"
+            ],
+            "network": "ws",
+            "ws-opts": {
+                "path": "/vl/Xk3dP9qLm2Rt7vBw",
+                "max-early-data": 2560,
+                "early-data-header-name": "Sec-WebSocket-Protocol",
+                "headers": {
+                    "Host": "bpb-panel.example.workers.dev"
+                }
+            }
+        },
+        {
+            "name": "💦 1. 🔗 VL - Domain : 443",
+            "type": "vless",
+            "server": "chain.example.net",
+            "port": 443,
+            "ip-version": "ipv4",
+            "tfo": false,
+            "udp": false,
+            "uuid": "0b3a5f7e-8c1d-4e2f-9a6b-7c8d9e0f1a2b",
+            "flow": "xtls-rprx-vision",
+            "encryption": "",
+            "tls": true,
+            "servername": "www.example.com",
+            "client-fingerprint": "chrome",
+            "skip-cert-verify": false,
+            "reality-opts": {
+                "public-key": "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0",
+                "short-id": "34010e92"
+            },
+            "network": "tcp",
+            "dialer-proxy": "💦 1. VL - Domain : 443"
+        },
+        {
+            "name": "💦 2. VL - IPv4 : 443",
+            "type": "vless",
+            "server": "203.0.113.10",
+            "port": 443,
+            "ip-version": "ipv4",
+            "tfo": false,
+            "udp": false,
+            "uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4",
+            "packet-encoding": "",
+            "encryption": "",
+            "tls": true,
+            "servername": "bpb-panel.example.workers.dev",
+            "client-fingerprint": "chrome",
+            "skip-cert-verify": false,
+            "alpn": [
+                "http/1.1"
+            ],
+            "network": "ws",
+            "ws-opts": {
+                "path": "/vl/Xk3dP9qLm2Rt7vBw",
+                "max-early-data": 2560,
+                "early-data-header-name": "Sec-WebSocket-Protocol",
+                "headers": {
+                    "Host": "bpb-panel.example.workers.dev"
+                }
+            }
+        },
+        {
+            "name": "💦 2. 🔗 VL - IPv4 : 443",
+            "type": "vless",
+            "server": "chain.example.net",
+            "port": 443,
+            "ip-version": "ipv4",
+            "tfo": false,
+            "udp": false,
+            "uuid": "0b3a5f7e-8c1d-4e2f-9a6b-7c8d9e0f1a2b",
+            "flow": "xtls-rprx-vision",
+            "encryption": "",
+            "tls": true,
+            "servername": "www.example.com",
+            "client-fingerprint": "chrome",
+            "skip-cert-verify": false,
+            "reality-opts": {
+                "public-key": "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0",
+                "short-id": "34010e92"
+            },
+            "network": "tcp",
+            "dialer-proxy": "💦 2. VL - IPv4 : 443"
+        },
+        {
+            "name": "💦 3. VL - Domain : 80",
+            "type": "vless",
+            "server": "bpb-panel.example.workers.dev",
+            "port": 80,
+            "ip-version": "ipv4",
+            "tfo": false,
+            "udp": false,
+            "uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4",
+            "packet-encoding": "",
+            "encryption": "",
+            "network": "ws",
+            "ws-opts": {
+                "path": "/vl/Xk3dP9qLm2Rt7vBw",
+                "max-early-data": 2560,
+                "early-data-header-name": "Sec-WebSocket-Protocol",
+                "headers": {
+                    "Host": "bpb-panel.example.workers.dev"
+                }
+            }
+        },
+        {
+            "name": "💦 3. 🔗 VL - Domain : 80",
+            "type": "vless",
+            "server": "chain.example.net",
+            "port": 443,
+            "ip-version": "ipv4",
+            "tfo": false,
+            "udp": false,
+            "uuid": "0b3a5f7e-8c1d-4e2f-9a6b-7c8d9e0f1a2b",
+            "flow": "xtls-rprx-vision",
+            "encryption": "",
+            "tls": true,
+            "servername": "www.example.com",
+            "client-fingerprint": "chrome",
+            "skip-cert-verify": false,
+            "reality-opts": {
+                "public-key": "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0",
+                "short-id": "34010e92"
+            },
+            "network": "tcp",
+            "dialer-proxy": "💦 3. VL - Domain : 80"
+        },
+        {
+            "name": "💦 4. VL - IPv4 : 80",
+            "type": "vless",
+            "server": "203.0.113.10",
+            "port": 80,
+            "ip-version": "ipv4",
+            "tfo": false,
+            "udp": false,
+            "uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4",
+            "packet-encoding": "",
+            "encryption": "",
+            "network": "ws",
+            "ws-opts": {
+                "path": "/vl/Xk3dP9qLm2Rt7vBw",
+                "max-early-data": 2560,
+                "early-data-header-name": "Sec-WebSocket-Protocol",
+                "headers": {
+                    "Host": "bpb-panel.example.workers.dev"
+                }
+            }
+        },
+        {
+            "name": "💦 4. 🔗 VL - IPv4 : 80",
+            "type": "vless",
+            "server": "chain.example.net",
+            "port": 443,
+            "ip-version": "ipv4",
+            "tfo": false,
+            "udp": false,
+            "uuid": "0b3a5f7e-8c1d-4e2f-9a6b-7c8d9e0f1a2b",
+            "flow": "xtls-rprx-vision",
+            "encryption": "",
+            "tls": true,
+            "servername": "www.example.com",
+            "client-fingerprint": "chrome",
+            "skip-cert-verify": false,
+            "reality-opts": {
+                "public-key": "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0",
+                "short-id": "34010e92"
+            },
+            "network": "tcp",
+            "dialer-proxy": "💦 4. VL - IPv4 : 80"
+        },
+        {
+            "name": "💦 1. TR - Domain : 443",
+            "type": "trojan",
+            "server": "bpb-panel.example.workers.dev",
+            "port": 443,
+            "ip-version": "ipv4",
+            "tfo": false,
+            "udp": false,
+            "password": "bpb-trojan-pass",
+            "tls": true,
+            "sni": "bpb-panel.example.workers.dev",
+            "client-fingerprint": "chrome",
+            "skip-cert-verify": false,
+            "alpn": [
+                "http/1.1"
+            ],
+            "network": "ws",
+            "ws-opts": {
+                "path": "/tr/Xk3dP9qLm2Rt7vBw",
+                "max-early-data": 2560,
+                "early-data-header-name": "Sec-WebSocket-Protocol",
+                "headers": {
+                    "Host": "bpb-panel.example.workers.dev"
+                }
+            }
+        },
+        {
+            "name": "💦 1. 🔗 TR - Domain : 443",
+            "type": "vless",
+            "server": "chain.example.net",
+            "port": 443,
+            "ip-version": "ipv4",
+            "tfo": false,
+            "udp": false,
+            "uuid": "0b3a5f7e-8c1d-4e2f-9a6b-7c8d9e0f1a2b",
+            "flow": "xtls-rprx-vision",
+            "encryption": "",
+            "tls": true,
+            "servername": "www.example.com",
+            "client-fingerprint": "chrome",
+            "skip-cert-verify": false,
+            "reality-opts": {
+                "public-key": "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0",
+                "short-id": "34010e92"
+            },
+            "network": "tcp",
+            "dialer-proxy": "💦 1. TR - Domain : 443"
+        },
+        {
+            "name": "💦 2. TR - IPv4 : 443",
+            "type": "trojan",
+            "server": "203.0.113.10",
+            "port": 443,
+            "ip-version": "ipv4",
+            "tfo": false,
+            "udp": false,
+            "password": "bpb-trojan-pass",
+            "tls": true,
+            "sni": "bpb-panel.example.workers.dev",
+            "client-fingerprint": "chrome",
+            "skip-cert-verify": false,
+            "alpn": [
+                "http/1.1"
+            ],
+            "network": "ws",
+            "ws-opts": {
+                "path": "/tr/Xk3dP9qLm2Rt7vBw",
+                "max-early-data": 2560,
+                "early-data-header-name": "Sec-WebSocket-Protocol",
+                "headers": {
+                    "Host": "bpb-panel.example.workers.dev"
+                }
+            }
+        },
+        {
+            "name": "💦 2. 🔗 TR - IPv4 : 443",
+            "type": "vless",
+            "server": "chain.example.net",
+            "port": 443,
+            "ip-version": "ipv4",
+            "tfo": false,
+            "udp": false,
+            "uuid": "0b3a5f7e-8c1d-4e2f-9a6b-7c8d9e0f1a2b",
+            "flow": "xtls-rprx-vision",
+            "encryption": "",
+            "tls": true,
+            "servername": "www.example.com",
+            "client-fingerprint": "chrome",
+            "skip-cert-verify": false,
+            "reality-opts": {
+                "public-key": "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0",
+                "short-id": "34010e92"
+            },
+            "network": "tcp",
+            "dialer-proxy": "💦 2. TR - IPv4 : 443"
+        }
+    ],
+    "proxy-groups": [
+        {
+            "name": "✅ Selector",
+            "type": "select",
+            "proxies": [
+                "💦 Best Ping 🚀",
+                "💦 🔗 Best Ping 🚀",
+                "💦 1. VL - Domain : 443",
+                "💦 2. VL - IPv4 : 443",
+                "💦 3. VL - Domain : 80",
+                "💦 4. VL - IPv4 : 80",
+                "💦 1. TR - Domain : 443",
+                "💦 2. TR - IPv4 : 443",
+                "💦 1. 🔗 VL - Domain : 443",
+                "💦 2. 🔗 VL - IPv4 : 443",
+                "💦 3. 🔗 VL - Domain : 80",
+                "💦 4. 🔗 VL - IPv4 : 80",
+                "💦 1. 🔗 TR - Domain : 443",
+                "💦 2. 🔗 TR - IPv4 : 443"
+            ]
+        },
+        {
+            "name": "💦 Best Ping 🚀",
+            "type": "url-test",
+            "proxies": [
+                "💦 1. VL - Domain : 443",
+                "💦 2. VL - IPv4 : 443",
+                "💦 3. VL - Domain : 80",
+                "💦 4. VL - IPv4 : 80",
+                "💦 1. TR - Domain : 443",
+                "💦 2. TR - IPv4 : 443"
+            ],
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 30,
+            "tolerance": 50
+        },
+        {
+            "name": "💦 🔗 Best Ping 🚀",
+            "type": "url-test",
+            "proxies": [
+                "💦 1. 🔗 VL - Domain : 443",
+                "💦 2. 🔗 VL - IPv4 : 443",
+                "💦 3. 🔗 VL - Domain : 80",
+                "💦 4. 🔗 VL - IPv4 : 80",
+                "💦 1. 🔗 TR - Domain : 443",
+                "💦 2. 🔗 TR - IPv4 : 443"
+            ],
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 30,
+            "tolerance": 50
+        }
+    ],
+    "rule-providers": {
+        "malware": {
+            "type": "http",
+            "format": "text",
+            "behavior": "domain",
+            "path": "./ruleset/malware.txt",
+            "interval": 86400,
+            "url": "https://raw.githubusercontent.com/Chocolate4U/Iran-clash-rules/release/malware.txt"
+        },
+        "malware-cidr": {
+            "type": "http",
+            "format": "text",
+            "behavior": "ipcidr",
+            "path": "./ruleset/malware-cidr.txt",
+            "interval": 86400,
+            "url": "https://raw.githubusercontent.com/Chocolate4U/Iran-clash-rules/release/malware-ip.txt"
+        },
+        "phishing": {
+            "type": "http",
+            "format": "text",
+            "behavior": "domain",
+            "path": "./ruleset/phishing.txt",
+            "interval": 86400,
+            "url": "https://raw.githubusercontent.com/Chocolate4U/Iran-clash-rules/release/phishing.txt"
+        },
+        "ir": {
+            "type": "http",
+            "format": "text",
+            "behavior": "domain",
+            "path": "./ruleset/ir.txt",
+            "interval": 86400,
+            "url": "https://raw.githubusercontent.com/Chocolate4U/Iran-clash-rules/release/ir.txt"
+        },
+        "ircidr": {
+            "type": "http",
+            "format": "text",
+            "behavior": "ipcidr",
+            "path": "./ruleset/ircidr.txt",
+            "interval": 86400,
+            "url": "https://raw.githubusercontent.com/Chocolate4U/Iran-clash-rules/release/ircidr.txt"
+        }
+    },
+    "rules": [
+        "GEOIP,lan,DIRECT,no-resolve",
+        "NETWORK,udp,REJECT",
+        "RULE-SET,malware,REJECT",
+        "RULE-SET,phishing,REJECT",
+        "DOMAIN-SUFFIX,ads.example.com,REJECT",
+        "RULE-SET,malware-cidr,REJECT",
+        "RULE-SET,ir,DIRECT",
+        "DOMAIN-SUFFIX,ir,DIRECT",
+        "RULE-SET,ircidr,DIRECT",
+        "IP-CIDR,192.0.2.10/32,DIRECT",
+        "MATCH,✅ Selector"
+    ],
+    "ntp": {
+        "enable": true,
+        "server": "time.cloudflare.com",
+        "port": 123,
+        "interval": 30
+    }
+}
