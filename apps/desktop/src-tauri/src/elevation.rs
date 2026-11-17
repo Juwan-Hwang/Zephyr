@@ -548,7 +548,7 @@ pub const fn can_elevate_as_self() -> bool {
 /// `not_admin_user` when the account cannot elevate as itself (module docs).
 ///
 /// Runs on the main thread (a sync command): `ShellExecuteExW` wants COM, which
-/// the WebView already initialised there.
+/// the `WebView` already initialised there.
 #[tauri::command]
 #[cfg(target_os = "windows")]
 #[allow(clippy::needless_pass_by_value)]
@@ -616,7 +616,9 @@ pub fn restart_as_admin_cmd(app: tauri::AppHandle, enable_tun: bool) -> Result<(
     // The stop is recorded before anything else of the shutdown runs, so a
     // resume recovery that begins meanwhile sees it and starts no core.
     let _user_stop = crate::core_manager::core::core_process::note_user_stop();
-    if let Err(e) = crate::sys_proxy::suspend_sys_proxy(&app) {
+    if let Err(e) =
+        crate::sys_proxy::suspend_sys_proxy(&app, crate::sys_proxy::SuspendFor::Relaunch)
+    {
         emit_warn!(
             System,
             SYS_PROXY_FAILED,
