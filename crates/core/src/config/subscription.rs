@@ -23,43 +23,420 @@ const fn decode_hex_digit(byte: u8) -> Option<u8> {
 
 /// Quote `short-id` values in YAML content before parsing.
 /// This prevents YAML from interpreting hex-like values (e.g., "34010e92") as scientific notation.
+///
+/// A `short-id` key is found where YAML has a key: at the start of a line,
+/// after a `- ` sequence entry, or inside a flow mapping
+/// (`{public-key: k, short-id: 34010e92}`). Its value is quoted when it is a
+/// plain scalar, whole (`abc def` becomes `"abc def"`), on the key's line or
+/// alone on a following, more indented line. Quoted values, block scalar
+/// indicators, flow collections, anchors, aliases, tags and plain scalars
+/// that go on over more lines are left alone. Text inside a block scalar
+/// (`|` or `>`) or a quoted scalar is not a key, so a password whose text
+/// holds `short-id: abc` keeps it.
+#[must_use]
 pub fn quote_short_id_values(content: &str) -> String {
     // Fast path: if "short-id:" is not present at all, return input immediately.
     if !content.contains("short-id:") {
         return content.to_owned();
     }
 
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        match regex::Regex::new(r#"(?:^|\n)(\s*short-id:\s*)([^\s"'\n][^\s\n]*)"#) {
-            Ok(re) => re,
-            Err(e) => unreachable!("short-id regex is statically valid: {e}"),
+    let spans = short_id_value_spans(content);
+    let mut out = String::with_capacity(content.len() + spans.len() * 2 + 16);
+    let mut last = 0;
+    for (start, end) in spans {
+        let (Some(before), Some(scalar)) = (content.get(last..start), content.get(start..end))
+        else {
+            return content.to_owned();
+        };
+        out.push_str(before);
+        out.push('"');
+        for c in scalar.chars() {
+            if matches!(c, '"' | '\\') {
+                out.push('\\');
+            }
+            out.push(c);
         }
-    });
+        out.push('"');
+        last = end;
+    }
+    out.push_str(content.get(last..).unwrap_or_default());
+    out
+}
 
-    // Zero-allocation loop over captures using a single pre-allocated output buffer.
-    let mut out = String::with_capacity(content.len() + 128);
-    let mut last_match = 0;
-    for caps in re.captures_iter(content) {
-        if let Some(m) = caps.get(0) {
-            out.push_str(&content[last_match..m.start()]);
-            let prefix = &caps[1];
-            let value = &caps[2];
-            let newline = if m.as_str().starts_with('\n') {
-                "\n"
-            } else {
-                ""
-            };
-            out.push_str(newline);
-            out.push_str(prefix);
-            out.push('"');
-            out.push_str(value);
-            out.push('"');
-            last_match = m.end();
+/// The byte ranges of the plain scalar values of `short-id` keys in
+/// `content`, in order: the spans [`quote_short_id_values`] wraps in quotes.
+fn short_id_value_spans(content: &str) -> Vec<(usize, usize)> {
+    let mut scanner = ShortIdScanner::default();
+    let mut line_start = 0;
+    while let Some(rest) = content.get(line_start..).filter(|rest| !rest.is_empty()) {
+        let line_len = rest.find('\n').map_or(rest.len(), |n| n + 1);
+        let Some(line) = rest.get(..line_len) else {
+            break;
+        };
+        let next_line = line_start + line_len;
+        let at = LineAt {
+            content,
+            line,
+            line_start,
+            next_line,
+        };
+        if !scanner.skip_line(&at) {
+            scanner.scan_line(&at);
+        }
+        line_start = next_line;
+    }
+    scanner.spans
+}
+
+/// One line of the content [`ShortIdScanner`] reads.
+struct LineAt<'a> {
+    /// The whole content, for looking at later lines.
+    content: &'a str,
+    /// The line, with its line ending.
+    line: &'a str,
+    /// Where the line starts in `content`.
+    line_start: usize,
+    /// Where the next line starts in `content`.
+    next_line: usize,
+}
+
+impl LineAt<'_> {
+    const fn bytes(&self) -> &[u8] {
+        self.line.as_bytes()
+    }
+
+    /// The length of the line without its line ending.
+    fn text_end(&self) -> usize {
+        self.line.trim_end_matches(['\n', '\r']).len()
+    }
+
+    /// The line's leading space count.
+    fn indent(&self) -> usize {
+        self.line.len() - self.line.trim_start_matches(' ').len()
+    }
+}
+
+/// What [`ShortIdScanner`] carries from one line to the next.
+#[derive(Default)]
+struct ShortIdScanner {
+    spans: Vec<(usize, usize)>,
+    /// How many flow collections (`{`, `[`) are open.
+    flow_depth: usize,
+    /// The quote of a quoted scalar that is still open.
+    quote: Option<u8>,
+    /// Column of the node that owns the block scalar being skipped: the
+    /// scalar's text is every following line indented deeper than it.
+    block_owner: Option<usize>,
+    /// Column of a `short-id:` key whose value comes on a later line.
+    pending_key: Option<usize>,
+}
+
+/// Where [`ShortIdScanner::scan_line`] is on its line.
+struct Cursor {
+    /// The byte being read.
+    pos: usize,
+    /// Whether a new node may start at `pos`.
+    token_start: bool,
+    /// Column of the token being read.
+    token_col: usize,
+    /// Column of the node that owns a block scalar starting on this line:
+    /// the key, or a `- ` entry.
+    owner_col: usize,
+}
+
+impl ShortIdScanner {
+    const KEY: &'static str = "short-id:";
+
+    /// Handle a line that is block scalar text, blank or a comment before a
+    /// pending value, or the pending value itself. Returns `true` when the
+    /// line needs no other reading.
+    fn skip_line(&mut self, at: &LineAt<'_>) -> bool {
+        if self.quote.is_some() {
+            return false;
+        }
+        let blank = at.line.trim().is_empty();
+        if let Some(owner) = self.block_owner {
+            if blank || at.indent() > owner {
+                return true;
+            }
+            self.block_owner = None;
+        }
+        let Some(key_col) = self.pending_key else {
+            return false;
+        };
+        if blank || at.line.trim_start().starts_with('#') {
+            return true;
+        }
+        self.pending_key = None;
+        let indent = at.indent();
+        if self.flow_depth > 0 || indent <= key_col {
+            return false;
+        }
+        match plain_scalar_end(at.bytes(), indent, at.text_end(), false) {
+            Some((end, true)) if !plain_scalar_continues(at.content, at.next_line, key_col) => {
+                self.spans
+                    .push((at.line_start + indent, at.line_start + end));
+                true
+            }
+            _ => false,
         }
     }
-    out.push_str(&content[last_match..]);
-    out
+
+    fn scan_line(&mut self, at: &LineAt<'_>) {
+        let start = if self.quote.is_some() { 0 } else { at.indent() };
+        let mut cursor = Cursor {
+            pos: start,
+            token_start: self.quote.is_none(),
+            token_col: start,
+            owner_col: start,
+        };
+        let text_end = at.text_end();
+        while cursor.pos < text_end {
+            if !self.step(at, &mut cursor) {
+                break;
+            }
+        }
+    }
+
+    /// Read on from the cursor. Returns `false` when the rest of the line
+    /// holds nothing more to read.
+    fn step(&mut self, at: &LineAt<'_>, cursor: &mut Cursor) -> bool {
+        let bytes = at.bytes();
+        if let Some(quote) = self.quote {
+            let Some(after) = quoted_scalar_end(bytes, cursor.pos, at.text_end(), quote) else {
+                return false;
+            };
+            self.quote = None;
+            cursor.pos = after;
+            cursor.token_start = false;
+            return true;
+        }
+        let b = byte_at(bytes, cursor.pos);
+        if matches!(b, b' ' | b'\t') {
+            cursor.pos += 1;
+            return true;
+        }
+        let after_blank = cursor.pos == 0 || matches!(byte_at(bytes, cursor.pos - 1), b' ' | b'\t');
+        if b == b'#' && after_blank {
+            return false;
+        }
+        if cursor.token_start {
+            return self.step_token_start(at, cursor);
+        }
+        let in_flow = self.flow_depth > 0;
+        match b {
+            b':' if is_value_separator(byte_at(bytes, cursor.pos + 1), in_flow) => {
+                cursor.owner_col = cursor.token_col;
+                cursor.token_start = true;
+            }
+            b',' if in_flow => cursor.token_start = true,
+            b'}' | b']' if in_flow => self.flow_depth -= 1,
+            _ => {}
+        }
+        cursor.pos += 1;
+        true
+    }
+
+    /// Read the node that starts at the cursor.
+    fn step_token_start(&mut self, at: &LineAt<'_>, cursor: &mut Cursor) -> bool {
+        let bytes = at.bytes();
+        let pos = cursor.pos;
+        let b = byte_at(bytes, pos);
+        let in_flow = self.flow_depth > 0;
+        cursor.token_col = pos;
+        cursor.pos += 1;
+        match b {
+            b'-' | b'?' if !in_flow && is_blank_byte(byte_at(bytes, pos + 1)) => {
+                cursor.owner_col = pos;
+            }
+            b'"' | b'\'' => self.quote = Some(b),
+            b'|' | b'>' if !in_flow => {
+                if is_block_scalar_indicator(bytes, pos, at.text_end()) {
+                    self.block_owner = Some(cursor.owner_col);
+                }
+                return false;
+            }
+            b'&' | b'!' => {
+                // An anchor or a tag comes before the node it names.
+                while cursor.pos < at.text_end() && !is_blank_byte(byte_at(bytes, cursor.pos)) {
+                    cursor.pos += 1;
+                }
+            }
+            b'{' | b'[' => self.flow_depth += 1,
+            b'}' | b']' if in_flow => {
+                self.flow_depth -= 1;
+                cursor.token_start = false;
+            }
+            b',' if in_flow => {}
+            _ => {
+                let is_key = at
+                    .line
+                    .get(pos..)
+                    .is_some_and(|rest| rest.starts_with(Self::KEY))
+                    && is_value_separator(byte_at(bytes, pos + Self::KEY.len()), in_flow);
+                if !is_key {
+                    cursor.token_start = false;
+                    return true;
+                }
+                return self.step_short_id_value(at, cursor, pos);
+            }
+        }
+        true
+    }
+
+    /// Read the value of the `short-id:` key at column `key_col`, recording
+    /// it when it is a plain scalar.
+    fn step_short_id_value(
+        &mut self,
+        at: &LineAt<'_>,
+        cursor: &mut Cursor,
+        key_col: usize,
+    ) -> bool {
+        let bytes = at.bytes();
+        let text_end = at.text_end();
+        let in_flow = self.flow_depth > 0;
+        cursor.owner_col = key_col;
+        let mut value = key_col + Self::KEY.len();
+        while value < text_end && matches!(byte_at(bytes, value), b' ' | b'\t') {
+            value += 1;
+        }
+        if value >= text_end || byte_at(bytes, value) == b'#' {
+            if !in_flow {
+                self.pending_key = Some(key_col);
+            }
+            return false;
+        }
+        cursor.pos = value;
+        let Some((end, ends_line)) = plain_scalar_end(bytes, value, text_end, in_flow) else {
+            return true;
+        };
+        // A plain scalar may go on over the next lines: it is left alone
+        // then, as quoting its first line would break it.
+        let continues = if in_flow {
+            ends_line
+        } else {
+            plain_scalar_continues(at.content, at.next_line, key_col)
+        };
+        if !continues {
+            self.spans
+                .push((at.line_start + value, at.line_start + end));
+        }
+        cursor.token_start = false;
+        cursor.pos = end;
+        true
+    }
+}
+
+/// The byte at `i` in `bytes`, or `\n` past the end.
+fn byte_at(bytes: &[u8], i: usize) -> u8 {
+    bytes.get(i).copied().unwrap_or(b'\n')
+}
+
+/// Whether `b` is whitespace or the end of the line.
+const fn is_blank_byte(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\r' | b'\n')
+}
+
+/// Whether the byte after a `:` makes the colon a key separator.
+const fn is_value_separator(next: u8, in_flow: bool) -> bool {
+    is_blank_byte(next) || (in_flow && matches!(next, b',' | b'}' | b']'))
+}
+
+/// Where the plain scalar starting at `start` ends on its line, with
+/// trailing whitespace left out, and whether it runs to the end of the line
+/// (or to a comment). `None` when no plain scalar starts there, or when the
+/// text is not one plain scalar (`a: b` holds a key).
+fn plain_scalar_end(
+    bytes: &[u8],
+    start: usize,
+    text_end: usize,
+    in_flow: bool,
+) -> Option<(usize, bool)> {
+    let first = byte_at(bytes, start);
+    let next = byte_at(bytes, start + 1);
+    let starts_plain = match first {
+        b'-' | b'?' | b':' => !(is_blank_byte(next) || in_flow && b",[]{}".contains(&next)),
+        b',' | b'[' | b']' | b'{' | b'}' | b'#' | b'&' | b'*' | b'!' | b'|' | b'>' | b'\''
+        | b'"' | b'%' | b'@' | b'`' => false,
+        b => !is_blank_byte(b),
+    };
+    if !starts_plain {
+        return None;
+    }
+    let mut i = start;
+    let mut end = start;
+    let mut ends_line = true;
+    while i < text_end {
+        let b = byte_at(bytes, i);
+        let prev_blank = i > start && matches!(byte_at(bytes, i - 1), b' ' | b'\t');
+        if b == b'#' && prev_blank {
+            break;
+        }
+        if b == b':' && is_value_separator(byte_at(bytes, i + 1), in_flow) {
+            return None;
+        }
+        if in_flow && matches!(b, b',' | b'}' | b']') {
+            ends_line = false;
+            break;
+        }
+        if in_flow && matches!(b, b'{' | b'[') {
+            return None;
+        }
+        if !matches!(b, b' ' | b'\t') {
+            end = i + 1;
+        }
+        i += 1;
+    }
+    Some((end, ends_line))
+}
+
+/// Whether the plain scalar value of a block key at column `key_col` goes on
+/// past its line: the next line that is not blank or a comment is indented
+/// deeper than the key. `from` is where that search starts.
+fn plain_scalar_continues(content: &str, from: usize, key_col: usize) -> bool {
+    content
+        .get(from..)
+        .unwrap_or_default()
+        .split('\n')
+        .find(|line| {
+            let text = line.trim();
+            !text.is_empty() && !text.starts_with('#')
+        })
+        .is_some_and(|line| line.len() - line.trim_start_matches(' ').len() > key_col)
+}
+
+/// The end of a quoted scalar opened with `quote`, searching from `from`:
+/// the byte after its closing quote, or `None` when it does not close on
+/// this line.
+fn quoted_scalar_end(bytes: &[u8], from: usize, text_end: usize, quote: u8) -> Option<usize> {
+    let mut i = from;
+    while i < text_end {
+        let b = byte_at(bytes, i);
+        if quote == b'"' && b == b'\\' {
+            i += 2;
+            continue;
+        }
+        if b == quote {
+            // In single quotes, `''` is an escaped quote.
+            if quote == b'\'' && byte_at(bytes, i + 1) == b'\'' {
+                i += 2;
+                continue;
+            }
+            return Some(i + 1);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Whether the token at `start` is a block scalar indicator (`|`, `>-`,
+/// `|2+`), with only whitespace or a comment after it.
+fn is_block_scalar_indicator(bytes: &[u8], start: usize, text_end: usize) -> bool {
+    let mut i = start + 1;
+    while i < text_end && i <= start + 2 && matches!(byte_at(bytes, i), b'+' | b'-' | b'1'..=b'9') {
+        i += 1;
+    }
+    i >= text_end || matches!(byte_at(bytes, i), b' ' | b'\t')
 }
 
 /// Strip a YAML `#` comment from an unquoted scalar. In YAML, `#` only
@@ -610,7 +987,9 @@ const MAX_DISPOSITION_STEM_BYTES: usize = 64;
 ///
 /// The name is fully percent-decoded first, so an encoded separator
 /// (`%2F`, `%5C`, `%252F`) is split on as well. A `.yaml`/`.yml` suffix is
-/// removed (ASCII case-insensitively), as are the trailing dots and spaces
+/// removed (ASCII case-insensitively), and so is `.json`: a config served
+/// as JSON is saved as YAML, so `name.json` must not become
+/// `name.json.yaml`. Also removed are the trailing dots and spaces
 /// Windows would drop. Returns `None` when nothing usable is left: an empty
 /// name, a bare `.`/`..`, or a stem over 64 bytes. The result still has to
 /// pass `sanitize_config_file_name`; callers fall back to another name when
@@ -628,7 +1007,7 @@ pub fn disposition_profile_stem(filename: &str) -> Option<String> {
     // caller would then turn into `sample.yaml.yaml`).
     let trimmed = last.trim_end_matches([' ', '.']);
     let lower = trimmed.to_ascii_lowercase();
-    let without_ext = if lower.ends_with(".yaml") {
+    let without_ext = if lower.ends_with(".yaml") || lower.ends_with(".json") {
         trimmed.get(..trimmed.len() - 5)?
     } else if lower.ends_with(".yml") {
         trimmed.get(..trimmed.len() - 4)?
@@ -672,7 +1051,9 @@ pub fn percent_decode(input: &str) -> String {
 
 /// Attempt to base64-decode content that does not already contain Clash markers.
 /// Returns `Some(decoded)` only if the decoded bytes are valid UTF-8, valid YAML,
-/// and contain a `proxies:` key (required for a valid Clash config).
+/// and contain a `proxies:` key (required for a valid Clash config). A Clash
+/// config encoded as JSON (see [`parse_json_clash_config`]) is returned as
+/// YAML text, so it reads the same through any YAML parser.
 pub fn try_decode_base64_content(content: &str) -> Option<String> {
     let mut trimmed = Vec::with_capacity(content.len());
     trimmed.extend(
@@ -684,11 +1065,45 @@ pub fn try_decode_base64_content(content: &str) -> Option<String> {
         .decode(&trimmed)
         .ok()?;
     let decoded_str = String::from_utf8(decoded_bytes).ok()?;
+    // A JSON config comes back as YAML text: callers read the result with a
+    // YAML parser, which rejects some valid JSON (a repeated key).
+    if let Some(config) = parse_json_clash_config(&decoded_str) {
+        return serde_yaml::to_string(&config).ok();
+    }
     let yaml_val: serde_yaml::Value = serde_yaml::from_str(&decoded_str).ok()?;
     let has_proxies = yaml_val
         .get("proxies")
         .is_some_and(serde_yaml::Value::is_sequence);
     has_proxies.then_some(decoded_str)
+}
+
+/// Parse a Clash config served as JSON, returning it as a YAML value.
+///
+/// Some panels (BPB Worker Panel, for one) serve the Clash subscription as
+/// `JSON.stringify(config)`. JSON is valid YAML, but its text has no
+/// `proxies:` marker (the key is written `"proxies":`), so the marker check
+/// used for YAML never matches it. The body is read with a JSON parser, so
+/// it is read the way JSON defines it: the YAML parser rejects some valid
+/// JSON, such as an object that repeats a key (the last value is kept).
+///
+/// Returns `Some` only for a JSON object whose `proxies` or `proxy-groups`
+/// value is a list, like the config a YAML subscription carries. Any other
+/// JSON (a sing-box or Xray config, an API reply such as the controller's
+/// `{"proxies": {...}}` map) returns `None`. A leading byte order mark and
+/// surrounding whitespace are ignored.
+#[must_use]
+pub fn parse_json_clash_config(content: &str) -> Option<serde_yaml::Value> {
+    let body = content.trim_start_matches('\u{feff}').trim();
+    if !body.starts_with('{') {
+        return None;
+    }
+    let json: serde_json::Value = serde_json::from_str(body).ok()?;
+    let object = json.as_object()?;
+    let is_list = |key: &str| object.get(key).is_some_and(serde_json::Value::is_array);
+    if !is_list("proxies") && !is_list("proxy-groups") {
+        return None;
+    }
+    serde_yaml::to_value(&json).ok()
 }
 
 #[inline]
@@ -1959,6 +2374,111 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_json_clash_config_accepts_clash_json() {
+        let json = r#"{
+    "mixed-port": 7890,
+    "proxies": [
+        { "name": "node-a", "type": "trojan", "server": "a.example.com", "port": 443, "password": "p" }
+    ],
+    "proxy-groups": [
+        { "name": "Select", "type": "select", "proxies": ["node-a"] }
+    ],
+    "rules": ["MATCH,Select"]
+}"#;
+        let value = parse_json_clash_config(json).unwrap();
+        assert_eq!(
+            value.get("mixed-port").and_then(serde_yaml::Value::as_u64),
+            Some(7890)
+        );
+        let proxies = value.get("proxies").unwrap().as_sequence().unwrap();
+        assert_eq!(proxies.len(), 1);
+        assert_eq!(
+            proxies.first().unwrap().get("name").unwrap().as_str(),
+            Some("node-a")
+        );
+        assert_eq!(
+            value
+                .get("rules")
+                .unwrap()
+                .as_sequence()
+                .unwrap()
+                .first()
+                .unwrap()
+                .as_str(),
+            Some("MATCH,Select")
+        );
+
+        // Key order is kept, so the saved YAML reads in the server's order.
+        let keys: Vec<&str> = value
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .filter_map(serde_yaml::Value::as_str)
+            .collect();
+        assert_eq!(keys, ["mixed-port", "proxies", "proxy-groups", "rules"]);
+
+        // A byte order mark, surrounding whitespace and tab indentation are fine.
+        let with_bom = format!("\u{feff}\n\t{}\n\n", json.replace("    ", "\t"));
+        assert_eq!(parse_json_clash_config(&with_bom), Some(value));
+
+        // A repeated key, which the YAML parser rejects, keeps its last value.
+        let repeated = r#"{"mode":"global","mode":"rule","proxies":[]}"#;
+        assert!(serde_yaml::from_str::<serde_yaml::Value>(repeated).is_err());
+        assert_eq!(
+            parse_json_clash_config(repeated)
+                .unwrap()
+                .get("mode")
+                .and_then(serde_yaml::Value::as_str),
+            Some("rule")
+        );
+
+        // A config with groups but no inline proxies (providers only) counts.
+        let groups_only = r#"{"proxy-groups":[{"name":"G","type":"select","use":["p"]}]}"#;
+        assert!(parse_json_clash_config(groups_only).is_some());
+    }
+
+    #[test]
+    fn test_parse_json_clash_config_rejects_other_content() {
+        // YAML, node lists and broken JSON are left to the other checks.
+        assert!(parse_json_clash_config("proxies:\n  - name: a\n").is_none());
+        assert!(parse_json_clash_config("https://example.com/sub").is_none());
+        assert!(parse_json_clash_config("{\"proxies\": [").is_none());
+        assert!(parse_json_clash_config("").is_none());
+        // JSON that is not a Clash config: an array, a sing-box config, and
+        // the controller's `/proxies` reply, whose `proxies` is a map.
+        assert!(parse_json_clash_config(r#"[{"proxies": []}]"#).is_none());
+        assert!(
+            parse_json_clash_config(r#"{"outbounds":[{"type":"direct","tag":"direct"}]}"#)
+                .is_none()
+        );
+        assert!(parse_json_clash_config(r#"{"proxies":{"DIRECT":{"type":"Direct"}}}"#).is_none());
+        assert!(parse_json_clash_config(r#"{"proxies":null,"proxy-groups":"x"}"#).is_none());
+    }
+
+    #[test]
+    fn test_try_decode_base64_content_accepts_json_config() {
+        let json = r#"{"proxies":[{"name":"a","type":"ss","server":"a.example.com","port":443}]}"#;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(json);
+        let decoded = try_decode_base64_content(&encoded).unwrap();
+        let value: serde_yaml::Value = serde_yaml::from_str(&decoded).unwrap();
+        assert_eq!(value, parse_json_clash_config(json).unwrap());
+
+        // A repeated key is valid JSON but not valid YAML; the decoded text
+        // must still parse as YAML, keeping the last value like JSON does.
+        let repeated = r#"{"port":1,"port":7890,"proxies":[{"name":"a","type":"ss"}]}"#;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(repeated);
+        let decoded = try_decode_base64_content(&encoded).unwrap();
+        let value: serde_yaml::Value = serde_yaml::from_str(&decoded).unwrap();
+        assert_eq!(
+            value.get("port").and_then(serde_yaml::Value::as_u64),
+            Some(7890)
+        );
+
+        let sing_box = base64::engine::general_purpose::STANDARD.encode(r#"{"outbounds":[]}"#);
+        assert!(try_decode_base64_content(&sing_box).is_none());
+    }
+
+    #[test]
     fn test_try_decode_base64_content() {
         let yaml = "proxies:\n  - name: test\n    type: ss\n    port: 443";
         let encoded = base64::engine::general_purpose::STANDARD.encode(yaml);
@@ -1991,6 +2511,210 @@ mod tests {
         let yaml = r#"short-id: "abc123""#;
         let result = quote_short_id_values(yaml);
         assert_eq!(result, r#"short-id: "abc123""#);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_skips_block_scalar_text() {
+        // Text inside a block scalar is not a key and must stay as written.
+        let yaml = "proxies:\n  - name: a\n    password: |\n      short-id: abc\n\n      more\n    short-id: 34010e92\n  - name: b\n    note: >-\n      short-id: def\n    reality-opts:\n      short-id: 1e5\n";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(
+            result,
+            "proxies:\n  - name: a\n    password: |\n      short-id: abc\n\n      more\n    short-id: \"34010e92\"\n  - name: b\n    note: >-\n      short-id: def\n    reality-opts:\n      short-id: \"1e5\"\n"
+        );
+        let value: serde_yaml::Value = serde_yaml::from_str(&result).unwrap();
+        let proxies = value
+            .get("proxies")
+            .and_then(serde_yaml::Value::as_sequence)
+            .unwrap();
+        let first = proxies.first().unwrap();
+        assert_eq!(
+            first.get("password").and_then(serde_yaml::Value::as_str),
+            Some("short-id: abc\n\nmore\n")
+        );
+        assert_eq!(
+            first.get("short-id").and_then(serde_yaml::Value::as_str),
+            Some("34010e92")
+        );
+
+        // A block scalar that is itself a sequence entry, and one with an
+        // anchor and an indentation indicator.
+        let yaml =
+            "notes:\n  - |\n    short-id: abc\n  - &n |2\n    short-id: def\nshort-id: 34010e92\n";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            "notes:\n  - |\n    short-id: abc\n  - &n |2\n    short-id: def\nshort-id: \"34010e92\"\n"
+        );
+    }
+
+    #[test]
+    fn test_quote_short_id_values_value_on_next_line() {
+        // YAML allows the value on a following, more indented line.
+        let yaml = "reality-opts:\n  short-id:\n    34010e92\n";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "reality-opts:\n  short-id:\n    \"34010e92\"\n");
+        let value: serde_yaml::Value = serde_yaml::from_str(&result).unwrap();
+        assert_eq!(
+            value
+                .get("reality-opts")
+                .and_then(|opts| opts.get("short-id"))
+                .and_then(serde_yaml::Value::as_str),
+            Some("34010e92")
+        );
+        // Blank lines and comments may come between; a comment may follow.
+        assert_eq!(
+            quote_short_id_values("short-id: # id\n\n  # hex\n  1e5 # x\nb: 1\n"),
+            "short-id: # id\n\n  # hex\n  \"1e5\" # x\nb: 1\n"
+        );
+        // A line that is not more indented, or is not one plain scalar, is
+        // not the value.
+        for yaml in [
+            "a:\n  short-id:\n  b: 1e5\n",
+            "short-id:\n  - 1e5\n",
+            "short-id:\n  'abc'\n",
+            "short-id:\n  1e5\n  2e5\n",
+            "short-id:\nb: 1\n",
+        ] {
+            assert_eq!(quote_short_id_values(yaml), yaml, "{yaml}");
+        }
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_scalar_edge_cases() {
+        // A comment that looks like a block scalar key starts nothing.
+        let yaml = "reality-opts:\n# sample: |\n  short-id: 34010e92\n";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(
+            result,
+            "reality-opts:\n# sample: |\n  short-id: \"34010e92\"\n"
+        );
+        let value: serde_yaml::Value = serde_yaml::from_str(&result).unwrap();
+        assert_eq!(
+            value
+                .get("reality-opts")
+                .and_then(|opts| opts.get("short-id"))
+                .and_then(serde_yaml::Value::as_str),
+            Some("34010e92")
+        );
+        // A quoted key holding `: ` still owns its block scalar.
+        let yaml = "\"a: b\": |\n  short-id: abc\nshort-id: 34010e92\n";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            "\"a: b\": |\n  short-id: abc\nshort-id: \"34010e92\"\n"
+        );
+        // `a |` is a plain scalar, so the next line is a key.
+        let yaml = "k: a |\nshort-id: 1e5\n";
+        assert_eq!(quote_short_id_values(yaml), "k: a |\nshort-id: \"1e5\"\n");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_whole_plain_scalar() {
+        // A plain scalar of several words is quoted whole, keeping the
+        // comment after it; quotes and backslashes in it are escaped.
+        for (yaml, quoted, value) in [
+            (
+                "short-id: abc def # c\n",
+                "short-id: \"abc def\" # c\n",
+                "abc def",
+            ),
+            (
+                "short-id:\n  1e5 2e5\n",
+                "short-id:\n  \"1e5 2e5\"\n",
+                "1e5 2e5",
+            ),
+            (r#"short-id: a"b\c"#, r#"short-id: "a\"b\\c""#, r#"a"b\c"#),
+        ] {
+            let result = quote_short_id_values(yaml);
+            assert_eq!(result, quoted, "{yaml}");
+            let parsed: serde_yaml::Value = serde_yaml::from_str(&result).unwrap();
+            assert_eq!(
+                parsed.get("short-id").and_then(serde_yaml::Value::as_str),
+                Some(value),
+                "{yaml}"
+            );
+        }
+        // A plain scalar that goes on over the next line is left alone.
+        let yaml = "short-id: 1e5\n  2e5\nb: 1\n";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_flow_mapping() {
+        let yaml = "proxies:\n  - {name: a, reality-opts: {public-key: k, short-id: 34010e92}}\n  - name: b\n    reality-opts: {short-id: 1e5, public-key: k}\n";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(
+            result,
+            "proxies:\n  - {name: a, reality-opts: {public-key: k, short-id: \"34010e92\"}}\n  - name: b\n    reality-opts: {short-id: \"1e5\", public-key: k}\n"
+        );
+        let value: serde_yaml::Value = serde_yaml::from_str(&result).unwrap();
+        let short_ids: Vec<_> = value
+            .get("proxies")
+            .and_then(serde_yaml::Value::as_sequence)
+            .unwrap()
+            .iter()
+            .map(|proxy| {
+                proxy
+                    .get("reality-opts")
+                    .and_then(|opts| opts.get("short-id"))
+                    .and_then(serde_yaml::Value::as_str)
+            })
+            .collect();
+        assert_eq!(short_ids, [Some("34010e92"), Some("1e5")]);
+        // Quoted, flow and other values inside a flow mapping are left alone.
+        for yaml in [
+            "a: {short-id: 'x', b: 1}\n",
+            "a: {short-id: [x]}\n",
+            "a: {myshort-id: 1e5}\n",
+        ] {
+            assert_eq!(quote_short_id_values(yaml), yaml, "{yaml}");
+        }
+    }
+
+    #[test]
+    fn test_quote_short_id_values_skips_quoted_scalar_text() {
+        // A quoted scalar may span lines; its text is not a key.
+        for yaml in [
+            "password: 'prefix\n  short-id: abc\n  it''s'\nshort-id: 34010e92\n",
+            "password: \"prefix \\\" \n  short-id: abc\n  suffix\"\nshort-id: 34010e92\n",
+            "a: [\"x\n  short-id: abc\"]\nshort-id: 34010e92\n",
+        ] {
+            let result = quote_short_id_values(yaml);
+            let expected = yaml.replace("short-id: 34010e92", "short-id: \"34010e92\"");
+            assert_eq!(result, expected, "{yaml}");
+            let value: serde_yaml::Value = serde_yaml::from_str(&result).unwrap();
+            assert_eq!(
+                value.get("short-id").and_then(serde_yaml::Value::as_str),
+                Some("34010e92"),
+                "{yaml}"
+            );
+        }
+        // A quote inside a plain scalar opens nothing.
+        let yaml = "name: it's\nshort-id: 1e5\n";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            "name: it's\nshort-id: \"1e5\"\n"
+        );
+    }
+
+    #[test]
+    fn test_quote_short_id_values_leaves_non_plain_values() {
+        for yaml in [
+            "short-id: 'abc'",
+            "short-id: # no value",
+            "short-id: &id 34010e92",
+            "short-id: *id",
+            "short-id: !!str 34010e92",
+            "short-id: [a]",
+            "short-id:",
+            "short-id:\n  public-key: abc\n",
+        ] {
+            assert_eq!(quote_short_id_values(yaml), yaml, "{yaml}");
+        }
+        // A comment after the value and CRLF line endings are kept.
+        assert_eq!(
+            quote_short_id_values("a: 1\r\nshort-id: 34010e92 # hex\r\n"),
+            "a: 1\r\nshort-id: \"34010e92\" # hex\r\n"
+        );
     }
 
     #[test]
@@ -2694,6 +3418,15 @@ mod tests {
         assert_eq!(
             disposition_profile_stem("sample.txt"),
             Some("sample.txt".to_owned())
+        );
+        // A config served as JSON is saved as YAML: `.json` goes too.
+        assert_eq!(
+            disposition_profile_stem("BPB-normal-clash.json"),
+            Some("BPB-normal-clash".to_owned())
+        );
+        assert_eq!(
+            disposition_profile_stem("sample.JSON. "),
+            Some("sample".to_owned())
         );
         // Trailing dots/spaces Windows would drop are removed.
         assert_eq!(
