@@ -23,43 +23,117 @@ const fn decode_hex_digit(byte: u8) -> Option<u8> {
 
 /// Quote `short-id` values in YAML content before parsing.
 /// This prevents YAML from interpreting hex-like values (e.g., "34010e92") as scientific notation.
+///
+/// Only a `short-id:` key that starts its line is touched, and only when its
+/// value is a plain scalar on the same line: quoted values, block scalar
+/// indicators, comments, anchors, aliases and tags are left alone. Lines
+/// inside a block scalar (`|` or `>`) are text, not keys, so they are copied
+/// unchanged: a password whose text contains `short-id: abc` keeps it.
+#[must_use]
 pub fn quote_short_id_values(content: &str) -> String {
     // Fast path: if "short-id:" is not present at all, return input immediately.
     if !content.contains("short-id:") {
         return content.to_owned();
     }
 
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        match regex::Regex::new(r#"(?:^|\n)(\s*short-id:\s*)([^\s"'\n][^\s\n]*)"#) {
-            Ok(re) => re,
-            Err(e) => unreachable!("short-id regex is statically valid: {e}"),
-        }
-    });
-
-    // Zero-allocation loop over captures using a single pre-allocated output buffer.
     let mut out = String::with_capacity(content.len() + 128);
-    let mut last_match = 0;
-    for caps in re.captures_iter(content) {
-        if let Some(m) = caps.get(0) {
-            out.push_str(&content[last_match..m.start()]);
-            let prefix = &caps[1];
-            let value = &caps[2];
-            let newline = if m.as_str().starts_with('\n') {
-                "\n"
-            } else {
-                ""
-            };
-            out.push_str(newline);
-            out.push_str(prefix);
-            out.push('"');
-            out.push_str(value);
-            out.push('"');
-            last_match = m.end();
+    // Column of the node that owns the block scalar being copied, if any:
+    // the scalar's text is every following line indented deeper than it.
+    let mut block_owner: Option<usize> = None;
+    for line in content.split_inclusive('\n') {
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        if let Some(owner) = block_owner {
+            if line.trim().is_empty() || indent > owner {
+                out.push_str(line);
+                continue;
+            }
         }
+        // The line is not block scalar text: it may start a new scalar.
+        block_owner = block_scalar_owner(line, indent);
+        push_line_with_quoted_short_id(&mut out, line);
     }
-    out.push_str(&content[last_match..]);
     out
+}
+
+/// Copy `line` to `out`, wrapping the value of a leading `short-id:` key in
+/// double quotes when it is a plain scalar.
+fn push_line_with_quoted_short_id(out: &mut String, line: &str) {
+    let Some(after_key) = line
+        .trim_start_matches([' ', '\t'])
+        .strip_prefix("short-id:")
+    else {
+        out.push_str(line);
+        return;
+    };
+    let value = after_key.trim_start_matches([' ', '\t']);
+    let plain = value.chars().next().is_some_and(|c| {
+        !c.is_whitespace() && !matches!(c, '"' | '\'' | '|' | '>' | '#' | '&' | '*' | '!')
+    });
+    if !plain {
+        out.push_str(line);
+        return;
+    }
+    let value_start = line.len() - value.len();
+    let value_end = value
+        .find(char::is_whitespace)
+        .map_or(line.len(), |end| value_start + end);
+    let (Some(prefix), Some(scalar), Some(rest)) = (
+        line.get(..value_start),
+        line.get(value_start..value_end),
+        line.get(value_end..),
+    ) else {
+        out.push_str(line);
+        return;
+    };
+    out.push_str(prefix);
+    out.push('"');
+    out.push_str(scalar);
+    out.push('"');
+    out.push_str(rest);
+}
+
+/// When `line` starts a block scalar (`key: |`, `- >-`, `key: &a |2`),
+/// return the column of the node that owns it: the key, or the `-` of a
+/// sequence entry whose value is the scalar. `indent` is the line's leading
+/// space count.
+fn block_scalar_owner(line: &str, indent: usize) -> Option<usize> {
+    if !line.contains(['|', '>']) {
+        return None;
+    }
+    let mut column = indent;
+    let mut owner = indent;
+    let mut rest = line.get(indent..)?.trim_end_matches(['\n', '\r']);
+    // Step over sequence entry indicators (`- `, `- - `).
+    while let Some(after) = rest.strip_prefix('-') {
+        if !(after.is_empty() || after.starts_with([' ', '\t'])) {
+            break;
+        }
+        owner = column;
+        let next = after.trim_start_matches([' ', '\t']);
+        column += rest.len() - next.len();
+        rest = next;
+    }
+    // In `key: value`, the key owns the value.
+    let value = match rest.find(": ").or_else(|| rest.find(":\t")) {
+        Some(colon) => {
+            owner = column;
+            rest.get(colon + 2..)?
+        }
+        None => rest,
+    };
+    // Anchors and tags may precede the indicator; a comment may follow it.
+    let mut tokens = strip_yaml_comment(value)
+        .split_whitespace()
+        .filter(|token| !token.starts_with(['&', '!']));
+    let indicator = tokens.next()?;
+    if tokens.next().is_some() {
+        return None;
+    }
+    let mut chars = indicator.chars();
+    let is_block = matches!(chars.next(), Some('|' | '>'))
+        && indicator.len() <= 3
+        && chars.all(|c| matches!(c, '+' | '-' | '1'..='9'));
+    is_block.then_some(owner)
 }
 
 /// Strip a YAML `#` comment from an unquoted scalar. In YAML, `#` only
@@ -610,7 +684,9 @@ const MAX_DISPOSITION_STEM_BYTES: usize = 64;
 ///
 /// The name is fully percent-decoded first, so an encoded separator
 /// (`%2F`, `%5C`, `%252F`) is split on as well. A `.yaml`/`.yml` suffix is
-/// removed (ASCII case-insensitively), as are the trailing dots and spaces
+/// removed (ASCII case-insensitively), and so is `.json`: a config served
+/// as JSON is saved as YAML, so `name.json` must not become
+/// `name.json.yaml`. Also removed are the trailing dots and spaces
 /// Windows would drop. Returns `None` when nothing usable is left: an empty
 /// name, a bare `.`/`..`, or a stem over 64 bytes. The result still has to
 /// pass `sanitize_config_file_name`; callers fall back to another name when
@@ -628,7 +704,7 @@ pub fn disposition_profile_stem(filename: &str) -> Option<String> {
     // caller would then turn into `sample.yaml.yaml`).
     let trimmed = last.trim_end_matches([' ', '.']);
     let lower = trimmed.to_ascii_lowercase();
-    let without_ext = if lower.ends_with(".yaml") {
+    let without_ext = if lower.ends_with(".yaml") || lower.ends_with(".json") {
         trimmed.get(..trimmed.len() - 5)?
     } else if lower.ends_with(".yml") {
         trimmed.get(..trimmed.len() - 4)?
@@ -672,7 +748,9 @@ pub fn percent_decode(input: &str) -> String {
 
 /// Attempt to base64-decode content that does not already contain Clash markers.
 /// Returns `Some(decoded)` only if the decoded bytes are valid UTF-8, valid YAML,
-/// and contain a `proxies:` key (required for a valid Clash config).
+/// and contain a `proxies:` key (required for a valid Clash config). A Clash
+/// config encoded as JSON (see [`parse_json_clash_config`]) is returned as
+/// YAML text, so it reads the same through any YAML parser.
 pub fn try_decode_base64_content(content: &str) -> Option<String> {
     let mut trimmed = Vec::with_capacity(content.len());
     trimmed.extend(
@@ -684,11 +762,45 @@ pub fn try_decode_base64_content(content: &str) -> Option<String> {
         .decode(&trimmed)
         .ok()?;
     let decoded_str = String::from_utf8(decoded_bytes).ok()?;
+    // A JSON config comes back as YAML text: callers read the result with a
+    // YAML parser, which rejects some valid JSON (a repeated key).
+    if let Some(config) = parse_json_clash_config(&decoded_str) {
+        return serde_yaml::to_string(&config).ok();
+    }
     let yaml_val: serde_yaml::Value = serde_yaml::from_str(&decoded_str).ok()?;
     let has_proxies = yaml_val
         .get("proxies")
         .is_some_and(serde_yaml::Value::is_sequence);
     has_proxies.then_some(decoded_str)
+}
+
+/// Parse a Clash config served as JSON, returning it as a YAML value.
+///
+/// Some panels (BPB Worker Panel, for one) serve the Clash subscription as
+/// `JSON.stringify(config)`. JSON is valid YAML, but its text has no
+/// `proxies:` marker (the key is written `"proxies":`), so the marker check
+/// used for YAML never matches it. The body is read with a JSON parser, so
+/// it is read the way JSON defines it: the YAML parser rejects some valid
+/// JSON, such as an object that repeats a key (the last value is kept).
+///
+/// Returns `Some` only for a JSON object whose `proxies` or `proxy-groups`
+/// value is a list, like the config a YAML subscription carries. Any other
+/// JSON (a sing-box or Xray config, an API reply such as the controller's
+/// `{"proxies": {...}}` map) returns `None`. A leading byte order mark and
+/// surrounding whitespace are ignored.
+#[must_use]
+pub fn parse_json_clash_config(content: &str) -> Option<serde_yaml::Value> {
+    let body = content.trim_start_matches('\u{feff}').trim();
+    if !body.starts_with('{') {
+        return None;
+    }
+    let json: serde_json::Value = serde_json::from_str(body).ok()?;
+    let object = json.as_object()?;
+    let is_list = |key: &str| object.get(key).is_some_and(serde_json::Value::is_array);
+    if !is_list("proxies") && !is_list("proxy-groups") {
+        return None;
+    }
+    serde_yaml::to_value(&json).ok()
 }
 
 #[inline]
@@ -1959,6 +2071,111 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_json_clash_config_accepts_clash_json() {
+        let json = r#"{
+    "mixed-port": 7890,
+    "proxies": [
+        { "name": "node-a", "type": "trojan", "server": "a.example.com", "port": 443, "password": "p" }
+    ],
+    "proxy-groups": [
+        { "name": "Select", "type": "select", "proxies": ["node-a"] }
+    ],
+    "rules": ["MATCH,Select"]
+}"#;
+        let value = parse_json_clash_config(json).unwrap();
+        assert_eq!(
+            value.get("mixed-port").and_then(serde_yaml::Value::as_u64),
+            Some(7890)
+        );
+        let proxies = value.get("proxies").unwrap().as_sequence().unwrap();
+        assert_eq!(proxies.len(), 1);
+        assert_eq!(
+            proxies.first().unwrap().get("name").unwrap().as_str(),
+            Some("node-a")
+        );
+        assert_eq!(
+            value
+                .get("rules")
+                .unwrap()
+                .as_sequence()
+                .unwrap()
+                .first()
+                .unwrap()
+                .as_str(),
+            Some("MATCH,Select")
+        );
+
+        // Key order is kept, so the saved YAML reads in the server's order.
+        let keys: Vec<&str> = value
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .filter_map(serde_yaml::Value::as_str)
+            .collect();
+        assert_eq!(keys, ["mixed-port", "proxies", "proxy-groups", "rules"]);
+
+        // A byte order mark, surrounding whitespace and tab indentation are fine.
+        let with_bom = format!("\u{feff}\n\t{}\n\n", json.replace("    ", "\t"));
+        assert_eq!(parse_json_clash_config(&with_bom), Some(value));
+
+        // A repeated key, which the YAML parser rejects, keeps its last value.
+        let repeated = r#"{"mode":"global","mode":"rule","proxies":[]}"#;
+        assert!(serde_yaml::from_str::<serde_yaml::Value>(repeated).is_err());
+        assert_eq!(
+            parse_json_clash_config(repeated)
+                .unwrap()
+                .get("mode")
+                .and_then(serde_yaml::Value::as_str),
+            Some("rule")
+        );
+
+        // A config with groups but no inline proxies (providers only) counts.
+        let groups_only = r#"{"proxy-groups":[{"name":"G","type":"select","use":["p"]}]}"#;
+        assert!(parse_json_clash_config(groups_only).is_some());
+    }
+
+    #[test]
+    fn test_parse_json_clash_config_rejects_other_content() {
+        // YAML, node lists and broken JSON are left to the other checks.
+        assert!(parse_json_clash_config("proxies:\n  - name: a\n").is_none());
+        assert!(parse_json_clash_config("https://example.com/sub").is_none());
+        assert!(parse_json_clash_config("{\"proxies\": [").is_none());
+        assert!(parse_json_clash_config("").is_none());
+        // JSON that is not a Clash config: an array, a sing-box config, and
+        // the controller's `/proxies` reply, whose `proxies` is a map.
+        assert!(parse_json_clash_config(r#"[{"proxies": []}]"#).is_none());
+        assert!(
+            parse_json_clash_config(r#"{"outbounds":[{"type":"direct","tag":"direct"}]}"#)
+                .is_none()
+        );
+        assert!(parse_json_clash_config(r#"{"proxies":{"DIRECT":{"type":"Direct"}}}"#).is_none());
+        assert!(parse_json_clash_config(r#"{"proxies":null,"proxy-groups":"x"}"#).is_none());
+    }
+
+    #[test]
+    fn test_try_decode_base64_content_accepts_json_config() {
+        let json = r#"{"proxies":[{"name":"a","type":"ss","server":"a.example.com","port":443}]}"#;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(json);
+        let decoded = try_decode_base64_content(&encoded).unwrap();
+        let value: serde_yaml::Value = serde_yaml::from_str(&decoded).unwrap();
+        assert_eq!(value, parse_json_clash_config(json).unwrap());
+
+        // A repeated key is valid JSON but not valid YAML; the decoded text
+        // must still parse as YAML, keeping the last value like JSON does.
+        let repeated = r#"{"port":1,"port":7890,"proxies":[{"name":"a","type":"ss"}]}"#;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(repeated);
+        let decoded = try_decode_base64_content(&encoded).unwrap();
+        let value: serde_yaml::Value = serde_yaml::from_str(&decoded).unwrap();
+        assert_eq!(
+            value.get("port").and_then(serde_yaml::Value::as_u64),
+            Some(7890)
+        );
+
+        let sing_box = base64::engine::general_purpose::STANDARD.encode(r#"{"outbounds":[]}"#);
+        assert!(try_decode_base64_content(&sing_box).is_none());
+    }
+
+    #[test]
     fn test_try_decode_base64_content() {
         let yaml = "proxies:\n  - name: test\n    type: ss\n    port: 443";
         let encoded = base64::engine::general_purpose::STANDARD.encode(yaml);
@@ -1991,6 +2208,60 @@ mod tests {
         let yaml = r#"short-id: "abc123""#;
         let result = quote_short_id_values(yaml);
         assert_eq!(result, r#"short-id: "abc123""#);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_skips_block_scalar_text() {
+        // Text inside a block scalar is not a key and must stay as written.
+        let yaml = "proxies:\n  - name: a\n    password: |\n      short-id: abc\n\n      more\n    short-id: 34010e92\n  - name: b\n    note: >-\n      short-id: def\n    reality-opts:\n      short-id: 1e5\n";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(
+            result,
+            "proxies:\n  - name: a\n    password: |\n      short-id: abc\n\n      more\n    short-id: \"34010e92\"\n  - name: b\n    note: >-\n      short-id: def\n    reality-opts:\n      short-id: \"1e5\"\n"
+        );
+        let value: serde_yaml::Value = serde_yaml::from_str(&result).unwrap();
+        let proxies = value
+            .get("proxies")
+            .and_then(serde_yaml::Value::as_sequence)
+            .unwrap();
+        let first = proxies.first().unwrap();
+        assert_eq!(
+            first.get("password").and_then(serde_yaml::Value::as_str),
+            Some("short-id: abc\n\nmore\n")
+        );
+        assert_eq!(
+            first.get("short-id").and_then(serde_yaml::Value::as_str),
+            Some("34010e92")
+        );
+
+        // A block scalar that is itself a sequence entry, and one with an
+        // anchor and an indentation indicator.
+        let yaml =
+            "notes:\n  - |\n    short-id: abc\n  - &n |2\n    short-id: def\nshort-id: 34010e92\n";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            "notes:\n  - |\n    short-id: abc\n  - &n |2\n    short-id: def\nshort-id: \"34010e92\"\n"
+        );
+    }
+
+    #[test]
+    fn test_quote_short_id_values_leaves_non_plain_values() {
+        for yaml in [
+            "short-id: 'abc'",
+            "short-id: # no value",
+            "short-id: &id 34010e92",
+            "short-id: *id",
+            "short-id: !!str 34010e92",
+            "short-id:",
+            "short-id:\n  public-key: abc\n",
+        ] {
+            assert_eq!(quote_short_id_values(yaml), yaml, "{yaml}");
+        }
+        // A comment after the value and CRLF line endings are kept.
+        assert_eq!(
+            quote_short_id_values("a: 1\r\nshort-id: 34010e92 # hex\r\n"),
+            "a: 1\r\nshort-id: \"34010e92\" # hex\r\n"
+        );
     }
 
     #[test]
@@ -2694,6 +2965,15 @@ mod tests {
         assert_eq!(
             disposition_profile_stem("sample.txt"),
             Some("sample.txt".to_owned())
+        );
+        // A config served as JSON is saved as YAML: `.json` goes too.
+        assert_eq!(
+            disposition_profile_stem("BPB-normal-clash.json"),
+            Some("BPB-normal-clash".to_owned())
+        );
+        assert_eq!(
+            disposition_profile_stem("sample.JSON. "),
+            Some("sample".to_owned())
         );
         // Trailing dots/spaces Windows would drop are removed.
         assert_eq!(
