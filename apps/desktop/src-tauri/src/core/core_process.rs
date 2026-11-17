@@ -117,6 +117,238 @@ mod win_job {
         // Safety: AssignProcessToJobObject is a well-defined Windows API.
         unsafe { AssignProcessToJobObject(job, process_handle) != 0 }
     }
+
+    /// End every core this process started (the processes in the Job) and
+    /// wait until `timeout` for them to be gone, so their ports are free.
+    ///
+    /// Only Windows calls are made: no other program is started, which
+    /// matters at sign-out and shutdown, when a newly started process fails
+    /// to initialize and Windows shows its error dialog over the shutdown.
+    /// The processes are ended one by one, not with `TerminateJobObject`, so
+    /// the Job keeps taking the cores started after this. No Job means no
+    /// core was ever started, and nothing is done.
+    pub fn terminate_all(timeout: std::time::Duration) {
+        let Some(job) = JOB.get().map(|h| h.0).filter(|h| !h.is_null()) else {
+            return;
+        };
+        let deadline = std::time::Instant::now() + timeout;
+        for pid in process_ids(job) {
+            // A member that exited after the list was taken can have its id
+            // reused by an unrelated process: only a process still in the
+            // Job is ended.
+            super::win_stray::end_process(pid, deadline, |process| is_in_job(process, job));
+        }
+    }
+
+    /// Whether `process` (opened with PROCESS_QUERY_LIMITED_INFORMATION) is
+    /// in `job` (a handle with JOB_OBJECT_QUERY).
+    fn is_in_job(process: HANDLE, job: HANDLE) -> bool {
+        let mut member: BOOL = 0;
+        // Safety: both handles are valid for the call and `member` is a
+        // writable BOOL.
+        let ok = unsafe { IsProcessInJob(process, job, &mut member) };
+        ok != 0 && member != 0
+    }
+
+    /// Whether `process` is in this app's Job (for tests).
+    #[cfg(test)]
+    pub fn contains(process: HANDLE) -> bool {
+        JOB.get()
+            .map(|h| h.0)
+            .filter(|h| !h.is_null())
+            .is_some_and(|job| is_in_job(process, job))
+    }
+
+    /// The ids of the processes in the Job.
+    fn process_ids(job: HANDLE) -> Vec<u32> {
+        // Room for far more cores than one app ever runs at once.
+        const CAPACITY: usize = 64;
+        let mut buf = vec![0usize; CAPACITY + 2];
+        let bytes = u32::try_from(std::mem::size_of_val(buf.as_slice())).unwrap_or(0);
+        // Safety: `buf` is a writable, usize-aligned buffer of `bytes` bytes,
+        // larger than JOBOBJECT_BASIC_PROCESS_ID_LIST, which holds integers.
+        let ok = unsafe {
+            QueryInformationJobObject(
+                job,
+                JobObjectBasicProcessIdList,
+                buf.as_mut_ptr().cast(),
+                bytes,
+                std::ptr::null_mut(),
+            )
+        };
+        // With more processes than fit, the call fails with ERROR_MORE_DATA
+        // and still lists the first ones.
+        // Safety: only reads the calling thread's last-error value.
+        if ok == 0 && unsafe { GetLastError() } != ERROR_MORE_DATA {
+            return Vec::new();
+        }
+        // Safety: `buf` is larger than the structure and suitably aligned;
+        // the call above filled in its header.
+        let list: JOBOBJECT_BASIC_PROCESS_ID_LIST = unsafe { std::ptr::read(buf.as_ptr().cast()) };
+        let skip = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList)
+            / std::mem::size_of::<usize>();
+        buf.iter()
+            .skip(skip)
+            .take(list.NumberOfProcessIdsInList as usize)
+            .filter_map(|&pid| u32::try_from(pid).ok())
+            .collect()
+    }
+}
+
+// ── Windows: ending core processes, and finding leftover ones ─────────────
+#[cfg(target_os = "windows")]
+#[allow(clippy::wildcard_imports)]
+mod win_stray {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt as _;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+    use windows_sys::Win32::Foundation::*;
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
+    use windows_sys::Win32::System::Threading::*;
+
+    /// End process `pid` when `accept` agrees, then wait for it until
+    /// `deadline`. A process that cannot be opened is left alone.
+    pub fn end_process(pid: u32, deadline: Instant, accept: impl FnOnce(HANDLE) -> bool) {
+        // Safety: a documented Windows API; a null handle is checked below.
+        let process = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE,
+                0,
+                pid,
+            )
+        };
+        if process.is_null() {
+            return;
+        }
+        if accept(process) {
+            // Safety: `process` was opened with PROCESS_TERMINATE.
+            if unsafe { TerminateProcess(process, 1) } != 0 {
+                let left = deadline.saturating_duration_since(Instant::now());
+                let wait_ms = u32::try_from(left.as_millis()).unwrap_or(10_000);
+                // Safety: `process` was opened with PROCESS_SYNCHRONIZE.
+                unsafe { WaitForSingleObject(process, wait_ms) };
+            }
+        }
+        // Safety: `process` is a valid handle that is not used afterwards.
+        unsafe { CloseHandle(process) };
+    }
+
+    /// End the core processes whose executable lies in `core_dir`, waiting
+    /// until `timeout` for them to be gone: cores of this installation the
+    /// Job does not hold (the Job could not take them, or an earlier
+    /// instance left them behind). A `mihomo.exe` anywhere else belongs to
+    /// another program and keeps running.
+    pub fn kill_owned_cores(core_dir: &Path, timeout: Duration) {
+        let core_dirs = path_forms(core_dir);
+        let deadline = Instant::now() + timeout;
+        for pid in core_process_ids() {
+            end_process(pid, deadline, |process| {
+                image_path(process).is_some_and(|image_file| {
+                    path_forms(&image_file).iter().any(|image| {
+                        core_dirs
+                            .iter()
+                            .any(|dir| super::is_owned_core_image(image, dir))
+                    })
+                })
+            });
+        }
+    }
+
+    /// The ids of running processes named like the core, this one excepted.
+    fn core_process_ids() -> Vec<u32> {
+        let mut pids = Vec::new();
+        // Safety: a documented Windows API; the result is checked below.
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        if snapshot == INVALID_HANDLE_VALUE || snapshot.is_null() {
+            return pids;
+        }
+        let own_pid = std::process::id();
+        // Safety: the structure consists of integers and an integer array.
+        let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+        entry.dwSize = u32::try_from(std::mem::size_of::<PROCESSENTRY32W>()).unwrap_or(0);
+        // Safety: `snapshot` is a valid snapshot handle and `entry` has its
+        // size set, as the API requires.
+        let mut more = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
+        while more {
+            let name: Vec<u16> = entry
+                .szExeFile
+                .iter()
+                .copied()
+                .take_while(|&c| c != 0)
+                .collect();
+            if entry.th32ProcessID != own_pid
+                && super::is_core_binary_file(&String::from_utf16_lossy(&name))
+            {
+                pids.push(entry.th32ProcessID);
+            }
+            // Safety: as for `Process32FirstW` above.
+            more = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
+        }
+        // Safety: `snapshot` is a valid handle that is not used afterwards.
+        unsafe { CloseHandle(snapshot) };
+        pids
+    }
+
+    /// The full path of the executable of `process`.
+    fn image_path(process: HANDLE) -> Option<PathBuf> {
+        let mut buf = vec![0u16; 32_768];
+        let mut len = u32::try_from(buf.len()).unwrap_or(0);
+        // Safety: `buf` holds `len` writable UTF-16 units, and `process` was
+        // opened with PROCESS_QUERY_LIMITED_INFORMATION.
+        let ok = unsafe {
+            QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len)
+        };
+        if ok == 0 {
+            return None;
+        }
+        let name = buf.get(..usize::try_from(len).ok()?)?;
+        Some(PathBuf::from(OsString::from_wide(name)))
+    }
+
+    /// The path as given and, when it resolves, its canonical form (short
+    /// 8.3 names and links resolved), so either spelling matches.
+    fn path_forms(path: &Path) -> Vec<String> {
+        let mut forms = vec![path.to_string_lossy().into_owned()];
+        if let Ok(canonical) = std::fs::canonicalize(path) {
+            forms.push(canonical.to_string_lossy().into_owned());
+        }
+        forms
+    }
+}
+
+/// Whether `file` (a process's executable name) is one of the core's names:
+/// the current one or the legacy `mihomo.exe`.
+#[cfg(any(target_os = "windows", test))]
+const fn is_core_binary_file(file: &str) -> bool {
+    file.eq_ignore_ascii_case("zephyr-mihomo.exe") || file.eq_ignore_ascii_case("mihomo.exe")
+}
+
+/// A Windows path in one form for comparison: no `\\?\` prefix, backslashes
+/// only, no trailing separator, lower case (Windows paths ignore case).
+#[cfg(any(target_os = "windows", test))]
+fn normalize_windows_path(path: &str) -> String {
+    let slashed = path.replace('/', "\\");
+    let plain = if let Some(rest) = slashed.strip_prefix("\\\\?\\UNC\\") {
+        format!("\\\\{rest}")
+    } else if let Some(rest) = slashed.strip_prefix("\\\\?\\") {
+        rest.to_owned()
+    } else {
+        slashed
+    };
+    plain.trim_end_matches('\\').to_lowercase()
+}
+
+/// Whether the executable `image` of a running process is a core binary
+/// directly inside `core_dir`, i.e. a core this installation runs.
+#[cfg(any(target_os = "windows", test))]
+fn is_owned_core_image(image: &str, core_dir: &str) -> bool {
+    let image_path = normalize_windows_path(image);
+    let Some((dir, file)) = image_path.rsplit_once('\\') else {
+        return false;
+    };
+    let owned_dir = normalize_windows_path(core_dir);
+    !owned_dir.is_empty() && dir == owned_dir && is_core_binary_file(file)
 }
 
 // ── ProcessIo trait for testable process operations ────────────────────────
@@ -277,16 +509,19 @@ async fn drain_connections_if_alive(port: u16, secret_val: &str) {
 /// Also kills legacy 'mihomo' processes for backward compatibility with Lite version users.
 ///
 /// On Unix: sends SIGTERM, waits up to 2s for exit, then SIGKILL.
-/// On Windows: uses taskkill /F (no graceful option).
+/// On Windows: ends the cores this process started (its Job Object) through
+/// the Windows API. No external program such as `taskkill` is started: at
+/// sign-out and shutdown it fails to initialize (0xc0000142), and its error
+/// dialog holds the shutdown up. Cores of other programs that share the
+/// `mihomo.exe` name are not touched.
 pub fn kill_mihomo() {
-    let exe_name = core_binary_name();
     #[cfg(target_os = "windows")]
-    let legacy_name = "mihomo.exe";
-    #[cfg(not(target_os = "windows"))]
-    let legacy_name = "mihomo";
+    win_job::terminate_all(WINDOWS_KILL_WAIT);
 
     #[cfg(unix)]
     {
+        let exe_name = core_binary_name();
+        let legacy_name = "mihomo";
         // Step 1: SIGTERM — allow mihomo to close connections gracefully
         // Kill both new and legacy binary names for backward compatibility
         let _ = std::process::Command::new("killall")
@@ -323,14 +558,39 @@ pub fn kill_mihomo() {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
+}
+
+/// How long Windows waits for ended cores to be gone.
+#[cfg(target_os = "windows")]
+const WINDOWS_KILL_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// End this app's cores when it quits (the quit itself, the window closed
+/// without the tray, or Windows ending the session).
+///
+/// On Windows nothing waits on a lock here and no program is started, so a
+/// shutdown is never held up: the cores in the Job are ended through the
+/// Windows API, then the tracked core, in case the Job could not take it,
+/// when its state is free. Elsewhere this is [`kill_mihomo`].
+pub fn kill_cores_on_exit(app: &AppHandle) {
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt as _;
-        // Kill both new and legacy binary names for backward compatibility
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", exe_name, "/IM", legacy_name])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
+        win_job::terminate_all(WINDOWS_KILL_WAIT);
+        if let Some(state) = app.try_state::<MihomoState>() {
+            let tracked = match state.0.try_lock() {
+                Ok(mut lock) => lock.take_process(),
+                Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner().take_process(),
+                Err(std::sync::TryLockError::WouldBlock) => None,
+            };
+            if let Some(mut child) = tracked {
+                // `kill` is TerminateProcess on the handle already held.
+                let _ = child.kill();
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = app;
+        kill_mihomo();
     }
 }
 
@@ -1387,6 +1647,23 @@ fn attach_log_file(cmd: &mut Command, log_path: &Path) {
     }
 }
 
+/// Windows: put a core that was just spawned into the Job Object with
+/// `KILL_ON_JOB_CLOSE`, so that it is terminated if the Tauri process dies (even
+/// from Task Manager), the Windows equivalent of Linux `PR_SET_PDEATHSIG`. This
+/// happens before anything waits on the core: an app that quits during the
+/// startup checks ends it with the Job, as it is not tracked yet.
+#[cfg(target_os = "windows")]
+fn assign_core_to_job(child: &std::process::Child) {
+    use std::os::windows::io::AsRawHandle as _;
+    if !win_job::assign_to_job(child.as_raw_handle() as _) {
+        emit_warn!(
+            Core,
+            CORE_START_FAILED,
+            "Failed to assign mihomo to Job Object (auto-kill on exit disabled)"
+        );
+    }
+}
+
 /// Spawn mihomo, detect immediate exit, and retry on cache lock issues.
 ///
 /// Returns the successfully spawned `Child` process and the log file path, or an error string.
@@ -1513,6 +1790,8 @@ async fn spawn_with_cache_retry(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn mihomo: {e}"))?;
+    #[cfg(target_os = "windows")]
+    assign_core_to_job(&child);
 
     // Track the actual log file path (may change on retry)
     let mut actual_log_path = log_path.clone();
@@ -1537,6 +1816,8 @@ async fn spawn_with_cache_retry(
 
                 match retry_cmd.spawn() {
                     Ok(mut retry_child) => {
+                        #[cfg(target_os = "windows")]
+                        assign_core_to_job(&retry_child);
                         // Only a retry that actually started has a log worth showing;
                         // otherwise the first attempt's log (with the lock error) stays.
                         *attempted_log = Some(retry_log_path.clone());
@@ -2295,11 +2576,22 @@ async fn start_core_locked(
     let tun_active = false;
 
     if !tun_active {
-        // Kill any existing mihomo processes before starting a new one
+        // Kill any existing mihomo processes before starting a new one.
+        // On Windows that is the cores in the Job, then any other core
+        // running from this installation's core directory (one an earlier
+        // instance left behind); cores of other programs keep running.
         // Use spawn_blocking to avoid blocking the tokio runtime (kill_mihomo sleeps 300ms)
-        tokio::task::spawn_blocking(kill_mihomo)
-            .await
-            .map_err(|e| format!("Kill task failed: {e}"))?;
+        #[cfg(target_os = "windows")]
+        let stray_core_dir = resolve_app_paths(&app).ok().map(|p| p.core_dir);
+        tokio::task::spawn_blocking(move || {
+            kill_mihomo();
+            #[cfg(target_os = "windows")]
+            if let Some(core_dir) = stray_core_dir {
+                win_stray::kill_owned_cores(&core_dir, WINDOWS_KILL_WAIT);
+            }
+        })
+        .await
+        .map_err(|e| format!("Kill task failed: {e}"))?;
     }
     // TUN-active starts deliberately keep any tracked child (and user-owned
     // orphans) alive at this point: the privileged restart script terminates
@@ -2474,7 +2766,15 @@ async fn start_core_locked(
             for arg in &safe_custom_args_clone {
                 cmd.arg(arg);
             }
-            cmd.output()
+            // What `output()` sets up, spawned first so that the check goes
+            // into the Job like the core: a quit while it runs ends it too.
+            cmd.stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+            let child = cmd.spawn()?;
+            #[cfg(target_os = "windows")]
+            assign_core_to_job(&child);
+            child.wait_with_output()
         })
         .await;
 
@@ -3035,22 +3335,8 @@ async fn start_core_locked(
         }
     };
     let started_at = std::time::Instant::now();
-
-    // Windows: assign child to a Job Object with KILL_ON_JOB_CLOSE so that
-    // mihomo is automatically terminated if the Tauri process dies (even from
-    // Task Manager). This is the Windows equivalent of Linux PR_SET_PDEATHSIG.
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::io::AsRawHandle as _;
-        let handle = child.as_raw_handle();
-        if !win_job::assign_to_job(handle as _) {
-            emit_warn!(
-                Core,
-                CORE_START_FAILED,
-                "Failed to assign mihomo to Job Object (auto-kill on exit disabled)"
-            );
-        }
-    }
+    // On Windows the child is already in the Job: `spawn_with_cache_retry`
+    // puts each core there as soon as it is spawned.
 
     // Use config port directly, rely on health check to verify
     let port = config_port;
@@ -3663,6 +3949,122 @@ pub(crate) fn get_core_version_with_io<I: ProcessIo>(
     Ok(parse_version_output(&stdout))
 }
 
+/// Ending cores on Windows, with real processes: copies of `cmd.exe` named
+/// like the core, each waiting on its input.
+#[cfg(all(test, target_os = "windows"))]
+#[allow(clippy::unwrap_used)]
+mod windows_kill_tests {
+    use super::*;
+    use std::os::windows::io::AsRawHandle as _;
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    const WAIT: Duration = Duration::from_secs(10);
+
+    fn spawn_core_copy(dir: &Path) -> Child {
+        std::fs::create_dir_all(dir).unwrap();
+        let system_root = std::env::var_os("SystemRoot")
+            .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+        let exe = dir.join("mihomo.exe");
+        std::fs::copy(system_root.join("System32").join("cmd.exe"), &exe).unwrap();
+        Command::new(&exe)
+            .args(["/d", "/q", "/k"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
+    }
+
+    fn exits_in_time(child: &mut Child) -> bool {
+        let deadline = Instant::now() + WAIT;
+        while Instant::now() < deadline {
+            if child.try_wait().unwrap().is_some() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    }
+
+    fn end(mut child: Child) {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn only_cores_in_this_installations_core_dir_are_ended() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core_dir = tmp.path().join("core");
+        let mut owned = spawn_core_copy(&core_dir);
+        let mut other = spawn_core_copy(&tmp.path().join("other-client"));
+        let mut nested = spawn_core_copy(&core_dir.join("old"));
+
+        win_stray::kill_owned_cores(&core_dir, WAIT);
+
+        assert!(
+            exits_in_time(&mut owned),
+            "the core in the core dir runs on"
+        );
+        assert!(
+            other.try_wait().unwrap().is_none(),
+            "another program's mihomo.exe was ended"
+        );
+        assert!(
+            nested.try_wait().unwrap().is_none(),
+            "a mihomo.exe below the core dir was ended"
+        );
+        end(other);
+        end(nested);
+    }
+
+    /// The tests below share the one Job of the test process, and
+    /// `terminate_all` ends every process in it: they run one at a time.
+    static JOB_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn the_cores_in_the_job_are_ended_and_the_job_takes_later_ones() {
+        let _serial = JOB_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tmp = tempfile::tempdir().unwrap();
+        let mut first = spawn_core_copy(&tmp.path().join("first"));
+        assert!(win_job::assign_to_job(first.as_raw_handle() as _));
+
+        win_job::terminate_all(WAIT);
+        assert!(exits_in_time(&mut first), "the core in the Job runs on");
+
+        // The Job is not terminated as a whole, so a core started later
+        // still goes into it and is ended with it.
+        let mut second = spawn_core_copy(&tmp.path().join("second"));
+        assert!(win_job::assign_to_job(second.as_raw_handle() as _));
+        win_job::terminate_all(WAIT);
+        assert!(exits_in_time(&mut second), "the later core runs on");
+    }
+
+    #[test]
+    fn a_process_outside_the_job_is_not_ended_with_it() {
+        let _serial = JOB_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tmp = tempfile::tempdir().unwrap();
+        let mut inside = spawn_core_copy(&tmp.path().join("inside"));
+        assert!(win_job::assign_to_job(inside.as_raw_handle() as _));
+        let mut outside = spawn_core_copy(&tmp.path().join("outside"));
+        assert!(win_job::contains(inside.as_raw_handle() as _));
+        assert!(!win_job::contains(outside.as_raw_handle() as _));
+
+        win_job::terminate_all(WAIT);
+
+        assert!(exits_in_time(&mut inside), "the core in the Job runs on");
+        assert!(
+            outside.try_wait().unwrap().is_none(),
+            "a process outside the Job was ended"
+        );
+        end(outside);
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
@@ -3910,6 +4312,66 @@ mod tests {
             Some(profiles_dir.join("bar.YAML").as_path())
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn owned_core_image_is_a_core_binary_directly_in_the_core_dir() {
+        let dir = r"C:\Users\a\AppData\Roaming\com.zephyr.app\core";
+        assert!(is_owned_core_image(
+            r"C:\Users\a\AppData\Roaming\com.zephyr.app\core\zephyr-mihomo.exe",
+            dir
+        ));
+        // The legacy name in the same directory is this installation's too.
+        assert!(is_owned_core_image(
+            r"C:\Users\a\AppData\Roaming\com.zephyr.app\core\mihomo.exe",
+            dir
+        ));
+        // Case, `\\?\` prefixes, forward slashes and a trailing separator
+        // do not matter on Windows.
+        assert!(is_owned_core_image(
+            r"\\?\c:\users\A\appdata\roaming\COM.ZEPHYR.APP\core\ZEPHYR-MIHOMO.EXE",
+            "C:/Users/a/AppData/Roaming/com.zephyr.app/core/"
+        ));
+        assert!(is_owned_core_image(
+            r"\\?\UNC\srv\share\Zephyr\core\mihomo.exe",
+            r"\\srv\share\Zephyr\core"
+        ));
+    }
+
+    #[test]
+    fn other_programs_cores_are_not_owned() {
+        let dir = r"C:\Users\a\AppData\Roaming\com.zephyr.app\core";
+        // Another client's `mihomo.exe` elsewhere.
+        assert!(!is_owned_core_image(
+            r"C:\Program Files\Other Client\mihomo.exe",
+            dir
+        ));
+        // A subdirectory or a sibling directory with the same prefix.
+        assert!(!is_owned_core_image(
+            r"C:\Users\a\AppData\Roaming\com.zephyr.app\core\old\mihomo.exe",
+            dir
+        ));
+        assert!(!is_owned_core_image(
+            r"C:\Users\a\AppData\Roaming\com.zephyr.app\core2\mihomo.exe",
+            dir
+        ));
+        // Another program in the core directory.
+        assert!(!is_owned_core_image(
+            r"C:\Users\a\AppData\Roaming\com.zephyr.app\core\zephyr.exe",
+            dir
+        ));
+        // No directory to compare against.
+        assert!(!is_owned_core_image(r"C:\mihomo.exe", ""));
+        assert!(!is_owned_core_image("mihomo.exe", dir));
+    }
+
+    #[test]
+    fn core_binary_files_are_the_current_and_legacy_names() {
+        assert!(is_core_binary_file("zephyr-mihomo.exe"));
+        assert!(is_core_binary_file("MIHOMO.EXE"));
+        assert!(!is_core_binary_file("verge-mihomo.exe"));
+        assert!(!is_core_binary_file("mihomo"));
+        assert!(!is_core_binary_file("taskkill.exe"));
     }
 
     #[test]
