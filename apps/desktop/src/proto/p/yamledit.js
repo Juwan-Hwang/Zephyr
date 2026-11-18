@@ -41,18 +41,18 @@ export async function post() {
       <div class="flex items-center justify-between gap-4 px-5 pt-5 pb-3">
         <div class="min-w-0">
           <h3 class="dialog-title">编辑 config.yaml</h3>
-          <p class="text-2xs text-[var(--text-muted)] mt-0.5">保存后立即重载内核</p>
+          <p class="text-2xs text-[var(--text-muted)] mt-0.5">保存后立即生效</p>
         </div>
         <button class="text-[var(--text-secondary)]" aria-label="关闭">${icon(ICONS.x, 'w-5 h-5')}</button>
       </div>
-      <div class="proto-yaml-warn mx-5">${icon(ICONS.alert, 'w-3.5 h-3.5 shrink-0')}<span>这是订阅文件，下次更新订阅（每 12 小时）时手改的内容会被覆盖。长期修改请用覆写。</span></div>
+      <div class="proto-yaml-warn mx-5">${icon(ICONS.alert, 'w-3.5 h-3.5 shrink-0')}<span>更新订阅后，这里的修改会被覆盖。如果要长期保留，可以使用覆写。</span></div>
       <div class="proto-yaml-editor mx-5 mt-3">
         <div class="proto-yaml-gutter">${lines.map((_, i) => `<div>${i + 1}</div>`).join('')}</div>
         <pre class="proto-yaml-code">${lines.map((l) => `<div>${hl(l) || ' '}</div>`).join('')}</pre>
       </div>
       <div class="flex items-center justify-between gap-3 px-5 py-4">
-        <button class="btn-ghost text-xs">改用覆写</button>
-        <div class="flex gap-2"><button class="btn-ghost">取消</button><button class="btn-primary">保存并重载</button></div>
+        <button class="btn-ghost text-xs">使用覆写</button>
+        <div class="flex gap-2"><button class="btn-ghost">取消</button><button class="btn-primary">保存</button></div>
       </div>
     </div>
   </div>`);

@@ -1,0 +1,2 @@
+/* 只有标题的选择卡片：文字居中，高度和分段控件接近 */
+.choice-card.proto-choice-compact { align-items: center; justify-content: center; text-align: center; padding-block: 11px; }

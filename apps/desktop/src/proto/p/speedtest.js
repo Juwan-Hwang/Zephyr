@@ -8,11 +8,11 @@ export async function post() {
   if (window.__PROTO__.endsWith('menu')) {
     // 悬停节点卡时，在「重新测试」旁边多一个「测下载速度」按钮
     const retest = card.querySelector('.node-retest-btn');
-    const btn = html(`<button type="button" class="node-retest-btn proto-speed-btn" title="测下载速度">${icon(ICONS.download, 'w-3 h-3')}</button>`);
+    const btn = html(`<button type="button" class="node-retest-btn proto-speed-btn" title="测试下载速度">${icon(ICONS.download, 'w-3 h-3')}</button>`);
     retest.before(btn);
     card.classList.add('proto-force-hover');
     const r = btn.getBoundingClientRect();
-    document.body.appendChild(html(`<div class="proto-tip" style="top:${r.bottom + 8}px;left:${r.left + r.width / 2}px">测下载速度<span>约消耗 25 MB</span></div>`));
+    document.body.appendChild(html(`<div class="proto-tip" style="top:${r.bottom + 8}px;left:${r.left + r.width / 2}px">测试下载速度<span>约使用 25 MB 流量</span></div>`));
     return;
   }
   const panel = html(`<div class="proto-dialog fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--zephyr-bg-overlay)] backdrop-blur-md">
@@ -27,10 +27,9 @@ export async function post() {
       <div class="proto-st-grid">
         <div><p>延迟</p><b>21 ms</b></div>
         <div><p>用时</p><b>0.7 s</b></div>
-        <div><p>消耗流量</p><b>25 MB</b></div>
+        <div><p>流量</p><b>25 MB</b></div>
       </div>
-      <p class="text-2xs text-[var(--text-muted)] mt-4">测速文件来自 speed.cloudflare.com，结果受测速服务器影响。每测一次都会消耗机场流量。</p>
-      <div class="flex justify-end gap-2 mt-5"><button class="btn-ghost">关闭</button><button class="btn-primary">再测一次</button></div>
+      <div class="flex justify-end gap-2 mt-5"><button class="btn-ghost">关闭</button><button class="btn-primary">重新测试</button></div>
     </div>
   </div>`);
   document.body.appendChild(panel);

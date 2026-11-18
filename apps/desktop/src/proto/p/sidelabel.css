@@ -10,3 +10,87 @@
 .proto-side-wide #sidebar-nav .nav-btn .icon { width: 19px !important; height: 19px !important; flex: 0 0 19px; }
 .proto-side-wide .proto-nav-label { font-size: 13px; font-weight: 600; }
 .proto-side-wide #sidebar-nav > :not(.nav-btn):not(.proto-nav-label) { align-self: center; }
+
+/* ——— fold：可收起的展开侧栏 ———
+   两种状态下按钮都靠左排、左内边距固定，图标的位置完全不动；变的只有侧栏宽度。
+   按钮 overflow:hidden + 文字 nowrap，宽度变化时文字只会被裁掉，不会换行或挤压。
+   展开：宽度先走（200ms），文字晚 80ms 淡入；收起：文字先淡出（120ms），宽度晚 40ms 再收。 */
+.proto-side-fold {
+  --side-w-collapsed: 80px;
+  --side-w-expanded: 160px;
+}
+.proto-side-fold #sidebar-nav {
+  width: var(--side-w-collapsed) !important;
+  flex: 0 0 auto;
+  align-items: stretch !important;
+  padding-inline: 16px;
+  transition: width var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out) 40ms,
+              margin var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out) 40ms,
+              background-color var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out),
+              box-shadow var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out);
+}
+.proto-side-fold.proto-side-expanded #sidebar-nav {
+  width: var(--side-w-expanded) !important;
+  transition-delay: 0s;
+}
+.proto-side-fold #sidebar-nav .nav-btn {
+  width: 100% !important;
+  justify-content: flex-start !important;
+  padding-inline-start: 12px;
+  gap: 12px;
+  overflow: hidden;
+}
+.proto-side-fold #sidebar-nav .nav-btn .icon { flex: 0 0 24px; }
+.proto-side-fold .proto-nav-label {
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity var(--zephyr-time-micro) var(--zephyr-easing-ease-out),
+              transform var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.proto-side-fold.proto-side-expanded .proto-nav-label {
+  opacity: 1;
+  transform: none;
+  transition-delay: 80ms;
+}
+/* 折叠按钮：比导航项矮一档、颜色更淡，和导航项分开 */
+.proto-side-fold .proto-side-toggle {
+  height: 40px !important;
+  margin-top: -12px;
+  padding-inline-start: 14px !important;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-md);
+  color: var(--zephyr-text-tertiary);
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--motion-ease-out), background-color var(--motion-fast) var(--motion-ease-out);
+}
+.proto-side-fold .proto-side-toggle:hover { color: var(--zephyr-text-primary); background: var(--zephyr-bg-muted); }
+.proto-side-fold .proto-side-toggle .icon { width: 20px; height: 20px; flex: 0 0 20px; }
+.proto-side-fold .proto-side-toggle .proto-nav-label { font-size: 12px; font-weight: 500; }
+.proto-fold-chev { transform-box: fill-box; transform-origin: center; transition: transform var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out); }
+.proto-side-fold:not(.proto-side-expanded) .proto-fold-chev { transform: scaleX(-1); }
+/* 键盘焦点：和全局焦点环一致，按钮裁切内容但不裁焦点环 */
+.proto-side-fold #sidebar-nav .nav-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+/* 展开时文字已经可见，不再弹悬停提示 */
+.proto-side-fold.proto-side-expanded .nav-tooltip { display: none; }
+/* 窄窗口：展开时浮在内容上方（负外边距抵掉多出的宽度，主内容区不动） */
+.proto-side-fold.proto-side-overlay #sidebar-nav {
+  margin-inline-end: calc(var(--side-w-collapsed) - var(--side-w-expanded));
+  z-index: 40;
+  background: color-mix(in srgb, var(--zephyr-bg-elevated) 92%, transparent);
+  box-shadow: var(--zephyr-shadow-md);
+}
+/* 矮窗口：缩小间距，按钮保持 40px 高（多了折叠按钮，不让导航项被压扁） */
+@media (max-height: 600px) {
+  .proto-side-fold #sidebar-nav { gap: 12px; padding-block: 20px; }
+  .proto-side-fold #sidebar-nav .nav-btn { flex-shrink: 0; min-height: 40px; }
+  .proto-side-fold .proto-side-toggle { margin-top: 0; height: 36px !important; min-height: 36px !important; }
+}
+.proto-side-instant #sidebar-nav, .proto-side-instant .proto-nav-label, .proto-side-instant .proto-fold-chev { transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .proto-side-fold #sidebar-nav, .proto-side-fold .proto-fold-chev { transition: none !important; }
+  .proto-side-fold .proto-nav-label { transition: opacity var(--zephyr-time-micro) linear !important; transform: none !important; }
+}

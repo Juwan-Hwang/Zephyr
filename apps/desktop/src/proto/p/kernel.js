@@ -6,7 +6,7 @@ export async function post() {
     id: 'proto-kernel-row',
     iconPaths: ICONS.cpu,
     title: '代理内核',
-    desc: '切换后重启内核。覆写、规则库和订阅转换只支持 mihomo',
+    desc: '切换后会重新启动。覆写、规则和订阅转换仅支持 mihomo。',
     control: `<div class="seg-tabs shrink-0" role="radiogroup">
       <button type="button" class="seg-tab active" aria-checked="true">mihomo</button>
       <button type="button" class="seg-tab">Smart</button>

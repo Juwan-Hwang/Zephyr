@@ -10,8 +10,8 @@ export async function post() {
   fields.appendChild(html(`<div class="proto-priv">
     <div class="flex items-center justify-between gap-4">
       <div class="min-w-0">
-        <p class="text-xs font-semibold text-[var(--text-primary)]">允许解析到内网地址</p>
-        <p class="edit-field-hint mt-0.5">只对这条订阅生效。机场域名被判成私有 IP、更新一直失败时再打开。</p>
+        <p class="text-xs font-semibold text-[var(--text-primary)]">允许本地网络地址</p>
+        <p class="edit-field-hint mt-0.5">如果此订阅总是更新失败，可以尝试打开。</p>
       </div>
       <label class="ios-switch shrink-0"><input type="checkbox" checked><span class="switch-slider"></span></label>
     </div>

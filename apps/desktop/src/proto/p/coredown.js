@@ -16,7 +16,7 @@ export async function post() {
     <span class="proto-core-banner-icon">${icon(ICONS.alert, 'w-4 h-4')}</span>
     <div class="min-w-0 flex-1">
       <p class="proto-core-banner-title">内核已停止运行</p>
-      <p class="proto-core-banner-desc">可能已被其他代理应用关闭。重新启动之前，你将无法连接网络。</p>
+      <p class="proto-core-banner-desc">重新启动前将无法连接互联网。</p>
     </div>
     <div class="flex items-center gap-2 shrink-0">
       <button type="button" class="btn-ghost text-xs px-3 py-1.5">关闭系统代理</button>
@@ -26,10 +26,10 @@ export async function post() {
   if (con) {
     // 控制台首页（方案 B）：横幅放在页面最上面、开关条上面，在布局里占位
     $('.proto-strip-top').before(banner);
-    $('#dz-node-name').textContent = '内核未运行';
+    $('#dz-node-name').textContent = '已停止';
     return;
   }
   page.prepend(banner);
   const name = $('#current-node-name');
-  if (name) name.textContent = '内核未运行';
+  if (name) name.textContent = '已停止';
 }

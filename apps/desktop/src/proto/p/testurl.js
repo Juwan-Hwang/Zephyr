@@ -6,7 +6,7 @@ export async function post() {
     id: 'proto-testurl-row',
     iconPaths: ICONS.gauge,
     title: '测速地址',
-    desc: '测延迟时请求的地址，应返回 204',
+    desc: '测试节点延迟时访问的地址。',
     control: valueButton('www.gstatic.com/generate_204'),
   }));
   await scrollSettingsTo('#proto-testurl-row');

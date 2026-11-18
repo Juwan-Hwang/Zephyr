@@ -16,8 +16,8 @@ async function setting() {
   insertRowAfter('#setting-home-mode-container', settingRow({
     id: 'proto-exitip-row',
     iconPaths: ICONS.globe,
-    title: '显示出口 IP',
-    desc: '在首页显示当前出口 IP 和地区，切换节点后自动刷新',
+    title: '显示 IP 地址',
+    desc: '打开后，首页会显示当前节点的 IP 地址和地区。',
     control: toggle(false),
   }));
   await scrollSettingsTo('#proto-exitip-row');
@@ -27,19 +27,19 @@ async function minimal(kind) {
   await until(() => $('#current-node-name') && $('#home-stats'));
   if (kind === 'sub') {
     // 节点胶囊下面一行小字，在布局里占一行，网速读数在剩下的空间里居中
-    $('.home-hero-speeds').before(html(`<p class="proto-exit-line">${flag}<span>出口</span>${ip}<span class="proto-exit-dot">·</span><span>香港 HKT</span></p>`));
+    $('.home-hero-speeds').before(html(`<p class="proto-exit-line">${flag}<span>IP</span>${ip}<span class="proto-exit-dot">·</span><span>香港</span></p>`));
   } else if (kind === 'status') {
     const st = $('#proxy-status-text');
     // 原来是「已准备好保护您的流量」这类状态句，换成出口
-    st.innerHTML = `${flag} 出口 ${ip}<span class="proto-exit-dot">·</span>香港 HKT`;
+    st.innerHTML = `${flag} IP ${ip}<span class="proto-exit-dot">·</span>香港`;
     st.classList.add('proto-exit-status');
   } else if (kind === 'stats') {
     const stats = $('#home-stats');
     stats.classList.add('proto-stats-4');
     stats.append(html(`<div class="home-stat">
-      <span class="home-stat-label">出口 IP</span>
+      <span class="home-stat-label">IP 地址</span>
       <span class="home-stat-value"><b class="proto-exit-stat">${IP}</b></span>
-      <span class="home-stat-foot">${flag} 香港 · HKT</span>
+      <span class="home-stat-foot">${flag} 香港</span>
     </div>`));
   }
   window.dispatchEvent(new Event('resize'));
@@ -50,7 +50,7 @@ async function consoleHome(kind) {
   await applyConsoleB();
   if (kind === 'sub') {
     // 「当前节点」卡：节点地址下面多一行副标题
-    $('.dz-node-sub', nodeCard).after(html(`<div class="dz-node-sub proto-exit-consub">${flag}<span>出口</span>${ip}<span class="proto-exit-dot">·</span><span>香港 HKT</span></div>`));
+    $('.dz-node-sub', nodeCard).after(html(`<div class="dz-node-sub proto-exit-consub">${flag}<span>IP</span>${ip}<span class="proto-exit-dot">·</span><span>香港</span></div>`));
   } else if (kind === 'status') {
     // 顶部开关条：系统代理那格的副标题从「127.0.0.1:7890」换成出口
     const sub = $('.proto-strip [data-c=sys] .proto-strip-sub');
@@ -61,7 +61,7 @@ async function consoleHome(kind) {
     const lat = $('#dz-lat-val, [id^=dz-lat]')?.closest('.dz-kpi') || [...document.querySelectorAll('.dz-kpis > *')].pop();
     const foot = $('.dz-kpi-foot', lat);
     foot.dataset.protoWas = foot.textContent.trim();
-    foot.innerHTML = `<span class="proto-exit-kpi">${flag} 出口 ${ip}</span>`;
+    foot.innerHTML = `<span class="proto-exit-kpi">${flag} IP ${ip}</span>`;
   }
   window.dispatchEvent(new Event('resize'));
 }

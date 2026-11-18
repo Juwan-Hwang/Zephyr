@@ -14,7 +14,7 @@ export async function post() {
   ];
   dialog({
     title: '测速地址',
-    sub: '节点延迟测试会请求这个地址。机场屏蔽 Google 时可以换一个。',
+    sub: '如果延迟总是显示超时，可以换一个地址。',
     width: 440,
     body: `
       <div class="flex flex-col gap-1.5 mb-4">
@@ -26,7 +26,7 @@ export async function post() {
       <div class="flex flex-col gap-1.5">
         <span class="text-xs font-medium text-[var(--text-muted)]">地址</span>
         <input type="text" class="form-control form-control-md proto-mono" value="https://cp.cloudflare.com/generate_204">
-        <p class="edit-field-hint">留空则用默认地址 https://www.gstatic.com/generate_204</p>
+        <p class="edit-field-hint">留空则使用 Google。</p>
       </div>`,
   });
 }

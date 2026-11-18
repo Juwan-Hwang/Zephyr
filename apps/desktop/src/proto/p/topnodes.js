@@ -14,7 +14,7 @@ export async function post() {
   const con = isConsole() ? await consoleParts() : null;
   if (con) await applyConsoleB();
   const strip = html(`<div class="glass-card proto-top relative z-10 shrink-0">
-    <div class="proto-top-head"><p class="proto-top-title">最快节点</p><p class="proto-top-sub">「🚀 节点选择」· 2 分钟前测速</p></div>
+    <div class="proto-top-head"><p class="proto-top-title">最快节点</p><p class="proto-top-sub">🚀 节点选择 · 2 分钟前</p></div>
     <div class="proto-top-list">
       ${TOP.map(([f, n, ms, on]) => `<button type="button" class="proto-top-chip ${on ? 'is-on' : ''}"><span class="proto-top-flag">${f}</span><span class="proto-top-name">${n}</span><span class="proto-top-ms">${ms}<small>ms</small></span></button>`).join('')}
     </div>

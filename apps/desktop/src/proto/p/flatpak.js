@@ -11,7 +11,7 @@ export async function post() {
     row.classList.add('proto-disabled-row');
     toggle.checked = false;
     toggle.disabled = true;
-    $('#setting-auto-update-client-desc').textContent = 'Flatpak 版由软件中心或 flatpak update 更新';
+    $('#setting-auto-update-client-desc').textContent = '可以在软件中心检查更新。';
   }
   await scrollSettingsTo('#app-version-text', 'start');
   $('#app-version-text').closest('.glass-card').parentElement.scrollIntoView({ block: 'start' });

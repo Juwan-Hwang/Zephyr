@@ -1,49 +1,32 @@
-// 新组件：选择卡片（styles.css .choice-grid / .choice-card）用在其他卡片式单选的地方。
-// ?proto=choice-logexport-before / -after：导出日志弹窗里的「导出内容」
-// ?proto=choice-homemode-before / -after：外观里的「主页模式」
+// 新组件：选择卡片（styles.css .choice-grid / .choice-card）。
+// 规则：4 个及以上选项的单选用选择卡片，2–3 个用分段滑块（.seg-tabs）。
+// 导出日志「导出内容」（3 个）和外观「主页模式」（2 个）因此保持原来的分段控件，原型已删。
+// ?proto=choice-subauto-before / -after：订阅编辑弹窗里的「自动更新」（4 个预设）
 // ?proto=choice-states：测速地址弹窗里的 hover / focus-visible / 选中三种状态放在一起
-import { $, until, wait, scrollSettingsTo } from './_kit.js';
+import { wait } from './_kit.js';
+import { openEditDialog } from './_subs.js';
 
-const card = (title, desc, on) => `<button type="button" role="radio" aria-checked="${on}" class="choice-card"><span class="choice-card-title">${title}</span><span class="choice-card-desc">${desc}</span></button>`;
-
-async function logExport(after) {
-  await scrollSettingsTo('#log-export-btn');
-  $('#log-export-btn').click();
-  const seg = await until(() => $('#log-export-modal .seg-tabs-lg'));
-  await wait(500);
+async function subAuto(after) {
+  const modal = await openEditDialog(0);
+  const seg = modal.querySelector('#edit-auto-update');
   if (!after || !seg) return;
+  // 和 ui/settings/subscriptions.js 一样的数据：按钮保留 data-value，只换外观；
+  // 选择卡片同样是 role=radio + aria-checked，原来的点击处理只需把 .seg-tab 换成 .choice-card。
   const grid = document.createElement('div');
+  grid.id = 'edit-auto-update';
   grid.className = 'choice-grid';
-  grid.style.setProperty('--choice-cols', '3');
+  grid.style.setProperty('--choice-cols', '4');
   grid.setAttribute('role', 'radiogroup');
-  grid.setAttribute('aria-label', seg.getAttribute('aria-label') || '');
-  grid.innerHTML = [
-    card('应用日志', '界面、订阅、设置出错', false),
-    card('核心日志', '连不上、节点和规则', false),
-    card('全部', '不确定时选这个', true),
-  ].join('');
+  grid.setAttribute('aria-labelledby', 'edit-auto-update-label');
+  grid.innerHTML = [...seg.querySelectorAll('.seg-tab')].map((b) => {
+    const on = b.classList.contains('active');
+    return `<button type="button" role="radio" aria-checked="${on}" data-value="${b.dataset.value}" class="choice-card proto-choice-compact"><span class="choice-card-title">${b.textContent}</span></button>`;
+  }).join('');
   seg.replaceWith(grid);
-}
-
-async function homeMode(after) {
-  await scrollSettingsTo('#setting-home-mode-container');
-  if (!after) return;
-  const seg = $('#setting-home-mode-container');
-  const row = seg.parentElement; // 整行：左边图标+标题，右边分段控件
-  seg.style.display = 'none';
-  const wrap = document.createElement('div');
-  wrap.className = 'proto-new';
-  wrap.innerHTML = `<div class="choice-grid" role="radiogroup" aria-label="主页模式" style="margin-inline-start:36px">
-    ${card('极简', '大号网速和当前节点，一眼看清', true)}
-    ${card('控制台', '流量图、连接和订阅，一屏看全', false)}
-  </div>`;
-  row.after(wrap);
-  wrap.style.marginTop = '12px';
-  await scrollSettingsTo('#setting-home-mode-container');
+  await wait(200);
 }
 
 export async function post() {
   const n = window.__PROTO__;
-  if (n.startsWith('choice-logexport')) return logExport(n.endsWith('after'));
-  if (n.startsWith('choice-homemode')) return homeMode(n.endsWith('after'));
+  if (n.startsWith('choice-subauto')) return subAuto(n.endsWith('after'));
 }
