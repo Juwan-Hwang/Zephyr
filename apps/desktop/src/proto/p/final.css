@@ -1,0 +1,124 @@
+/* ===== 定稿：全局 ===== */
+/* 辅助文字对比度提到 4.5:1 以上（WCAG AA）。原来浅色 0.4 的三级文字只有约 2.5:1。 */
+:root:not(.dark) {
+  --zephyr-text-tertiary: rgba(24, 24, 28, 0.64);
+  --zephyr-text-muted: #5b5b65;   /* 原 #71717a，在灰色卡片上只有 3.8–4.3:1 */
+}
+html.dark { --zephyr-text-tertiary: rgba(255, 255, 255, 0.52); --zephyr-text-muted: #8e8e98; }
+
+/* 侧栏：未选中项的文字用二级文字色（原来是三级，对比度不够） */
+.proto-side-fold .proto-side-toggle .proto-nav-label { color: var(--zephyr-text-secondary) !important; }
+.proto-side-fold .proto-side-toggle { color: var(--zephyr-text-secondary) !important; }
+.proto-side-fold #sidebar-nav .nav-btn:not(.active) .proto-nav-label { color: var(--text-secondary); }
+
+/* ===== 定稿：简洁首页 ===== */
+.fh-page { gap: 16px !important; }
+.fh-strip .proto-strip-sub { color: var(--text-secondary); }
+.fh-hero .home-hero-body { padding-top: 64px; }
+.fh-hero-head { position: absolute; top: 16px; inset-inline: 16px; z-index: calc(var(--z-sticky, 100) + 5); display: flex; align-items: center; justify-content: space-between; gap: 12px; pointer-events: none; }
+.fh-hero-head > * { pointer-events: auto; }
+.fh-hero-head .select-common { height: 32px; font-size: 12px; border-radius: var(--radius-full); padding-inline: 12px; }
+.fh-conn-link { display: inline-flex; align-items: center; gap: 2px; height: 32px; padding: 0 8px 0 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 500; color: var(--text-secondary); transition: background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), color var(--zephyr-time-micro) var(--zephyr-easing-ease-out); }
+.fh-conn-link b { font-weight: 600; color: var(--text-primary); margin-inline-end: 3px; font-variant-numeric: tabular-nums; }
+.fh-conn-link:hover { background: var(--zephyr-bg-muted); color: var(--text-primary); }
+.fh-conn-link:focus-visible, .fh-current:focus-visible, .fh-alt:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.fh-total { margin-top: 10px; font-size: 12px; font-weight: 500; color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.fh-node { display: flex; align-items: center; gap: 0; padding: 12px; min-height: 72px; }
+.fh-current { display: flex; align-items: center; gap: 12px; flex: 0 1 auto; max-width: 264px; min-width: 0; padding: 6px 10px 6px 6px; border-radius: 16px; text-align: start; transition: background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out); }
+.fh-current:hover { background: var(--zephyr-bg-muted); }
+.fh-flag { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-family: 'Zephyr Country Flags', sans-serif; font-size: 20px; background: var(--zephyr-bg-muted); border: 1px solid var(--zephyr-border-subtle); }
+.fh-name { display: block; font-size: 14px; font-weight: 600; color: var(--text-primary); line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fh-sub { display: flex; align-items: center; gap: 0; margin-top: 2px; font-size: 12px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; }
+.fh-sub > span { flex-shrink: 0; }
+.fh-sub > span:last-child { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
+.fh-sep { margin-inline: 6px; color: var(--text-tertiary); }
+.fh-ms { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.fh-dot { width: 6px; height: 6px; border-radius: 50%; background: rgb(16 185 129); box-shadow: 0 0 0 3px rgb(16 185 129 / .15); }
+.fh-ip { font-variant-numeric: tabular-nums; }
+.fh-chev { flex: 0 0 16px; color: var(--text-tertiary); }
+.fh-alts { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 6px; padding-inline-start: 16px; margin-inline-start: 12px; border-inline-start: 1px solid var(--zephyr-border-subtle); align-self: stretch; }
+.fh-alts-label { flex: 0 0 auto; font-size: 11px; line-height: 14px; font-weight: 500; color: var(--text-secondary); white-space: nowrap; }
+/* 放得下几个就显示几个：窄窗口 1–2 个，宽窗口 3 个；放不下的换到第二行并隐藏 */
+.fh-alts-list { min-width: 0; display: flex; flex-wrap: wrap; gap: 8px; height: 32px; overflow: hidden; }
+.fh-alt { flex: 1 1 148px; max-width: 200px; display: flex; align-items: center; gap: 8px; min-width: 0; height: 32px; padding: 0 10px; border-radius: 10px; background: var(--zephyr-bg-muted); border: 1px solid transparent; transition: border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out); }
+.fh-alt:hover { border-color: var(--zephyr-border-default); }
+.fh-alt-flag { font-family: 'Zephyr Country Flags', sans-serif; font-size: 14px; flex: 0 0 auto; }
+.fh-alt-name { flex: 1 1 auto; min-width: 0; font-size: 12px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: start; }
+.fh-alt-ms { flex: 0 0 auto; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+/* 窄窗口：只留两个备选，标签收起 */
+@media (max-height: 600px) { .fh-node { min-height: 64px; padding: 10px; } .fh-flag { width: 36px; height: 36px; flex-basis: 36px; } .fh-hero .home-hero-body { padding-top: 56px; } .fh-total { margin-top: 6px; } }
+
+/* 内核停止时：节点条跟着变灰 */
+.fh-node.is-stopped .fh-dot { background: var(--text-tertiary); box-shadow: none; }
+.fh-node.is-stopped .fh-alts { opacity: .45; pointer-events: none; }
+
+/* ===== 定稿：控制台首页 ===== */
+.fc-node-alts { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--zephyr-border-subtle); }
+.fc-node-alts p { font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; }
+.fc-alt { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 8px; margin-inline: -8px; width: calc(100% + 16px); border-radius: 10px; }
+.fc-alt:hover { background: var(--zephyr-bg-muted); }
+.fc-alt .fh-alt-name { font-size: 12px; }
+.fc-kpi-link { cursor: pointer; transition: border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out); }
+.fc-kpi-link:hover { border-color: var(--zephyr-border-default) !important; }
+.fc-kpi-link .dz-kpi-label { display: flex; align-items: center; justify-content: space-between; }
+.fc-kpi-link .fc-kpi-arrow { color: var(--text-tertiary); }
+
+/* ===== 定稿：下载测速 ===== */
+.fs-btn { display: inline-flex; align-items: center; gap: 6px; }
+.fs-btn.is-running { color: var(--text-primary); }
+.fs-btn .fs-count { font-variant-numeric: tabular-nums; color: var(--text-secondary); font-weight: 500; }
+.fs-speed { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fs-speed svg { color: var(--color-download, var(--accent-primary)); }
+.fs-speed.is-muted { color: var(--text-secondary); font-weight: 500; }
+.fs-progress { position: absolute; inset-inline: 16px; bottom: 8px; height: 3px; border-radius: 999px; background: var(--zephyr-bg-muted); overflow: hidden; }
+.fs-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--accent-primary); }
+.proxy-card.fs-testing { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent-primary) 45%, transparent) !important; }
+.fs-dialog-note { font-size: 13px; line-height: 1.6; color: var(--text-secondary); }
+.fs-field-label { font-size: 12px; font-weight: 600; color: var(--text-primary); margin: 18px 0 8px; }
+.fs-field-label:first-child { margin-top: 0; }
+.fs-custom { margin-top: 10px; }
+
+/* 延迟徽标：浅色模式下文字加深一级，对比度从约 2.9:1 提到 4.5:1 以上（背景色不变） */
+:root:not(.dark) .latency-badge--fast   { color: #166534; }
+:root:not(.dark) .latency-badge--medium { color: #a16207; }
+:root:not(.dark) .latency-badge--slow   { color: #b91c1c; }
+/* 节点卡片延迟数字：浅色模式下 emerald/amber/rose-400 只有约 1.9:1，换成 700 色阶 */
+:root:not(.dark) .proxy-card .text-emerald-400 { color: #047857; }
+:root:not(.dark) .proxy-card .text-amber-400 { color: #b45309; }
+:root:not(.dark) .proxy-card .text-rose-400, :root:not(.dark) .proxy-card .text-red-400 { color: #be123c; }
+.proxy-sort-desc { color: var(--text-secondary) !important; }
+
+/* 开关条：标题不折行（720 宽时「系统代理」会断成两行） */
+.proto-strip-title { white-space: nowrap; }
+
+/* 控制台模式切换：选中项文字用主文字色，和简洁首页、系统分段控件一致（原来蓝字压在白色滑块上只有 3.5:1） */
+.dz-mode-seg button.active { color: var(--text-primary); }
+.fc-ip { margin-top: 4px; }
+/* 4 张指标卡：宽窗口一行 4 张，窄窗口两行各 2 张 */
+.dz-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+.dz-kpis > .dz-kpi { grid-column: auto !important; }
+@media (max-width: 1000px) { .dz-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+
+/* ===== 定稿：浅色模式对比度（WCAG AA，小字 4.5:1）=====
+   品牌蓝 #007AFF 保留给图标、滑块、选中描边这些非文字元素；
+   白字压在蓝底上、蓝字压在浅底上的地方换成深一级的 #0062D6（和 macOS「增强对比度」的做法一样） */
+:root:not(.dark) .btn-primary { background-color: #0062d6; }
+:root:not(.dark) .btn-primary:hover { background-color: #0056bd; }
+:root:not(.dark) .btn-ghost[class], :root:not(.dark) .btn-accent span, :root:not(.dark) .sub-in-use,
+:root:not(.dark) .proto-cr-type, :root:not(.dark) .choice-card[aria-checked=true] .choice-card-title { color: #0058c2; }
+:root:not(.dark) .btn-ghost.text-\[var\(--text-secondary\)\], :root:not(.dark) .fs-btn { color: var(--text-secondary); }
+:root:not(.dark) .btn-danger span { color: #b91c1c; }
+:root:not(.dark) .text-upload { color: #b4232f; }
+:root:not(.dark) .text-download { color: #0058c2; }
+:root:not(.dark) .proxy-card .text-emerald-400 { color: #065f46; }
+:root:not(.dark) .proto-cr-arrow, :root:not(.dark) .proto-cr-src, :root:not(.dark) .proto-cr-head h4,
+:root:not(.dark) .settings-section-desc { color: var(--zephyr-text-muted); }
+:root:not(.dark) .edit-url-current button#edit-url-change.btn-ghost { color: #0058c2; }
+html.dark .edit-url-current button#edit-url-change.btn-ghost { color: #4da3ff; }
+/* 深色模式：蓝字、红字提亮一级（#4DA3FF / #F87171），主按钮蓝底同浅色模式加深 */
+html.dark .btn-primary { background-color: #0062d6; }
+html.dark .btn-primary:hover { background-color: #0a6ee8; }
+html.dark .btn-accent span, html.dark .sub-in-use, html.dark .proto-cr-type, html.dark .row-action, html.dark .row-action span,
+html.dark .choice-card[aria-checked=true] .choice-card-title, html.dark .text-download { color: #4da3ff; }
+html.dark .btn-danger span, html.dark .text-\[var\(--zephyr-color-danger\)\] { color: #f87171; }

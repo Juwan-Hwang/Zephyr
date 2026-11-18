@@ -2543,7 +2543,7 @@ html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
   transition: border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), box-shadow var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
 }
 .choice-card-title { font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--text-primary); }
-.choice-card-desc { font-size: 11px; line-height: 1.4; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.choice-card-desc { font-size: 11px; line-height: 1.4; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .choice-card:hover:not([aria-checked="true"], .is-selected, :disabled) {
   border-color: var(--zephyr-border-strong);
   background: color-mix(in srgb, var(--text-primary) 3%, var(--zephyr-bg-muted));
