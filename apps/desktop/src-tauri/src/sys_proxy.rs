@@ -875,12 +875,26 @@ fn suspend_action(marker: Option<&str>, enabled: Option<&str>, active: Option<&s
     }
 }
 
-/// Turn the system proxy off for a restart into another instance, keeping the
-/// ownership marker so that instance restores it (the crash-recovery path).
-/// A proxy Zephyr does not own (no marker, or another server active) is left
-/// alone.
+/// Why [`suspend_sys_proxy`] runs, which decides what it does when the proxy
+/// is Zephyr's but its ownership marker cannot be written.
 #[cfg(target_os = "windows")]
-pub fn suspend_sys_proxy(app: &AppHandle) -> Result<(), String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuspendFor {
+    /// A relaunch into another instance, which starts right away: the proxy
+    /// stays on, toward the address that instance starts its core on.
+    Relaunch,
+    /// Windows ending the session (sign-out, shutdown, restart): Zephyr may
+    /// not run again for a long time, so the proxy goes off all the same and
+    /// the next start leaves it off.
+    Exit,
+}
+
+/// Turn the system proxy off for a restart into another instance or for the
+/// end of the session, keeping the ownership marker so the next instance
+/// restores it (the crash-recovery path). A proxy Zephyr does not own (no
+/// marker, or another server active) is left alone.
+#[cfg(target_os = "windows")]
+pub fn suspend_sys_proxy(app: &AppHandle, reason: SuspendFor) -> Result<(), String> {
     let _transition = proxy_transition_lock();
     let marker = read_ownership(app);
     let enabled = enabled_server_slot().clone();
@@ -897,17 +911,33 @@ pub fn suspend_sys_proxy(app: &AppHandle) -> Result<(), String> {
         Suspend::Disable(write) => {
             if let Some(server) = write {
                 if !write_ownership(app, &server) {
-                    // Without a marker the next instance would leave the
-                    // proxy off. Left on, it points at the same address the
-                    // next instance starts its core on, so it works again then.
-                    // An older marker would have it put back an older address.
+                    // An older marker would have the next instance put back
+                    // an older address.
                     remove_ownership(app);
-                    emit_warn!(
-                        System,
-                        SYS_PROXY_FAILED,
-                        "Leaving the system proxy on for the relaunch: its ownership could not be recorded"
-                    );
-                    return Ok(());
+                    match reason {
+                        // Without a marker the next instance would leave the
+                        // proxy off. Left on, it points at the same address
+                        // the next instance starts its core on, so it works
+                        // again then.
+                        SuspendFor::Relaunch => {
+                            emit_warn!(
+                                System,
+                                SYS_PROXY_FAILED,
+                                "Leaving the system proxy on for the relaunch: its ownership could not be recorded"
+                            );
+                            return Ok(());
+                        }
+                        // Left on, it would point at a stopped core until
+                        // Zephyr runs again, and no program using it could
+                        // connect. Off, the next start does not turn it back on.
+                        SuspendFor::Exit => {
+                            emit_warn!(
+                                System,
+                                SYS_PROXY_FAILED,
+                                "Turning the system proxy off on exit without recording its ownership: the next start leaves it off"
+                            );
+                        }
+                    }
                 }
             }
             // The marker stays as it is: removing and rewriting it could lose it.

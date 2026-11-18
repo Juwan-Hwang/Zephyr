@@ -39,10 +39,10 @@ use core_manager::{
     decrypt_all_profiles, delete_config, disable_tun_cmd, download_sub, download_sub_batch,
     encrypt_all_profiles, ensure_app_storage, export_logs, fetch_text, get_core_uptime,
     get_core_version, grant_linux_tun_permission, init_tun_mode_from_config,
-    is_machine_key_persisted, kill_all_mihomo_as_root_cmd, kill_mihomo, list_configs,
-    open_config_folder, open_log_folder, read_config_file, record_tun_enabled, rename_config,
-    restart_core_as_root_cmd, set_tun_enabled, start_core, stop_core, update_config_url,
-    update_subscription_interval, update_subscription_ua, write_config_file, CoreData, MihomoState,
+    is_machine_key_persisted, kill_all_mihomo_as_root_cmd, list_configs, open_config_folder,
+    open_log_folder, read_config_file, record_tun_enabled, rename_config, restart_core_as_root_cmd,
+    set_tun_enabled, start_core, stop_core, update_config_url, update_subscription_interval,
+    update_subscription_ua, write_config_file, CoreData, MihomoState,
 };
 use global_shortcut::ShortcutRegistry;
 use serde::{Deserialize, Serialize};
@@ -2041,8 +2041,8 @@ pub fn run() {
                         // `RunEvent::Exit`: no waiting restart starts a core
                         // after this kill.
                         let _user_stop = core_manager::core::core_process::note_user_stop();
-                        kill_mihomo();
                         let app = window.app_handle();
+                        core_manager::core::core_process::kill_cores_on_exit(app);
                         let _ = clear_sys_proxy(app);
                         app.cleanup_before_exit();
                         app.exit(0);
@@ -2375,7 +2375,33 @@ write_frontend_log,
                 // background restart waiting for the start lock (a resume
                 // check) then starts no core after the one below is killed.
                 let _user_stop = core_manager::core::core_process::note_user_stop();
-                kill_mihomo();
+                // Windows also ends the session this way (sign-out, shutdown,
+                // restart): the system proxy is turned off before the core
+                // goes, or it stays on toward a closed port until Zephyr runs
+                // again. Zephyr keeps owning it, so the next start turns it
+                // back on, as after the administrator relaunch. A quit or a
+                // relaunch set the exit flag before this and has already dealt
+                // with the proxy (the relaunch can leave it on on purpose):
+                // that is left as it is. The flag first: a restore still in
+                // flight must not turn the proxy back on.
+                #[cfg(target_os = "windows")]
+                {
+                    let explicit = handle
+                        .try_state::<ExplicitExitFlag>()
+                        .is_some_and(|flag| flag.0.swap(true, std::sync::atomic::Ordering::SeqCst));
+                    if !explicit {
+                        if let Err(e) =
+                            sys_proxy::suspend_sys_proxy(handle, sys_proxy::SuspendFor::Exit)
+                        {
+                            emit_warn!(
+                                System,
+                                SYS_PROXY_FAILED,
+                                "Failed to turn off system proxy on exit: {e}"
+                            );
+                        }
+                    }
+                }
+                core_manager::core::core_process::kill_cores_on_exit(handle);
                 // Clean up only this app's managed core (root- and user-owned):
                 // an unrelated root mihomo service must survive the app exit.
                 // Prefer the executable recorded when the root core was started
