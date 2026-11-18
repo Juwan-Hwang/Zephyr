@@ -1,12 +1,14 @@
 // #182 #217 #318 #609 内核被其他代理应用关闭后，弹横幅并给出「重新启动」
 import { $, html, icon, ICONS, until } from './_kit.js';
+import { isConsole, consoleParts } from './_con.js';
 
 export function pre() {
   window.__PROTO_TRAFFIC_ZERO__ = true;
 }
 
 export async function post() {
-  await until(() => $('#home-hero') || $('[data-page="home"]'));
+  const con = isConsole() ? await consoleParts() : null;
+  if (!con) await until(() => $('#home-hero') || $('[data-page="home"]'));
   if (window.__PROTO__.endsWith('before')) return;
   const page = $('[data-page="home"]');
   const banner = html(`<div class="proto-core-banner glass-card relative z-20 shrink-0" role="alert">
@@ -20,6 +22,12 @@ export async function post() {
       <button type="button" class="btn-primary text-xs px-3.5 py-1.5 flex items-center gap-1.5">${icon(ICONS.refresh, 'w-3.5 h-3.5')}重新启动</button>
     </div>
   </div>`);
+  if (con) {
+    // 控制台首页：横幅放在标题下面、指标条上面，在布局里占位
+    con.header.after(banner);
+    $('#dz-node-name').textContent = '内核未运行';
+    return;
+  }
   page.prepend(banner);
   const name = $('#current-node-name');
   if (name) name.textContent = '内核未运行';

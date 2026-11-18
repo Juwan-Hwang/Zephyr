@@ -1,3 +1,4 @@
 .proto-sub-menu { inset-inline-end: 0; min-width: 220px; }
 .proto-sub-opt.active { background: var(--zephyr-bg-muted); }
 .proto-sub-select .select-common { height: 36px; }
+.dz-card-head .proto-sub-select .select-common { height: 30px; font-size: 12px; border-radius: var(--radius-full); padding-inline: 12px; }

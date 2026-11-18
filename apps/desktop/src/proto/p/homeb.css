@@ -17,3 +17,8 @@
 .proto-hero-sub { position: absolute; top: 16px; inset-inline-start: 16px; z-index: calc(var(--z-sticky, 100) + 5); }
 .proto-hero-sub .select-common { height: 32px; font-size: 12px; border-radius: var(--radius-full); padding-inline: 12px; }
 @media (max-width: 800px) { .proto-strip-sub { display: none; } .proto-strip-cell { gap: 10px; padding: 0 12px; } }
+.proto-strip-cell.is-mode > .dz-mode-seg.proto-strip-seg { width: 100%; margin-top: 0; }
+.proto-bottom-two { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) !important; }
+.proto-con-sub { margin-bottom: 2px; }
+.proto-con-sub .select-common { height: 30px; font-size: 12px; border-radius: var(--radius-full); padding-inline: 12px; }
+.proto-con-sub .proto-sub-menu { inset-inline-start: 0; inset-inline-end: auto; }

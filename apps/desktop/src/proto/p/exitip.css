@@ -5,3 +5,4 @@
 .proto-exit-flag { font-family: 'Zephyr Country Flags', sans-serif; font-size: 12px; }
 .proto-exit-refresh { color: var(--text-muted); margin-inline-start: 2px; }
 .home-hero-body:has(> .proto-exit-pill) .home-hero-speeds { margin-block: auto; }
+.proto-exit-pill.is-start { margin: 8px 0 2px; }
