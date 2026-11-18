@@ -1,12 +1,13 @@
 // #2439 双击流量图进入连接页 → 改成看得见的「查看连接」入口
 // ?proto=chartlink-link（链接版）/ chartlink-hover（双击版：悬停提示）
 import { $, html, icon, ICONS, until } from './_kit.js';
-import { isConsole, consoleParts } from './_con.js';
+import { isConsole, consoleParts, applyConsoleB } from './_con.js';
 
 export async function post() {
   if (isConsole()) {
     // 控制台首页：流量卡标题行右边加入口（链接版），或悬停时在图上提示（双击版）
     const { traffic } = await consoleParts();
+    await applyConsoleB();
     if (window.__PROTO__.endsWith('hover')) {
       traffic.style.position = 'relative';
       traffic.classList.add('proto-hero-hover');

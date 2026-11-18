@@ -22,3 +22,7 @@
 .proto-con-sub { margin-bottom: 2px; }
 .proto-con-sub .select-common { height: 30px; font-size: 12px; border-radius: var(--radius-full); padding-inline: 12px; }
 .proto-con-sub .proto-sub-menu { inset-inline-start: 0; inset-inline-end: auto; }
+/* 控制台方案 B：开关条顶替标题，占标题原来的位置（标题块原有 8px 下外边距） */
+.dz-content > .proto-strip.proto-strip-top { margin-bottom: 0; }
+/* 订阅卡在右栏靠下，下拉菜单往上开，避免被窗口底边截掉 */
+.proto-con-sub .proto-sub-menu { top: auto; bottom: calc(100% + 6px); }

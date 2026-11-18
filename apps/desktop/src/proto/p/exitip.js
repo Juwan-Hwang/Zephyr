@@ -1,22 +1,74 @@
-// #321 #673 首页显示出口 IP 和地区（点一下才查）。?proto=exitip-idle / exitip-done
-import { $, html, icon, ICONS, until } from './_kit.js';
-import { isConsole, consoleParts } from './_con.js';
+// #321 #673 显示出口 IP 和地区。设置里「显示出口 IP」开关（默认关），打开后自动查询，
+// 切换节点时自动刷新，不再手动点「查询」。首页不再加胶囊，并进现有的一行：
+//   ?proto=exitip-setting  设置 → 外观里的开关
+//   ?proto=exitip-sub      方案一：节点名下面的副标题
+//   ?proto=exitip-status   方案二：系统代理那一行的状态文字
+//   ?proto=exitip-stats    方案三：统计行里多一项
+// 控制台首页都先套方案 B（用户倾向的版本）。
+import { $, html, until, ICONS, insertRowAfter, settingRow, toggle, scrollSettingsTo } from './_kit.js';
+import { isConsole, consoleParts, applyConsoleB } from './_con.js';
+
+const IP = '203.0.113.48';
+const flag = '<span class="proto-exit-flag">🇭🇰</span>';
+const ip = `<span class="proto-exit-ip">${IP}</span>`;
+
+async function setting() {
+  insertRowAfter('#setting-home-mode-container', settingRow({
+    id: 'proto-exitip-row',
+    iconPaths: ICONS.globe,
+    title: '显示出口 IP',
+    desc: '在首页显示当前出口 IP 和地区，切换节点后自动刷新',
+    control: toggle(false),
+  }));
+  await scrollSettingsTo('#proto-exitip-row');
+}
+
+async function minimal(kind) {
+  await until(() => $('#current-node-name') && $('#home-stats'));
+  if (kind === 'sub') {
+    // 节点胶囊下面一行小字，在布局里占一行，网速读数在剩下的空间里居中
+    $('.home-hero-speeds').before(html(`<p class="proto-exit-line">${flag}<span>出口</span>${ip}<span class="proto-exit-dot">·</span><span>香港 HKT</span></p>`));
+  } else if (kind === 'status') {
+    const st = $('#proxy-status-text');
+    // 原来是「已准备好保护您的流量」这类状态句，换成出口
+    st.innerHTML = `${flag} 出口 ${ip}<span class="proto-exit-dot">·</span>香港 HKT`;
+    st.classList.add('proto-exit-status');
+  } else if (kind === 'stats') {
+    const stats = $('#home-stats');
+    stats.classList.add('proto-stats-4');
+    stats.append(html(`<div class="home-stat">
+      <span class="home-stat-label">出口 IP</span>
+      <span class="home-stat-value"><b class="proto-exit-stat">${IP}</b></span>
+      <span class="home-stat-foot">${flag} 香港 · HKT</span>
+    </div>`));
+  }
+  window.dispatchEvent(new Event('resize'));
+}
+
+async function consoleHome(kind) {
+  const { nodeCard, traffic } = await consoleParts();
+  await applyConsoleB();
+  if (kind === 'sub') {
+    // 「当前节点」卡：节点地址下面多一行副标题
+    $('.dz-node-sub', nodeCard).after(html(`<div class="dz-node-sub proto-exit-consub">${flag}<span>出口</span>${ip}<span class="proto-exit-dot">·</span><span>香港 HKT</span></div>`));
+  } else if (kind === 'status') {
+    // 顶部开关条：系统代理那格的副标题从「127.0.0.1:7890」换成出口
+    const sub = $('.proto-strip [data-c=sys] .proto-strip-sub');
+    sub.innerHTML = `${flag} ${ip}`; // 窄窗口下这格只有约 100px，地区交给国旗
+    sub.classList.add('proto-exit-status');
+  } else if (kind === 'stats') {
+    // 指标行：「节点延迟」那张卡的脚注从节点名换成出口（流量卡底部的统计行在默认窗口里看不到，不放那里）
+    const lat = $('#dz-lat-val, [id^=dz-lat]')?.closest('.dz-kpi') || [...document.querySelectorAll('.dz-kpis > *')].pop();
+    const foot = $('.dz-kpi-foot', lat);
+    foot.dataset.protoWas = foot.textContent.trim();
+    foot.innerHTML = `<span class="proto-exit-kpi">${flag} 出口 ${ip}</span>`;
+  }
+  window.dispatchEvent(new Event('resize'));
+}
 
 export async function post() {
-  const con = isConsole() ? await consoleParts() : null;
-  if (!con) await until(() => $('#current-node-name'));
-  const done = window.__PROTO__.endsWith('done');
-  const pill = html(done
-    ? `<button type="button" class="proto-exit-pill is-done"><span class="proto-exit-flag">🇭🇰</span><span class="proto-exit-ip">203.0.113.48</span><span class="proto-exit-sep"></span><span>香港 · HKT</span>${icon(ICONS.refresh, 'w-3 h-3 proto-exit-refresh')}</button>`
-    : `<button type="button" class="proto-exit-pill">${icon(ICONS.globe, 'w-3.5 h-3.5')}<span>查询出口 IP</span></button>`);
-  // 在首页 hero 的正常布局里占一行：放在节点胶囊下面、速度读数上面，
-  // 速度读数在剩下的空间里居中，被往下推，不靠 z-index 盖上去。
-  if (con) {
-    // 控制台首页：放进「当前节点」卡，节点名下面单独一行，卡片随之变高
-    pill.classList.add('is-start');
-    $('.dz-node-sub', con.nodeCard).after(pill);
-    return;
-  }
-  const speeds = $('.home-hero-speeds');
-  speeds.before(pill);
+  const kind = window.__PROTO__.replace(/^exitip-?/, '') || 'sub';
+  if (kind === 'setting') return setting();
+  if (isConsole()) return consoleHome(kind);
+  return minimal(kind);
 }

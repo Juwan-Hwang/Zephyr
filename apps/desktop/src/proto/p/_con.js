@@ -20,3 +20,18 @@ export async function consoleParts() {
   const subCard = $('#dz-sub-name').closest('.glass-card');
   return { content, header, kpis, main, traffic, side, nodeWrap, nodeCard, quickCard, bottom, subCard };
 }
+
+// 控制台首页方案 B（用户倾向）作为其他控制台原型的底：先套 B，再加各自的改动。
+export async function applyConsoleB() {
+  if (!document.querySelector('link[data-proto-b]')) {
+    const l = document.createElement('link');
+    l.rel = 'stylesheet';
+    l.href = 'proto/p/homeb.css';
+    l.dataset.protoB = '1';
+    const loaded = new Promise((r) => { l.onload = r; l.onerror = r; });
+    document.head.appendChild(l);
+    await loaded;
+  }
+  const { consoleB } = await import('./homeb.js');
+  await consoleB();
+}

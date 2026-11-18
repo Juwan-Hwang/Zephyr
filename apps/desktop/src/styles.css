@@ -2513,6 +2513,65 @@ html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
 .seg-tabs.seg-tabs-lg { height: 40px; padding: 4px; }
 .seg-tabs-lg .seg-tab { font-size: 13px; }
 
+/* Choice cards: single choice among a few options that each need a short
+   explanation line (a name + one line of detail). Use segmented tabs when the
+   labels explain themselves; use choice cards when each option needs a line.
+   Markup: <div class="choice-grid" role="radiogroup">
+             <button type="button" role="radio" aria-checked="true" class="choice-card">
+               <span class="choice-card-title">…</span><span class="choice-card-desc">…</span>
+             </button>…</div>
+   Selected = aria-checked="true" (or .is-selected): accent border, tinted
+   fill and a 3px glow ring. */
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--choice-cols, 2), minmax(0, 1fr));
+  gap: 8px;
+}
+.choice-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--zephyr-border-subtle);
+  background: var(--zephyr-bg-muted);
+  text-align: start;
+  cursor: pointer;
+  transition: border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), box-shadow var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.choice-card-title { font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--text-primary); }
+.choice-card-desc { font-size: 11px; line-height: 1.4; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.choice-card:hover:not([aria-checked="true"], .is-selected, :disabled) {
+  border-color: var(--zephyr-border-strong);
+  background: color-mix(in srgb, var(--text-primary) 3%, var(--zephyr-bg-muted));
+}
+.choice-card:is([aria-checked="true"], .is-selected) {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--zephyr-bg-muted));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 10%, transparent);
+}
+.choice-card:is([aria-checked="true"], .is-selected) .choice-card-title { color: var(--accent-ink); }
+.choice-card:focus-visible:not(:disabled) {
+  outline: 2px solid transparent;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--zephyr-focus-ring);
+}
+.choice-card:is([aria-checked="true"], .is-selected):focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 28%, transparent); }
+.choice-card:disabled { opacity: .5; cursor: not-allowed; }
+html.dark .choice-card { background: var(--zephyr-bg-subtle); }
+html.dark .choice-card:hover:not([aria-checked="true"], .is-selected, :disabled) { background: var(--zephyr-bg-muted); }
+html.dark .choice-card:is([aria-checked="true"], .is-selected) {
+  border-color: color-mix(in srgb, var(--accent-primary) 65%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+@media (forced-colors: active) {
+  .choice-card:is([aria-checked="true"], .is-selected) { border: 2px solid Highlight; }
+}
+
 /* Rule library: groups read as quiet section labels (like settings), files
    sit flush on the page edge; groups are 24px apart */
 .rl-group + .rl-group { margin-top: 24px; }

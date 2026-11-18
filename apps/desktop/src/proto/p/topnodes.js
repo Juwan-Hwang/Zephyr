@@ -1,7 +1,7 @@
 // #2439 首页显示延迟最低的前几个节点
 import { html } from './_kit.js';
 import { homeParts } from './_home.js';
-import { isConsole, consoleParts } from './_con.js';
+import { isConsole, consoleParts, applyConsoleB } from './_con.js';
 
 const TOP = [
   ['🇭🇰', '香港 03 IPLC', 21, true],
@@ -12,6 +12,7 @@ const TOP = [
 
 export async function post() {
   const con = isConsole() ? await consoleParts() : null;
+  if (con) await applyConsoleB();
   const strip = html(`<div class="glass-card proto-top relative z-10 shrink-0">
     <div class="proto-top-head"><p class="proto-top-title">最快节点</p><p class="proto-top-sub">「🚀 节点选择」· 2 分钟前测速</p></div>
     <div class="proto-top-list">

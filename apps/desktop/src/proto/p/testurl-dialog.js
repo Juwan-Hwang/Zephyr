@@ -3,13 +3,13 @@ import { dialog } from './_kit.js';
 
 export async function post() {
   await base();
-  // 预设用设置里已有的分段控件（.seg-tabs-lg + .seg-tab.active），
-  // 和订阅弹窗的「自动更新」、隧道弹窗的「协议」同一个组件、同一个选中态。
+  // 常用地址用新的通用选择卡片（styles.css 里的 .choice-grid / .choice-card）：
+  // 每项一个名字加一行域名，选中时 accent 描边 + 浅色底 + 3px 辉光环。
   const presets = [
-    ['Google', false],
-    ['Cloudflare', true],
-    ['Apple', false],
-    ['小米', false],
+    ['Google', 'www.gstatic.com', false],
+    ['Cloudflare', 'cp.cloudflare.com', true],
+    ['Apple', 'captive.apple.com', false],
+    ['小米', 'connect.rom.miui.com', false],
   ];
   dialog({
     title: '测速地址',
@@ -18,8 +18,8 @@ export async function post() {
     body: `
       <div class="flex flex-col gap-1.5 mb-4">
         <span class="text-xs font-medium text-[var(--text-muted)]">常用地址</span>
-        <div class="seg-tabs seg-tabs-lg w-full" role="radiogroup" aria-label="常用地址">
-          ${presets.map(([n, on]) => `<button type="button" role="radio" aria-checked="${on}" class="seg-tab ${on ? 'active ' : ''}flex-1 justify-center">${n}</button>`).join('')}
+        <div class="choice-grid" role="radiogroup" aria-label="常用地址">
+          ${presets.map(([n, h, on]) => `<button type="button" role="radio" aria-checked="${on}" class="choice-card"><span class="choice-card-title">${n}</span><span class="choice-card-desc">${h}</span></button>`).join('')}
         </div>
       </div>
       <div class="flex flex-col gap-1.5">

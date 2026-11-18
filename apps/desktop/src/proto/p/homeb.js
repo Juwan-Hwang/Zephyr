@@ -36,9 +36,11 @@ export async function post() {
   window.dispatchEvent(new Event('resize'));
 }
 
-// 控制台首页：同样三个开关压成标题下面的一条（用控制台自己的模式分段和开关），
-// 「快捷控制」卡去掉；订阅卡从底部挪到右栏「当前节点」下面，订阅名换成下拉切换。
-async function consoleB() {
+// 控制台首页（用户倾向的方案）：去掉「控制台」标题那一块，三个开关压成一条放在
+// 页面最上面原来标题的位置（用控制台自己的模式分段和开关）；「快捷控制」卡去掉；
+// 订阅卡从底部挪到右栏「当前节点」下面，订阅名换成下拉切换。
+// 其他控制台原型（出口 IP、内核停止横幅、最快节点、图表跳转）都先套这一版。
+export async function consoleB() {
   const { header, quickCard, side, subCard, bottom } = await consoleParts();
   const sysRow = $('#dz-sys-toggle').closest('.dz-quick-row');
   const tunRow = $('#dz-tun-toggle').closest('.dz-quick-row');
@@ -61,7 +63,9 @@ async function consoleB() {
   const seg = $('#dz-mode-seg');
   seg.classList.add('proto-strip-seg');
   strip.querySelector('[data-c=mode]').append(seg);
+  header.style.display = 'none';
   header.after(strip);
+  strip.classList.add('proto-strip-top');
   quickCard.style.display = 'none';
   side.append(subCard);
   subCard.style.flex = '1';

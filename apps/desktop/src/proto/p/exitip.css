@@ -1,8 +1,24 @@
-.proto-exit-pill { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; margin: 0 auto; flex: none; border-radius: 999px; font-size: 11px; font-weight: 500; color: var(--text-secondary); background: var(--zephyr-bg-muted); border: 1px solid var(--zephyr-border-subtle); width: max-content; }
-.proto-exit-pill.is-done { color: var(--text-primary); }
-.proto-exit-ip { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; letter-spacing: .01em; }
-.proto-exit-sep { width: 1px; height: 11px; background: var(--zephyr-border-default); }
 .proto-exit-flag { font-family: 'Zephyr Country Flags', sans-serif; font-size: 12px; }
-.proto-exit-refresh { color: var(--text-muted); margin-inline-start: 2px; }
-.home-hero-body:has(> .proto-exit-pill) .home-hero-speeds { margin-block: auto; }
-.proto-exit-pill.is-start { margin: 8px 0 2px; }
+.proto-exit-ip { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; letter-spacing: .01em; }
+.proto-exit-dot { color: var(--text-tertiary, var(--zephyr-text-tertiary)); margin-inline: 4px; }
+
+/* 方案一（极简首页）：节点胶囊下面的副标题，在流里占一行 */
+.proto-exit-line { display: flex; align-items: center; justify-content: center; gap: 5px; margin: -4px auto 0; font-size: 11px; line-height: 16px; color: var(--text-muted); white-space: nowrap; }
+.proto-exit-line .proto-exit-ip { color: var(--text-secondary); }
+.home-hero-body:has(> .proto-exit-line) { justify-content: flex-start; }
+.home-hero-body:has(> .proto-exit-line) .home-hero-speeds { margin-block: auto; }
+
+/* 方案二：系统代理状态文字里带上出口 */
+.proto-exit-status { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proto-exit-status .proto-exit-ip { color: var(--text-secondary); }
+
+/* 方案三（极简首页）：底部统计行变成四项 */
+.home-stats.proto-stats-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.home-stat-value b.proto-exit-stat { font-family: var(--font-mono, ui-monospace, monospace); font-size: 17px; font-weight: 400; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* 控制台：节点卡副标题 / 流量卡统计行 */
+.proto-exit-consub { display: flex; align-items: center; gap: 5px; margin-top: 4px; white-space: nowrap; overflow: hidden; }
+.proto-exit-consub .proto-exit-ip { color: var(--zephyr-text-secondary); }
+.proto-exit-meta b { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.proto-exit-kpi { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.proto-exit-kpi .proto-exit-ip { font-size: 11px; }
