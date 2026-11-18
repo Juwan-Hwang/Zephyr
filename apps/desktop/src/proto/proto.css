@@ -1,0 +1,15 @@
+/* Shared styles for UI prototypes. Only tokens the app already defines. */
+.proto-mono { font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace); font-size: 12px; line-height: 1.6; }
+textarea.form-control.proto-mono { resize: none; padding: 10px 12px; width: 100%; }
+
+/* Small pill used for inline meta (counts, badges) */
+.proto-pill {
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 9px;
+  border-radius: var(--radius-full); font-size: 11px; font-weight: 600; white-space: nowrap;
+  background: var(--zephyr-bg-muted); color: var(--text-secondary); border: 1px solid var(--zephyr-border-subtle);
+}
+.proto-pill.is-accent { background: color-mix(in srgb, var(--accent-primary) 10%, transparent); color: var(--accent-ink, var(--accent-primary)); border-color: color-mix(in srgb, var(--accent-primary) 22%, transparent); }
+.proto-pill.is-warn { background: color-mix(in srgb, var(--zephyr-color-warning) 12%, transparent); color: var(--zephyr-color-warning); border-color: color-mix(in srgb, var(--zephyr-color-warning) 24%, transparent); }
+
+/* Annotation overlay (not part of the design; marks hit areas in screenshots) */
+.proto-annot { position: fixed; pointer-events: none; z-index: 2147483000; }

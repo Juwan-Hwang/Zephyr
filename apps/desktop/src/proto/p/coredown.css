@@ -1,0 +1,4 @@
+.proto-core-banner { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-color: color-mix(in srgb, var(--zephyr-color-warning, #f59e0b) 35%, transparent) !important; background: color-mix(in srgb, var(--zephyr-color-warning, #f59e0b) 7%, var(--zephyr-bg-elevated, transparent)) !important; }
+.proto-core-banner-icon { width: 32px; height: 32px; flex: 0 0 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--zephyr-color-warning, #d97706); background: color-mix(in srgb, var(--zephyr-color-warning, #f59e0b) 14%, transparent); }
+.proto-core-banner-title { font-size: 13px; font-weight: 600; color: var(--text-primary); line-height: 1.35; }
+.proto-core-banner-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.5; margin-top: 2px; }

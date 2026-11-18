@@ -1,0 +1,12 @@
+/* under: icon + small caption, same 80px rail */
+.proto-side-under #sidebar-nav { gap: 14px !important; }
+.proto-side-under #sidebar-nav .nav-btn { width: 60px !important; height: 54px !important; flex-direction: column; gap: 4px; }
+.proto-side-under #sidebar-nav .nav-btn .icon { width: 20px !important; height: 20px !important; }
+.proto-side-under .proto-nav-label { font-size: 10px; font-weight: 600; line-height: 1; letter-spacing: .02em; }
+
+/* wide: expanded rail with icon + label rows */
+.proto-side-wide #sidebar-nav { width: 148px !important; align-items: stretch !important; padding-inline: 14px; gap: 6px !important; }
+.proto-side-wide #sidebar-nav .nav-btn { width: 100% !important; height: 42px !important; justify-content: flex-start !important; gap: 12px; padding-inline: 12px; }
+.proto-side-wide #sidebar-nav .nav-btn .icon { width: 19px !important; height: 19px !important; flex: 0 0 19px; }
+.proto-side-wide .proto-nav-label { font-size: 13px; font-weight: 600; }
+.proto-side-wide #sidebar-nav > :not(.nav-btn):not(.proto-nav-label) { align-self: center; }

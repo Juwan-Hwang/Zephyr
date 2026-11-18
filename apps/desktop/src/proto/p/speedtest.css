@@ -1,0 +1,17 @@
+.proto-st-card { width: 380px; }
+.proto-flag { font-family: 'Zephyr Country Flags', sans-serif; }
+.proto-st-big { display: flex; align-items: baseline; justify-content: center; gap: 6px; margin-top: 22px; }
+.proto-st-num { font-size: 44px; font-weight: 700; letter-spacing: -.02em; color: var(--text-primary); font-variant-numeric: tabular-nums; line-height: 1; }
+.proto-st-unit { font-size: 14px; font-weight: 600; color: var(--text-muted); }
+.proto-st-bar { height: 4px; border-radius: 999px; background: var(--zephyr-bg-muted); margin-top: 18px; overflow: hidden; }
+.proto-st-bar span { display: block; height: 100%; border-radius: inherit; background: var(--accent-primary); }
+.proto-st-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; }
+.proto-st-grid > div { padding: 10px 12px; border-radius: 10px; background: var(--zephyr-bg-muted); }
+.proto-st-grid p { font-size: 10px; color: var(--text-muted); }
+.proto-st-grid b { display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.proto-menu-new { display: flex !important; align-items: center; gap: 8px; }
+.proto-menu-meta { margin-inline-start: auto; font-size: 10px; color: var(--text-muted); padding-inline-start: 12px; }
+.proto-force-hover .node-retest-btn { opacity: 1 !important; }
+.proto-speed-btn { color: var(--color-accent) !important; background: color-mix(in srgb, var(--color-accent) 12%, transparent) !important; margin-inline-end: 2px; }
+.proto-tip { position: fixed; z-index: 3000; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 10px; border-radius: 8px; font-size: 11px; font-weight: 600; color: #fff; background: rgb(24 24 27 / .92); box-shadow: 0 6px 18px rgb(0 0 0 / .18); white-space: nowrap; }
+.proto-tip span { font-size: 10px; font-weight: 500; opacity: .7; }

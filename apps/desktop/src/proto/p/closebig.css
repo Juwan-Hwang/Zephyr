@@ -1,0 +1,7 @@
+.proto-close-dot { width: 18px !important; height: 18px !important; }
+.proto-close-dot svg { opacity: 1 !important; width: 9px !important; height: 9px !important; color: rgb(0 0 0 / .5) !important; }
+.proto-close-x { width: 32px !important; height: 28px !important; border-radius: 8px !important; background: transparent !important; box-shadow: none !important; }
+.proto-close-x::before { inset: 0 !important; }
+.proto-close-x svg { opacity: 1 !important; width: 14px !important; height: 14px !important; stroke-width: 2.25 !important; color: var(--text-secondary) !important; }
+.proto-close-x.proto-hover { background: #e5484d !important; }
+.proto-close-x.proto-hover svg { color: #fff !important; }

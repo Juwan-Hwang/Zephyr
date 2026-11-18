@@ -1,0 +1,5 @@
+.proto-tl-row { gap: 9px !important; }
+.proto-tl-min { background: #f5bf4f; }
+.proto-tl-max { background: #61c554; }
+.proto-tl-glyph { color: rgb(0 0 0 / .45); opacity: 0; }
+.proto-tl-row:hover .proto-tl-glyph { opacity: 1; }

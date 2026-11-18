@@ -1,0 +1,3 @@
+.proto-resize-corner { background: rgb(236 72 153 / .55); outline: 1px solid rgb(236 72 153 / .9); }
+.proto-corner-zoom { display: flex; align-items: center; gap: 6px; }
+.proto-corner-zoom span { font: 600 10px/1 var(--font-sans, system-ui); color: #fff; background: rgb(236 72 153 / .92); padding: 4px 7px; border-radius: 999px; box-shadow: 0 2px 8px rgb(236 72 153 / .35); white-space: nowrap; }
