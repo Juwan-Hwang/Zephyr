@@ -102,6 +102,12 @@ describe('initSidebar', () => {
         ta.dispatchEvent(inField);
         expect(inField.defaultPrevented).toBe(false);
         expect(root.classList.contains('sidebar-expanded')).toBe(true);
+        // A dialog panel left inside a hidden backdrop does not count.
+        document.body.insertAdjacentHTML('beforeend', '<div class="hidden"><div role="dialog" aria-modal="true"></div></div>');
+        document.dispatchEvent(key({ key: 'b', ctrlKey: true }));
+        expect(root.classList.contains('sidebar-expanded')).toBe(false);
+        document.dispatchEvent(key({ key: 'b', ctrlKey: true }));
+        expect(root.classList.contains('sidebar-expanded')).toBe(true);
         document.getElementById('dlg')?.classList.remove('hidden');
         document.dispatchEvent(key({ key: 'b', ctrlKey: true }));
         expect(root.classList.contains('sidebar-expanded')).toBe(true);
@@ -115,6 +121,19 @@ describe('initSidebar', () => {
         root.style.setProperty('--ui-scale', '1'); // 1200 CSS px: wide again
         await Promise.resolve();
         expect(root.classList.contains('sidebar-expanded')).toBe(true);
+    });
+
+    it('pins the width before overlaying a narrow-window drag', () => {
+        setWidth(NARROW_PX - 100);
+        cleanup = initSidebar();
+        const nav = /** @type {HTMLElement} */ (document.getElementById('sidebar-nav'));
+        const edge = /** @type {HTMLElement} */ (document.querySelector('.sidebar-edge'));
+        edge.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 80 }));
+        expect(root.classList.contains('sidebar-overlay')).toBe(true);
+        expect(nav.style.getPropertyValue('--sidebar-drag-w')).not.toBe('');
+        edge.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 80 }));
+        expect(root.classList.contains('sidebar-overlay')).toBe(false);
+        expect(nav.style.getPropertyValue('--sidebar-drag-w')).toBe('');
     });
 
     it('toggles on a double-click of the edge', () => {

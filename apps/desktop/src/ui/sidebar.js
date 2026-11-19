@@ -79,8 +79,10 @@ export function shortcutBelongsElsewhere(e) {
     if (e.defaultPrevented) return true;
     const t = e.target;
     if (t instanceof Element && t.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .cm-editor')) return true;
+    // A dialog counts as open only when neither it nor a wrapper is hidden:
+    // some panels keep aria-modal after their backdrop is hidden.
     return [...document.querySelectorAll('[aria-modal="true"]')].some(
-        (el) => el instanceof HTMLElement && !el.classList.contains('hidden') && !el.hidden,
+        (el) => !el.closest('.hidden, [hidden]'),
     );
 }
 
@@ -179,8 +181,12 @@ export function initSidebar() {
         edge.setPointerCapture?.(e.pointerId);
         root.classList.add('sidebar-dragging');
         // In a narrow window the sidebar overlays the content while dragged,
-        // so the page does not reflow under the pointer.
-        if (isNarrow()) root.classList.add('sidebar-overlay');
+        // so the page does not reflow under the pointer. Pin the current width
+        // first so the overlay's offset matches it from the first frame.
+        if (isNarrow()) {
+            nav.style.setProperty('--sidebar-drag-w', `${drag.startW}px`);
+            root.classList.add('sidebar-overlay');
+        }
     };
     /** @param {PointerEvent} e */
     const onMove = (e) => {
