@@ -643,7 +643,7 @@ impl ShortIdScanner {
             b':' if explicit_value == Some(pos) => {
                 return self.step_short_id_value(at, cursor, pos, 1);
             }
-            b'?' if is_blank_byte(byte_at(bytes, pos + 1))
+            b'?' if (in_flow || is_blank_byte(byte_at(bytes, pos + 1)))
                 && is_lone_short_id_key(bytes, pos + 1, at.text_end()) =>
             {
                 // `? short-id` ending its line, in a block or a flow
@@ -658,8 +658,11 @@ impl ShortIdScanner {
                 cursor.owner_col = pos;
                 cursor.owner_on_line = true;
             }
-            // An explicit key in a flow mapping (`{? short-id: 1e5}`).
-            b'?' if is_blank_byte(byte_at(bytes, pos + 1)) => {}
+            // An explicit key in a flow mapping (`{? short-id: 1e5}`). In
+            // flow context the parser takes `?` as the key indicator even
+            // with no blank after it (`{?short-id: 1e5}`). A `,` between
+            // flow entries is skipped the same way.
+            b'?' | b',' if in_flow => {}
             b'"' | b'\'' => {
                 // A quoted key (`"short-id":`) is a key like the plain one.
                 // YAML allows blanks before the colon (`"short-id" :`).
@@ -710,7 +713,6 @@ impl ShortIdScanner {
                 cursor.token_start = false;
                 cursor.json_like = true;
             }
-            b',' if in_flow => {}
             _ => {
                 // YAML allows blanks before the colon (`short-id :`).
                 let colon = skip_inline_blanks(bytes, pos + SHORT_ID.len(), at.text_end());
@@ -4327,6 +4329,11 @@ mod tests {
             "--- {\"proxies\":[{\"name\":\"n\",\"reality-opts\":{\"short-id\":\"34010e92\"}}]}\n",
             &["34010e92"],
         );
+        // A key on the marker's line, after `--- `.
+        assert_eq!(
+            quote_short_id_values("--- short-id: 34010e92\nproxies: []"),
+            "--- short-id: \"34010e92\"\nproxies: []"
+        );
         // Between two documents, which serde_yaml does not read as one.
         assert_eq!(
             quote_short_id_values("a: 1\n---\n  b: {short-id: 1e5}\n"),
@@ -5192,6 +5199,20 @@ mod tests {
     }
 
     #[test]
+    fn test_percent_decode_mixed_runs_and_bad_escapes() {
+        // A `%` without two hex digits after it stays literal, at the
+        // start, in the middle and at the end.
+        assert_eq!(percent_decode("a%20b%2Fc"), "a b/c");
+        assert_eq!(percent_decode("%41BC%"), "ABC%");
+        assert_eq!(percent_decode("100%zz%4"), "100%zz%4");
+        assert_eq!(percent_decode("%%41%"), "%A%");
+        assert_eq!(percent_decode("x%e4%b8%ADy"), "x\u{4e2d}y");
+        assert_eq!(percent_decode("%"), "%");
+        // Invalid UTF-8 after decoding is replaced, not dropped.
+        assert_eq!(percent_decode("a%FFb"), "a\u{fffd}b");
+    }
+
+    #[test]
     fn snapshot_percent_decode_no_encoding() {
         insta::assert_snapshot!(percent_decode("plain text"));
     }
@@ -5988,6 +6009,724 @@ mod tests {
         assert_eq!(
             rule_policy_name("DOMAIN-SUFFIX,example.com,NodeGroup"),
             Some("NodeGroup")
+        );
+    }
+
+    #[test]
+    fn test_quote_short_id_values_multiline_continuation() {
+        // A plain scalar on the next, more-indented line is still the value.
+        let yaml = "short-id:\n  34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id:\n  \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_comment_lines_skipped() {
+        // A comment between the key and its value is not the value: the
+        // comment stays untouched and the real value still gets quoted.
+        let yaml = "short-id:\n  # note\n  34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id:\n  # note\n  \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_inline_comment_not_quoted() {
+        // A comment after the key means the value is empty, not "#".
+        let yaml = "short-id: # note";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_scalar_not_quoted() {
+        // A block scalar is already a string: quoting its header would
+        // corrupt the document, so both forms stay untouched.
+        let yaml = "short-id:\n  |-\n    34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "short-id: |-\n  34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_cr_only_line_endings() {
+        // A carriage return alone is a YAML line break too.
+        let yaml = "a: 1\rshort-id: 34010e92\r";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "a: 1\rshort-id: \"34010e92\"\r");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_alias_not_quoted() {
+        // An alias is a reference, not text: quoting it would stop it
+        // from resolving to its anchor.
+        let yaml = "sid: &sid 34010e92\nshort-id: # note\n  *sid";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_tag_not_quoted() {
+        // A tag is node syntax, not the value itself: quoting it would
+        // split the tagged scalar into two tokens.
+        let yaml = "short-id: !!str 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "short-id:\n  !!str 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_anchor_and_flow_not_quoted() {
+        // An anchor keeps its name and the plain scalar after it gets
+        // quoted; a flow collection as the value is left alone.
+        let yaml = "short-id: &a 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id: &a \"34010e92\"");
+        let yaml = "short-id: {id: 34010e92}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_flow_context() {
+        // In flow context the scalar ends at the separator, so the
+        // separator stays outside the quotes, on one line or many.
+        let yaml = "{\n  short-id: 34010e92,\n  y: 1\n}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{\n  short-id: \"34010e92\",\n  y: 1\n}");
+        let yaml = "{\n  short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{\n  short-id: \"34010e92\"}");
+        let yaml = "reality-opts: {short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "reality-opts: {short-id: \"34010e92\"}");
+        // In block context a separator is part of the scalar, so the
+        // whole token is quoted, separator included.
+        let yaml = "short-id: abc,def";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            yaml.replace("abc,def", "\"abc,def\"")
+        );
+    }
+
+    #[test]
+    fn test_quote_short_id_values_nested_mapping_not_quoted() {
+        // A more-indented line holding a mapping entry is a nested
+        // mapping, not a scalar continuation.
+        let yaml = "short-id:\n  next: 1";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_interior_quotes_escaped() {
+        // A plain scalar may contain quotes and backslashes inside; they
+        // must be escaped when the token is wrapped in double quotes.
+        let yaml = "short-id: a\"b\\c";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id: \"a\\\"b\\\\c\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_inside_string_or_comment_not_quoted() {
+        // An occurrence inside a quoted scalar or a comment is not a key.
+        let yaml = "key: \"foo\n  short-id: 34010e92\"";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "# short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_interior_quote_not_a_scalar_start() {
+        // A quote inside a plain scalar does not open a quoted scalar,
+        // so a later short-id key is still found and quoted.
+        let yaml = "note: use \" anywhere\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "note: use \" anywhere\nshort-id: \"34010e92\"");
+        let yaml = "note: don't stop\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "note: don't stop\nshort-id: \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_scalar_content_untouched() {
+        // Brackets, braces, and apparent keys inside a block scalar are
+        // literal text: they must not affect flow tracking or quoting,
+        // neither inside the scalar nor for keys after it ends.
+        let yaml = "desc: |\n  text [ bracket\n  more\nshort-id: abc,def";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            yaml.replace("abc,def", "\"abc,def\"")
+        );
+        let yaml = "desc: |\n  something { here\n  x, short-id: 34010e92\nnext: 1";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_sequence_entry() {
+        // A mapping entry inside a sequence item is a real key, inline
+        // or with a continuation value indented past the key column.
+        // A value line at the key column itself is not a continuation.
+        let yaml = "- short-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "- short-id: \"34010e92\"");
+        let yaml = "- short-id:\n    34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "- short-id:\n    \"34010e92\"");
+        let yaml = "- short-id:\n  34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_compact_flow_quoted_value() {
+        // A quote directly after `:` in flow context opens a quoted
+        // scalar, so a `}` inside it does not close the flow early.
+        let yaml = "{x: \"a}b\", short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{x: \"a}b\", short-id: \"34010e92\"}");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_colon_without_separator() {
+        // A colon with no separating space is plain scalar text, not
+        // a key, in block and in flow alike: `[short-id:34010e92]`
+        // is one scalar item, and `{short-id:34010e92}` is a key
+        // with no value.
+        let yaml = "- short-id:34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "short-id:34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "{short-id:34010e92}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "[short-id:34010e92]";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        // With a space it does split a pair, even as a single-pair
+        // sequence entry.
+        let yaml = "{short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{short-id: \"34010e92\"}");
+        let yaml = "[short-id: 34010e92]";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "[short-id: \"34010e92\"]");
+        // A quote after a bare colon is scalar text, so it cannot
+        // hide a later pair behind an unbalanced string.
+        let yaml = "{a:\"b, short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{a:\"b, short-id: \"34010e92\"}");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_bare_tag_and_explicit_keys() {
+        // A bare `!` is the non-specific tag, so the node after it
+        // is still tracked, in flow and before a block scalar.
+        let yaml = "proxies: ! {short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "proxies: ! {short-id: \"34010e92\"}");
+        let yaml = "description: ! |-\n  short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        // A quoted key after an explicit-key `?` is one quoted
+        // scalar: the short-id text inside it is not a key.
+        let yaml = "{? \"foo, short-id: 34010e92\":bar}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "? \"foo, short-id: 34010e92\"\n: bar";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_flow_endings_continue() {
+        // In block context `}`, `]` and `,` end plain scalar text,
+        // so the next indented line still continues the scalar.
+        let yaml = "note: foo}\n  [continuation\nshort-id: abc,def";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            yaml.replace("abc,def", "\"abc,def\"")
+        );
+        let yaml = "note: foo]\n  [continuation\nshort-id: abc,def";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            yaml.replace("abc,def", "\"abc,def\"")
+        );
+        let yaml = "note: foo,\n  [continuation\nshort-id: abc,def";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            yaml.replace("abc,def", "\"abc,def\"")
+        );
+    }
+
+    #[test]
+    fn test_quote_short_id_values_quote_after_bare_colon_or_comma() {
+        // A quote after a bare colon or a comma in block context is
+        // plain scalar text, not a quoted scalar start, so a later
+        // short-id key is still found and quoted.
+        let yaml = "password: ab:\"cd\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "password: ab:\"cd\nshort-id: \"34010e92\"");
+        let yaml = "name: a,'b\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "name: a,'b\nshort-id: \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_sequence_block_scalar_sibling() {
+        // A block scalar on a sequence-item line ends at a sibling key
+        // at the key column, not at the `-` column.
+        let yaml = "- desc: |\n    text\n  short-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "- desc: |\n    text\n  short-id: \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_bracket_in_plain_scalar() {
+        // An unmatched bracket inside a block plain scalar does not
+        // open flow context for later keys.
+        let yaml = "name: HK [Premium\nshort-id: abc,def";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            yaml.replace("abc,def", "\"abc,def\"")
+        );
+        let yaml = "name: HK [Premium\nshort-id:\n  next: 1";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_dash_without_space_not_sequence() {
+        // A dash glued to what follows is plain scalar text, not a
+        // sequence entry, so it must not make a key or open a quote.
+        let yaml = "-short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "-'abc\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "-'abc\nshort-id: \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_bare_colon_not_block_header() {
+        // A `>` after a bare colon is plain scalar text, not a block
+        // scalar header, so a sibling key is still quoted.
+        let yaml = "- name: HK:>\n  short-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "- name: HK:>\n  short-id: \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_flow_continuation_same_indent() {
+        // In flow context a line break folds to a space, so a value on
+        // the next line counts even at the same indent as its key.
+        let yaml = "{\nshort-id:\n34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{\nshort-id:\n\"34010e92\"}");
+        // In block context the same shape is not a continuation.
+        let yaml = "short-id:\n34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_anchored_or_tagged_flow() {
+        // A flow collection after an anchor or tag is still a flow
+        // collection, so values next to its closing brace are quoted.
+        let yaml = "rules: &r {\n  short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "rules: &r {\n  short-id: \"34010e92\"}");
+        let yaml = "rules: !!map {\n  short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "rules: !!map {\n  short-id: \"34010e92\"}");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_multiline_scalar_not_quoted() {
+        // A plain scalar that continues on a more-indented following
+        // line (or any following line in flow context) is one
+        // multi-word value, so its first token is left alone.
+        let yaml = "short-id: 34010e92\n  extra";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "short-id: 34010e92\n\n  extra";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "{\nshort-id: 34010e92\n  extra}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        // A following line at the key column is a sibling, not a
+        // continuation, and a comma line ends a flow scalar.
+        let yaml = "- short-id: 34010e92\n  other: 1";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "- short-id: \"34010e92\"\n  other: 1");
+        let yaml = "{\nshort-id: 34010e92\n, other: 1}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{\nshort-id: \"34010e92\"\n, other: 1}");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_anchor_tag_chain_and_verbatim() {
+        // An anchor plus a tag still start a node, as does a verbatim
+        // tag, so a flow collection after them is tracked.
+        let yaml = "key: &a !t {\n  short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "key: &a !t {\n  short-id: \"34010e92\"}");
+        let yaml = "rules: !<tag:yaml.org,2002:map> {\n  short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(
+            result,
+            "rules: !<tag:yaml.org,2002:map> {\n  short-id: \"34010e92\"}"
+        );
+    }
+
+    #[test]
+    fn test_quote_short_id_values_continuation_line_quote_not_scalar() {
+        // A quote or bracket starting a continuation line of a plain
+        // scalar is literal text, not a new node, so a later short-id
+        // key is still found and quoted.
+        let yaml = "note: prefix\n  \"continuation\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(
+            result,
+            "note: prefix\n  \"continuation\nshort-id: \"34010e92\""
+        );
+        let yaml = "note: prefix\n  [cont\nshort-id: abc,def";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            yaml.replace("abc,def", "\"abc,def\"")
+        );
+        // A quoted scalar on its own line after a bare key is a real
+        // node start, not a continuation.
+        let yaml = "key:\n  \"quoted\"\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "key:\n  \"quoted\"\nshort-id: \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_scalar_after_anchor() {
+        // A block scalar header after an anchor is still a header, so
+        // key-like text inside its literal content is left alone.
+        let yaml = "key: &a |\n  short-id: 34010e92\nnext: 1";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_flow_explicit_key() {
+        // An explicit key in flow context, with or without a space
+        // after the `?`, is still a key.
+        let yaml = "{? short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{? short-id: \"34010e92\"}");
+        let yaml = "{?short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{?short-id: \"34010e92\"}");
+        // The same key ending its line, value after `: ` on the next.
+        let yaml = "{?short-id\n: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "{?short-id\n: \"34010e92\"}");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_flow_after_anchor_not_continuation() {
+        // An anchor awaiting its node is not plain-scalar text, so a
+        // flow collection on the next line is the anchored node and
+        // its short-id value is quoted.
+        let yaml = "opts: &x\n  {short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "opts: &x\n  {short-id: \"34010e92\"}");
+        // A `&` inside a word is not an anchor, so the next line
+        // really is a plain-scalar continuation and stays untouched.
+        let yaml = "note: foo&x\n  {short-id: 34010e92}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_long_gt_run_stays_linear() {
+        // A long unbroken run of `>` must not make the verbatim-tag
+        // backscan quadratic, and must not hide a later key.
+        let mut yaml = ">".repeat(100_000);
+        yaml.push_str("\nshort-id: 34010e92");
+        let result = quote_short_id_values(&yaml);
+        assert!(result.ends_with("short-id: \"34010e92\""));
+    }
+
+    #[test]
+    fn test_quote_short_id_values_anchor_only_lines_not_recursive() {
+        // Many consecutive anchor-only lines must not recurse once
+        // per line when the flow collection after them is evaluated.
+        let mut yaml = "  &a\n".repeat(50_000);
+        yaml.push_str("  {short-id: 34010e92}");
+        let result = quote_short_id_values(&yaml);
+        assert!(result.ends_with("{short-id: \"34010e92\"}"));
+    }
+
+    #[test]
+    fn test_quote_short_id_values_trailing_quote_continuation() {
+        // A quote at the end of plain-scalar text is literal, so the
+        // next indented line still continues the scalar and its `[`
+        // must not open a flow collection.
+        let yaml = "note:\n  prefix\"\n  [continuation\nshort-id: abc,def";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            yaml.replace("abc,def", "\"abc,def\"")
+        );
+        let yaml = "note: foo&\n  [continuation\nshort-id: abc,def";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            yaml.replace("abc,def", "\"abc,def\"")
+        );
+    }
+
+    #[test]
+    fn test_quote_short_id_values_long_verbatim_tag() {
+        // A verbatim tag longer than any backscan cap is still a tag,
+        // so the flow collection after it is tracked.
+        let mut yaml = String::from("rules: !<");
+        yaml.push_str(&"a".repeat(300));
+        yaml.push_str("> {\n  short-id: 34010e92}");
+        let result = quote_short_id_values(&yaml);
+        assert!(result.ends_with("short-id: \"34010e92\"}"));
+    }
+
+    #[test]
+    fn test_quote_short_id_values_tag_suffix_chars() {
+        // Tag suffixes may contain URI characters such as `/` and `:`.
+        let yaml = "x: !local/type {short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "x: !local/type {short-id: \"34010e92\"}");
+        let yaml = "x: !foo:bar {short-id: 34010e92}";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "x: !foo:bar {short-id: \"34010e92\"}");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_explicit_key_marker_lines() {
+        // A line holding only an explicit-key marker is not a plain
+        // scalar: the quoted key on the next line is a real node.
+        let yaml = "?\n  \"foo, short-id: 34010e92\"\n: bar";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "- ?\n    \"foo, short-id: 34010e92\"\n  : bar";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_percent_encoded_tag() {
+        // A percent-encoded tag suffix still counts as a tag, so a
+        // block scalar header after it is recognised and its literal
+        // content stays untouched.
+        let yaml = "desc: !foo%2Fbar |-\n  {short-id: 34010e92}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_long_quote_run_stays_linear() {
+        // Quotes inside one long plain scalar must not re-walk the
+        // whole run for every quote, and must not hide a later key.
+        let mut yaml = String::from("note: ");
+        yaml.push_str(&"a'".repeat(20_000));
+        yaml.push_str("\nshort-id: 34010e92");
+        let result = quote_short_id_values(&yaml);
+        assert!(result.ends_with("short-id: \"34010e92\""));
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_scalar_header_next_line() {
+        // A block scalar header alone on its line is still a header
+        // when the previous content line leaves a value pending.
+        let yaml = "short-id:\n  |\n    short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "key: &a\n  |\n    short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "key:\n  # note\n  |-\n    short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    /// Parse-equivalence oracle: quoting must not change the parsed
+    /// document, except that `short-id` scalars become strings. The
+    /// normalizer replaces every scalar `short-id` value with a
+    /// marker, since the parsed form of a value like `34010e92` (a
+    /// float) does not round-trip to its text.
+    fn normalize_short_ids(value: serde_yaml::Value) -> serde_yaml::Value {
+        use serde_yaml::Value;
+        match value {
+            Value::Mapping(mapping) => {
+                let mut out = serde_yaml::Mapping::new();
+                for (k, v) in &mapping {
+                    if k.as_str() == Some("short-id")
+                        && !matches!(v, Value::Mapping(_) | Value::Sequence(_))
+                    {
+                        out.insert(k.clone(), Value::String("short-id".to_owned()));
+                    } else {
+                        out.insert(
+                            normalize_short_ids(k.clone()),
+                            normalize_short_ids(v.clone()),
+                        );
+                    }
+                }
+                Value::Mapping(out)
+            }
+            Value::Sequence(seq) => {
+                Value::Sequence(seq.iter().map(|v| normalize_short_ids(v.clone())).collect())
+            }
+            Value::Tagged(tagged) => {
+                let mut tagged = tagged;
+                tagged.value = normalize_short_ids(tagged.value);
+                Value::Tagged(tagged)
+            }
+            other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)) => other,
+        }
+    }
+
+    fn assert_parse_equivalent(input: &str) {
+        let out = quote_short_id_values(input);
+        let Ok(before) = serde_yaml::from_str::<serde_yaml::Value>(input) else {
+            return; // Invalid input: only require no panic.
+        };
+        let after: serde_yaml::Value = serde_yaml::from_str(&out).unwrap_or_else(|e| {
+            panic!("quoting broke valid YAML: {e}\ninput: {input:?}\noutput: {out:?}")
+        });
+        assert_eq!(
+            normalize_short_ids(before),
+            normalize_short_ids(after),
+            "input: {input:?}\noutput: {out:?}"
+        );
+    }
+
+    #[test]
+    fn test_quote_short_id_values_parse_equivalent() {
+        for doc in [
+            "short-id: 34010e92",
+            "short-id: 34010e92\nother: 1",
+            "outer:\n  short-id: 34010e92\n  other: abc,def",
+            "{short-id: 34010e92, other: 1}",
+            "{\"note\":\"x, short-id: 34010e92\"}",
+            "{[a]:\"b, short-id: 34010e92\"}",
+            "{\"note\" :\"x, short-id: 34010e92\"}",
+            "--- short-id: 34010e92\nproxies: []",
+            "{\"k\":'a, short-id: 1', short-id: 34010e92}",
+            "{a':\"b, short-id: 34010e92}",
+            "{short-id:&a x}",
+            "{\n  short-id: 34010e92,\n  other: 1\n}",
+            "[short-id: 34010e92]",
+            "[short-id: 34010e92, other]",
+            "short-id:\n  34010e92",
+            "short-id: # note\n  34010e92",
+            "short-id: |\n  34010e92",
+            "short-id:\n  |\n    short-id: 34010e92",
+            "key:\n  \"quoted\"\nshort-id: 34010e92",
+            "desc: !foo%2Fbar |-\n  {short-id: 34010e92}",
+            "proxies: ! {short-id: 34010e92}",
+            "key: &a |\n  short-id: 34010e92",
+            "rules: &r {\n  short-id: 34010e92}",
+            "rules: !<tag:yaml.org,2002:map> {\n  short-id: 34010e92}",
+            "x: !local/type {short-id: 34010e92}",
+            "{? short-id: 34010e92}",
+            "{? \"foo, short-id: 34010e92\": bar}",
+            "note: prefix\n  \"continuation\"\nshort-id: 34010e92",
+            "note: foo}\n  [continuation\nshort-id: abc,def",
+            "- short-id: 34010e92",
+            "- short-id: 34010e92\n  other: 1",
+            "short-id: 34010e92 # note\nother: 1",
+            "short-id: 34010e92\nnext: 1",
+            "a: 1\rshort-id: 34010e92\r",
+            "a: 1\r\nshort-id: 34010e92\r\n",
+            "short-id: 34010e92\n  extra",
+            "sid: &sid 34010e92\nshort-id: # note\n  *sid",
+            "short-id:\n34010e92",
+        ] {
+            assert_parse_equivalent(doc);
+        }
+    }
+
+    #[test]
+    fn test_quote_short_id_values_block_scalar_content_parent_indent() {
+        // Block content need only exceed the pending parent's indent,
+        // not the header line's: a column-1 line under `key:\n  |` is
+        // still block content, and a column-3 line under `- key:\n  |`
+        // (key column 2) is too.
+        let yaml = "key:\n  |\n short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "- key:\n  |\n   short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+        let yaml = "-\n  |\n short-id: 34010e92";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_long_anchor_block_header() {
+        // Block scalar headers after an anchor of any length are
+        // recognised: the bounded walk is only for general node
+        // tracking, and missing the header would rewrite the
+        // literal content. The 256-character name is the control
+        // that already worked under the bound.
+        let name = "a".repeat(257);
+        let yaml = format!("desc:\n&{name} |\n  short-id: 34010e92");
+        assert_eq!(quote_short_id_values(&yaml), yaml);
+        let yaml = format!("desc: &{name}\n |\n  short-id: 34010e92");
+        assert_eq!(quote_short_id_values(&yaml), yaml);
+        let name = "a".repeat(256);
+        let yaml = format!("desc:\n&{name} |\n  short-id: 34010e92");
+        assert_eq!(quote_short_id_values(&yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_json_like_key_value_not_quoted() {
+        // A quote directly after the colon of a quoted key starts
+        // the value (`{"note":"x"}`), so `short-id` text inside it
+        // is string content, not a key.
+        let yaml = "{\"note\":\"x, short-id: 34010e92\"}";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_mid_scalar_quote_not_a_close() {
+        // A quote inside a plain scalar (`a'`) is not the closing
+        // quote of a key, so the quote after the colon does not
+        // start a value: the `short-id` after the comma is a real
+        // key and its value is quoted. The closed variant behaves
+        // the same, since the quoted value ends before the comma.
+        let yaml = "{a':\"b, short-id: 34010e92}";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            "{a':\"b, short-id: \"34010e92\"}"
+        );
+        let yaml = "{a':\"b\", short-id: 34010e92}";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            "{a':\"b\", short-id: \"34010e92\"}"
+        );
+    }
+
+    #[test]
+    fn test_quote_short_id_values_continuation_anchor() {
+        // A continuation value may start with an anchor, on the
+        // same line or alone on its line with the value following;
+        // an anchor before an alias is left alone, as inline.
+        let yaml = "short-id:\n &a 34010e92";
+        assert_eq!(quote_short_id_values(yaml), "short-id:\n &a \"34010e92\"");
+        let yaml = "short-id:\n &a\n 34010e92";
+        assert_eq!(quote_short_id_values(yaml), "short-id:\n &a\n \"34010e92\"");
+        let yaml = "{\nshort-id:\n &a 34010e92}";
+        assert_eq!(
+            quote_short_id_values(yaml),
+            "{\nshort-id:\n &a \"34010e92\"}"
+        );
+        let yaml = "short-id:\n &a *b";
+        assert_eq!(quote_short_id_values(yaml), yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_value_after_inline_comment() {
+        // A comment ends the key line, but the value may still follow on
+        // a more-indented line, and it still needs quoting.
+        let yaml = "short-id: # note\n  34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, "short-id: # note\n  \"34010e92\"");
+    }
+
+    #[test]
+    fn test_quote_short_id_values_sibling_key_not_quoted() {
+        // A key at the same indent on the next line is a sibling, not the
+        // value: quoting it would corrupt the mapping.
+        let yaml = "outer:\n  short-id:\n  next: 1";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(result, yaml);
+    }
+
+    #[test]
+    fn test_quote_short_id_values_repeated_occurrences_on_one_line() {
+        // Occurrences that are not keys (e.g. inside a long comment) must
+        // not be quoted, no matter how many share the line.
+        let yaml = "# short-id: a short-id: b short-id: c\nshort-id: 34010e92";
+        let result = quote_short_id_values(yaml);
+        assert_eq!(
+            result,
+            "# short-id: a short-id: b short-id: c\nshort-id: \"34010e92\""
         );
     }
 }
