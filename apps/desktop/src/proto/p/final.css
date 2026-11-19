@@ -122,3 +122,30 @@ html.dark .btn-primary:hover { background-color: #0a6ee8; }
 html.dark .btn-accent span, html.dark .sub-in-use, html.dark .proto-cr-type, html.dark .row-action, html.dark .row-action span,
 html.dark .choice-card[aria-checked=true] .choice-card-title, html.dark .text-download { color: #4da3ff; }
 html.dark .btn-danger span, html.dark .text-\[var\(--zephyr-color-danger\)\] { color: #f87171; }
+
+/* ===== 看图后修改（用浏览器真正看了截图之后） ===== */
+/* 1. 流量图的线从大数字后面穿过：上半部分淡出，线只在数字下方出现；左端没有历史数据时也淡入，不再从半空中突然开始 */
+.fh-hero .home-hero-chart {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent 42%, #000 72%), linear-gradient(to right, transparent 0, #000 12%);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(to bottom, transparent 0, transparent 42%, #000 72%), linear-gradient(to right, transparent 0, #000 12%);
+  mask-composite: intersect;
+}
+/* 2. 宽窗口下「延迟较低」右边空一大块：节点胶囊撑满整行，延迟数字靠右对齐 */
+.fh-alt { flex: 1 0 auto; max-width: none; }
+.fh-alt-ms { margin-inline-start: auto; padding-inline-start: 8px; }
+/* 3. 节点卡副标题被截断：隐藏时的单节点按钮不再占位置（悬停或键盘聚焦时才出现） */
+.proxy-card .mt-auto > .min-w-0 { gap: 6px; }
+.proto-force-hover .node-retest-btn { position: static !important; pointer-events: auto !important; }
+.proxy-card:not(:hover):not(:focus-within):not(.proto-force-hover) .node-retest-btn:not(.is-spinning):not(:focus-visible) { position: absolute; pointer-events: none; }
+/* 4. 侧栏选中项：去掉浮起的重阴影，改成系统侧栏那样的平铺底色 */
+.nav-indicator { box-shadow: 0 0 0 1px var(--zephyr-border-subtle); }
+html:not(.dark) .nav-indicator { background: rgba(0, 0, 0, 0.06); }
+html.dark .nav-indicator { background: rgba(255, 255, 255, 0.1); }
+/* 5. 深色侧栏未选中项偏暗：文字和图标提亮 */
+html.dark #sidebar-nav .nav-btn:not(.active):not(.is-active) { color: rgba(255, 255, 255, 0.74); }
+html.dark #sidebar-nav .nav-btn:not(.active):not(.is-active) .proto-nav-label { color: rgba(255, 255, 255, 0.74) !important; }
+/* 6. 右上角孤零零的红点像一个报错提示：平时是中性灰，悬停时才变红 */
+#close-btn { background-color: var(--zephyr-border-strong, rgba(0,0,0,.18)); box-shadow: none; }
+#close-btn:hover, #close-btn:focus-visible { background-color: #ff5f57; }
+#close-btn svg { opacity: .85; }
