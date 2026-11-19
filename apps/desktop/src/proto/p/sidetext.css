@@ -1,0 +1,48 @@
+/* 定稿侧栏（第二版）：纯文字导航。
+   - 没有图标：靠字重、颜色和一块平铺的浅底色区分选中项，不加描边、不加投影。
+   - 没有收起按钮：两个字的名字让侧栏和原来的图标栏一样窄，所有窗口尺寸都是同一种侧栏。
+   - 分两组：常用的 首页 / 节点 / 订阅 / 连接，和 规则 / 日志 之间空出 12 px；设置照旧沉到底部。 */
+html.proto-side-text #sidebar-nav {
+  width: auto !important;
+  min-width: clamp(80px, 9vw, 128px);
+  align-items: stretch !important;
+  gap: 2px !important;
+  padding: 56px 10px 16px !important;
+}
+html.proto-side-text #sidebar-nav .nav-btn {
+  width: auto !important;
+  height: 34px !important;
+  justify-content: flex-start !important;
+  padding: 0 14px !important;
+  border-radius: 8px !important;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--text-secondary) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+}
+html.proto-side-text #sidebar-nav .nav-btn > svg,
+html.proto-side-text #sidebar-nav .nav-btn .icon { display: none !important; }
+html.proto-side-text #sidebar-nav .nav-btn.is-active { color: var(--text-primary) !important; font-weight: 600; }
+html.proto-side-text #sidebar-nav .nav-btn:not(.is-active):hover { color: var(--text-primary) !important; background: rgba(15, 30, 60, 0.045) !important; }
+html.dark.proto-side-text #sidebar-nav .nav-btn:not(.is-active) { color: rgba(255, 255, 255, 0.66) !important; }
+html.dark.proto-side-text #sidebar-nav .nav-btn:not(.is-active):hover { color: rgba(255, 255, 255, 0.92) !important; background: rgba(255, 255, 255, 0.06) !important; }
+html.proto-side-text #sidebar-nav .nav-btn:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: -2px; }
+html.proto-side-text #sidebar-nav [data-nav="rule-library"] { margin-top: 12px; }
+html.proto-side-text .nav-indicator {
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  background: rgba(15, 30, 60, 0.075) !important;
+}
+html.dark.proto-side-text .nav-indicator { background: rgba(255, 255, 255, 0.1) !important; }
+/* 页面背景的光晕只跟着选中页走，不再需要图标的呼吸动画 */
+html.proto-side-text #sidebar-nav .nav-btn.is-leaving { animation: none; }
+/* 最小窗口：侧栏回到原来图标栏的 80 px，不挤占内容区 */
+@media (max-width: 860px) {
+  html.proto-side-text #sidebar-nav { padding-inline: 6px !important; }
+  html.proto-side-text #sidebar-nav .nav-btn { padding: 0 12px !important; }
+}

@@ -1,0 +1,109 @@
+/* 定稿：简洁首页随窗口缩放的规则。
+   默认的 930×680 和最小的 720×540 不变（内容刚好填满）；窗口更大时：
+   1. 内容列有最大宽度 --fh-col = min(可用宽度, max(1040px, 70vw), 175vh)，水平居中。
+      宽屏下不超过窗口高度的 1.75 倍，内容不会被拉成一条。
+   2. 流量卡有最大高度：跟着窗口高度慢慢长（每多 100 px 窗口长 35 px），不低于内容列宽度的 0.44，
+      不高于 0.8。它不再把多出来的高度全吃掉。
+   3. 多出来的高度分到内容列上下，上 2 下 3：视觉中心略高于几何中心。
+   4. 内容列超过 1040 px 以后，大数字、小字、开关条和节点条按列宽同比例放大，
+      最多约 1.25 倍；常见尺寸（≤ 1440）保持系统字号。 */
+.fh-page {
+  container-type: inline-size;
+}
+.fh-page > * {
+  --fh-col: min(100cqw, max(1040px, 70vw), 175vh);
+  --fh-k: max(0px, var(--fh-col) - 1040px);
+}
+.fh-page > .fh-strip,
+.fh-page > .fh-hero,
+.fh-page > .fh-node,
+.fh-page > .fh-banner,
+.fh-page > .proto-coredown {
+  width: 100%;
+  max-width: var(--fh-col);
+  margin-inline: auto;
+}
+.fh-page::before,
+.fh-page::after {
+  content: '';
+  display: block;
+  min-height: 0;
+}
+.fh-page::before { order: -100; flex: 2 1 0; margin-block-end: calc(-1 * var(--fh-gap, 16px)); }
+.fh-page::after { order: 100; flex: 3 1 0; margin-block-start: calc(-1 * var(--fh-gap, 16px)); }
+.fh-page { --fh-gap: clamp(16px, 16px + (min(100cqw, max(1040px, 70vw), 175vh) - 1040px) * 0.03, 28px); gap: var(--fh-gap) !important; }
+.fh-page > .fh-hero {
+  flex: 1000 1 0 !important;
+  max-height: min(
+    max(440px + (100vh - 680px) * 0.35, var(--fh-col) * 0.44),
+    var(--fh-col) * 0.8
+  );
+}
+/* 大数字：默认尺寸仍按窗口高度（和 main 一样），大窗口下按内容列宽度继续长，最大 100 px */
+.fh-hero .home-speed-value { font-size: clamp(40px, min(7.7vh, max(66px, var(--fh-col) * 0.062)), 100px); }
+.fh-hero .home-speed-label,
+.fh-hero .fh-total { font-size: calc(12px + var(--fh-k) * 0.006); }
+.fh-hero .fh-total { margin-top: calc(10px + var(--fh-k) * 0.008); }
+.fh-hero .home-hero-speeds { column-gap: calc(clamp(32px, 9vw, 112px) + var(--fh-k) * 0.04); }
+.fh-hero-head { top: calc(16px + var(--fh-k) * 0.01); inset-inline: calc(16px + var(--fh-k) * 0.01); }
+.fh-hero .home-hero-body { padding-top: calc(64px + var(--fh-k) * 0.03); }
+/* 开关条和节点条：高度、字号、国旗跟着列宽一起小幅放大 */
+.fh-strip { min-height: calc(72px + var(--fh-k) * 0.03); }
+.fh-strip .proto-strip-title { font-size: calc(12px + var(--fh-k) * 0.004); }
+.fh-strip .proto-strip-sub { font-size: calc(11px + var(--fh-k) * 0.004); }
+.fh-node { min-height: calc(72px + var(--fh-k) * 0.035); padding: calc(12px + var(--fh-k) * 0.008); }
+.fh-node .fh-name { font-size: calc(14px + var(--fh-k) * 0.005); line-height: 1.4; }
+.fh-node .fh-sub, .fh-node .fh-alt-name, .fh-node .fh-alt-ms { font-size: calc(12px + var(--fh-k) * 0.004); }
+.fh-node .fh-flag { width: calc(40px + var(--fh-k) * 0.02); height: calc(40px + var(--fh-k) * 0.02); flex-basis: calc(40px + var(--fh-k) * 0.02); font-size: calc(20px + var(--fh-k) * 0.01); }
+.fh-node .fh-current { max-width: calc(296px + var(--fh-k) * 0.4); }
+.fh-node .fh-alts-list, .fh-node .fh-alt { height: calc(32px + var(--fh-k) * 0.012); }
+@media (max-height: 600px) {
+  .fh-node { min-height: 64px; padding: 10px; }
+  .fh-node .fh-flag { width: 36px; height: 36px; flex-basis: 36px; }
+}
+
+/* ===== 控制台首页（详细首页）随窗口缩放的规则 =====
+   1. 宽窗口（≥ 1081 px）按 4 列网格排：指标卡 4 张各占 1 列；「实时流量」占 3 列、「当前节点」占 1 列；
+      底行「活动连接」占 2 列，「最近事件」「订阅用量」各占 1 列。三行的竖向边线完全对齐。
+      1081–1279 px 宽时 4 列太挤，改用 3 列：流量 2 列 + 节点 1 列，底行三张各 1 列。
+   2. 一屏放得下时，两行卡片分掉剩下的高度（上 1.15 : 下 1），都有最小和最大高度：
+      流量行 280–560 px，底行 288–440 px。再多出来的高度分到内容上下（上 2 下 3）。
+      放不下时（比如 1280×800）整页照旧滚动，每张卡保持完整高度，不在卡片里面截断。
+   3. 内容最大宽度 --dz-col = min(可用宽度, max(1240px, 70vw), 190vh)，水平居中；
+      超过 1240 px 后，指标数字和卡片内边距随宽度小幅变大。 */
+@media (min-width: 1081px) {
+  .fc-wide .dz-content { container-type: inline-size; padding-bottom: 20px !important; }
+  .fc-wide .dz-content > * { --dz-col: min(100cqw, max(1240px, 70vw), 190vh); --dz-k: max(0px, var(--dz-col) - 1240px); }
+  .fc-wide .dz-content > :not(.dz-header) { width: 100%; max-width: var(--dz-col); margin-inline: auto; }
+  .fc-wide .dz-content::before, .fc-wide .dz-content::after { content: ''; display: block; min-height: 0; flex: 0.0002 1 0; margin-block-end: -16px; }
+  .fc-wide .dz-content::before { order: -100; }
+  .fc-wide .dz-content::after { order: 100; flex-grow: 0.0003; margin-block: -16px 0; }
+  .fc-wide .dz-content > .dz-grid-main {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    flex: 1.15 1 0; min-height: 280px; max-height: 560px;
+  }
+  .fc-wide .dz-grid-main > #dz-traffic-card { grid-column: span 3; display: flex; flex-direction: column; }
+  .fc-wide .dz-grid-main > .dz-side { grid-column: span 1; min-height: 0; }
+  .fc-wide .dz-side > .dz-node-wrap { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+  .fc-wide .dz-node-wrap > .glass-card { flex: 1 1 0; min-height: 0; overflow: hidden; }
+  .fc-wide .dz-content > .dz-grid-bottom.proto-bottom-two {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    flex: 1 1 0; min-height: 288px; max-height: 440px;
+  }
+  .fc-wide .dz-grid-bottom > :first-child { grid-column: span 2; }
+  .fc-wide .dz-grid-bottom > .glass-card { display: flex; flex-direction: column; min-height: 0; }
+  .fc-wide .dz-chart-wrap { min-height: 120px; }
+  .fc-wide .dz-kpi { padding: calc(16px + var(--dz-k) * 0.006); }
+  .fc-wide .dz-kpi-value b { font-size: calc(24px + var(--dz-k) * 0.008); }
+  .fc-wide .dz-card-pad { padding: calc(20px + var(--dz-k) * 0.006); }
+}
+@media (min-width: 1081px) and (max-width: 1279px) {
+  .fc-wide .dz-content > .dz-grid-main { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .fc-wide .dz-grid-main > #dz-traffic-card { grid-column: span 2; }
+  .fc-wide .dz-content > .dz-grid-bottom.proto-bottom-two { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .fc-wide .dz-grid-bottom > :first-child { grid-column: span 1; }
+}
+
+/* 大数字固定在卡片上部（标题下面），图表从数字下方 16 px 开始铺到底：卡片变高时只有图表变高，数字和曲线永远不重叠 */
+.fh-hero .home-hero-body { justify-content: flex-start !important; }
+.fh-hero .home-hero-chart { inset: var(--fh-chart-top, 44%) 0 0 0 !important; }

@@ -35,12 +35,42 @@ function setSpeed(card, inner) {
 export function headerButton(state = 'idle', done = 0, total = cards().length) {
   const test = $('#test-all-btn');
   const b = html(state === 'run'
-    ? `<button type="button" id="fs-all-btn" class="btn-ghost fs-btn is-running" aria-keyshortcuts="Escape">${icon(STOP, 'w-3.5 h-3.5')}停止测试<span class="fs-count">${done}/${total}</span></button>`
-    : `<button type="button" id="fs-all-btn" class="btn-ghost fs-btn">${icon(DL, 'w-3.5 h-3.5')}测试下载速度</button>`);
+    ? `<button type="button" id="fs-all-btn" class="btn-ghost fs-btn is-running" aria-keyshortcuts="Escape">${icon(STOP, 'w-3.5 h-3.5')}<span class="fs-label">停止测试</span><span class="fs-count">${done}/${total}</span></button>`
+    : `<button type="button" id="fs-all-btn" class="btn-ghost fs-btn">${icon(DL, 'w-3.5 h-3.5')}<span class="fs-label">测试下载速度</span></button>`);
   b.className += ' ' + [...test.classList].filter((c) => !/btn-accent|btn-primary/.test(c)).join(' ');
-  test.before(b);
+  // 用户决定：「测试延迟」在前，「测试下载速度」在后（两个按钮交换了位置）
+  test.after(b);
+  b.setAttribute('aria-label', state === 'run' ? `停止测试，已完成 ${done}/${total}` : '测试下载速度');
   if (state === 'run') test.setAttribute('disabled', '');
+  fitHeader(b.closest('header'));
   return b;
+}
+
+// 用户决定：空间不够时先收起「测试下载速度」，「测试延迟」尽量一直带文字露在外面。
+// 顺序：① 下载测速只留图标 → ② 排序等其他按钮只留图标（main 的 is-compact，测试延迟仍带文字）
+//      → ③ 搜索框收窄到 96 px → ④ 最后才让测试延迟只留图标。
+const FIT = ['fs-dl-icon', 'is-compact', 'fs-narrow', 'fs-lat-icon'];
+function fitHeader(header) {
+  if (!header) return;
+  const run = () => {
+    if (!header.clientWidth) return;
+    header.classList.remove(...FIT);
+    for (const step of FIT) {
+      if (header.scrollWidth <= header.clientWidth + 1) break;
+      header.classList.add(step);
+    }
+    const dl = header.querySelector('#fs-all-btn');
+    if (dl) {
+      if (header.classList.contains('fs-dl-icon')) dl.setAttribute('title', dl.textContent.replace(/\s+/g, ' ').trim().replace(/(\d+\/\d+)$/, ' $1'));
+      else dl.removeAttribute('title');
+    }
+  };
+  run();
+  if (!header.dataset.fsFit) {
+    header.dataset.fsFit = '1';
+    // main 的 header-fit 也在 resize 时重排，等它跑完再按上面的顺序重来一遍
+    new ResizeObserver(() => requestAnimationFrame(() => requestAnimationFrame(run))).observe(header);
+  }
 }
 
 async function menu() {
@@ -48,7 +78,7 @@ async function menu() {
   const card = cards().find((c) => c.dataset.name.includes('香港 03'));
   const retest = card.querySelector('.node-retest-btn');
   const btn = html(`<button type="button" class="node-retest-btn proto-speed-btn" aria-label="测试下载速度">${icon(DL, 'w-3 h-3')}</button>`);
-  retest.before(btn);
+  retest.after(btn);
   card.classList.add('proto-force-hover');
   const r = btn.getBoundingClientRect();
   // 提示放在按钮正下方（系统提示的默认位置）：落在两行卡片之间的空隙里，不盖住本卡的协议名，也够不到下一张卡的节点名

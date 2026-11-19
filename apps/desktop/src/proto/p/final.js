@@ -2,8 +2,7 @@
 //   __F__.feat  — home（默认，按 ?home= 走简洁或控制台）、coredown、speed-*、
 //                或者一个已有原型名（bypass-dialog、cards-200、privnet-after …）
 //   __F__.ip    — 「显示 IP 地址」打开
-//   __F__.side  — 'collapsed' | 'expanded'（默认按记住的状态，展开）
-// 所有屏都套定稿外壳：可收起的展开侧栏 + 辅助文字对比度修正（final.css）。
+// 所有屏都套定稿外壳：纯文字侧栏（sidetext）+ 辅助文字对比度修正（final.css）+ 简洁首页随窗口缩放的规则（fsize.css）。
 import { $, $$, html, icon, ICONS, until, wait } from './_kit.js';
 
 const F = (window.__F__ = window.__F__ || {});
@@ -28,8 +27,7 @@ const SPEED = feat.startsWith('speed-');
 const OWN = ['home', 'coredown', 'exitip-setting'];
 
 export async function pre() {
-  if (F.side) window.__PROTO_SIDE__ = F.side;
-  await css('sidelabel');
+  await css('sidetext');
   await css('homeb');
   await css('choice');
   await css('speedtest');
@@ -54,6 +52,10 @@ export async function pre() {
   again.rel = 'stylesheet';
   again.href = 'proto/p/final.css?late';
   document.head.appendChild(again);
+  const size = document.createElement('link');
+  size.rel = 'stylesheet';
+  size.href = 'proto/p/fsize.css';
+  document.head.appendChild(size);
 }
 
 // 文案：「测速地址」和新的「下载测速」放在一起会分不清，改叫「延迟测试地址」
@@ -65,7 +67,8 @@ function renameTestUrl() {
 
 async function consoleHome() {
   const { applyConsoleB, consoleParts } = await import('./_con.js');
-  const { nodeCard, kpis } = await consoleParts();
+  const parts = await consoleParts();
+  const { nodeCard, kpis } = parts;
   await applyConsoleB();
   const { nodeSub, ALTS, stateSub } = await import('./fhome.js');
   // 开关条副标题：端口号是实现细节，换成状态
@@ -90,7 +93,31 @@ async function consoleHome() {
     const lab = conn.querySelector('.dz-kpi-label');
     lab?.append(html(`<span class="fc-kpi-arrow">${icon('<path d="m9 18 6-6-6-6"/>', 'w-3.5 h-3.5')}</span>`));
   }
+  consoleFit(parts);
   window.dispatchEvent(new Event('resize'));
+}
+
+// 控制台首页随窗口缩放（规则见 fsize.css）：
+// 宽窗口（≥ 1081 px）下订阅卡回到底行，和「活动连接」「最近事件」并排，右栏只留「当前节点」，
+// 「实时流量」不再被右栏两张卡撑高；窄窗口照旧放在「当前节点」下面。
+// 「延迟较低」能放几个放几个（1–3 个），放不下的那一行整行藏起来，不露半行。
+function consoleFit({ side, subCard, bottom, nodeCard }) {
+  const mq = matchMedia('(min-width: 1081px)');
+  const place = () => {
+    if (mq.matches) { bottom.append(subCard); subCard.style.flex = ''; }
+    else { side.append(subCard); subCard.style.flex = '1'; }
+    document.documentElement.classList.toggle('fc-wide', mq.matches);
+  };
+  place();
+  mq.addEventListener('change', place);
+  const fitAlts = () => {
+    const alts = [...nodeCard.querySelectorAll('.fc-alt')];
+    alts.forEach((a) => { a.hidden = false; });
+    if (!document.documentElement.classList.contains('fc-wide')) return;
+    for (let i = alts.length - 1; i > 0 && nodeCard.scrollHeight > nodeCard.clientHeight + 1; i--) alts[i].hidden = true;
+  };
+  new ResizeObserver(() => requestAnimationFrame(fitAlts)).observe(nodeCard);
+  fitAlts();
 }
 
 async function home() {
@@ -125,7 +152,7 @@ async function coredown() {
 }
 
 export async function post() {
-  const side = await import('./sidelabel-fold.js');
+  const side = await import('./sidetext.js');
   await side.post();
   await wait(50);
   if (feat === 'home') await home();

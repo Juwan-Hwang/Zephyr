@@ -88,6 +88,28 @@ export async function post(F = window.__F__ || {}) {
     </div>
   </div>`);
   page.append(bar);
+  if (!window.__PROTO_TRAFFIC_ZERO__) await prefillTraffic();
+  // 图表的上边 = 大数字下方 16 px（见 fsize.css）
+  const speeds = hero.querySelector('.home-hero-speeds');
+  const placeChart = () => {
+    if (!speeds || !hero.clientHeight) return;
+    const top = speeds.getBoundingClientRect().bottom - hero.getBoundingClientRect().top + 16;
+    hero.style.setProperty('--fh-chart-top', `${Math.round(top)}px`);
+  };
+  new ResizeObserver(placeChart).observe(hero);
+  placeChart();
   window.dispatchEvent(new Event('resize'));
   return { strip, hero, bar };
+}
+
+// 原型截图时窗口刚打开几秒，流量图只有最右端几个点，看起来像一条平线突然竖起。
+// 这里先填上 60 秒模拟的浏览流量（真实应用里图表本来就会攒满 60 秒的历史）。
+async function prefillTraffic() {
+  const { updateTrafficData } = await import('../../modules/traffic-chart.js');
+  const { generateTrafficTick } = await import('../demo/mock-data.js');
+  const fmt = (b) => `${(b / 1048576).toFixed(2)} MB/s`;
+  for (let i = 0; i < 60; i++) {
+    const t = generateTrafficTick();
+    updateTrafficData({ raw: { down: t.down, up: t.up }, down: fmt(t.down), up: fmt(t.up) });
+  }
 }

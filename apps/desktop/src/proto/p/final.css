@@ -126,9 +126,13 @@ html.dark .btn-danger span, html.dark .text-\[var\(--zephyr-color-danger\)\] { c
 /* ===== 看图后修改（用浏览器真正看了截图之后） ===== */
 /* 1. 流量图的线从大数字后面穿过：上半部分淡出，线只在数字下方出现；左端没有历史数据时也淡入，不再从半空中突然开始 */
 .fh-hero .home-hero-chart {
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent 42%, #000 72%), linear-gradient(to right, transparent 0, #000 12%);
+  /* 图表只占卡片下半部分（从 44% 往下），自己的纵轴在这块区域里铺开：曲线起伏看得见，又不从数字后面穿过 */
+  inset: 44% 0 0 0;
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22%), linear-gradient(to right, transparent 0, #000 12%);
   -webkit-mask-composite: source-in;
-  mask-image: linear-gradient(to bottom, transparent 0, transparent 42%, #000 72%), linear-gradient(to right, transparent 0, #000 12%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 22%), linear-gradient(to right, transparent 0, #000 12%);
   mask-composite: intersect;
 }
 /* 2. 宽窗口下「延迟较低」右边空一大块：节点胶囊撑满整行，延迟数字靠右对齐 */
@@ -145,7 +149,10 @@ html.dark .nav-indicator { background: rgba(255, 255, 255, 0.1); }
 /* 5. 深色侧栏未选中项偏暗：文字和图标提亮 */
 html.dark #sidebar-nav .nav-btn:not(.active):not(.is-active) { color: rgba(255, 255, 255, 0.74); }
 html.dark #sidebar-nav .nav-btn:not(.active):not(.is-active) .proto-nav-label { color: rgba(255, 255, 255, 0.74) !important; }
-/* 6. 右上角孤零零的红点像一个报错提示：平时是中性灰，悬停时才变红 */
-#close-btn { background-color: var(--zephyr-border-strong, rgba(0,0,0,.18)); box-shadow: none; }
-#close-btn:hover, #close-btn:focus-visible { background-color: #ff5f57; }
-#close-btn svg { opacity: .85; }
+/* ===== 用户决定：测试下载速度和测试延迟交换位置；空间不够时先收起测试下载速度 ===== */
+header.fs-dl-icon #fs-all-btn > :is(.fs-label, .fs-count) { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+header.fs-dl-icon #fs-all-btn { padding-inline: 8px; min-width: 2rem; }
+/* main 的 is-compact 会把所有按钮的文字一起收起；测试延迟要到最后一步（fs-lat-icon）才收 */
+header.is-compact:not(.fs-lat-icon) #test-all-btn > span { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip-path: none; }
+header.is-compact:not(.fs-lat-icon) #test-all-btn { padding-inline: var(--zephyr-button-padding-x); min-width: 0; }
+header.fs-narrow .proxy-search { width: 96px !important; min-width: 0 !important; }
