@@ -66,6 +66,7 @@ import { initSettings, initUwpExemption } from './ui/settings.js';
 import { autoApplyIfNeeded } from './ui/network-optim.js';
 import { initNavigation, switchPage, navigateTo } from './ui/navigation.js';
 import { initNavTooltips } from './ui/nav-tooltip.js';
+import { initSidebar } from './ui/sidebar.js';
 import { initProxyControls, syncCoreConfig, refreshProxies } from './ui/proxies.js';
 import { initPlugins } from './ui/plugins.js';
 import { initModeSelector } from './ui/modes.js';
@@ -549,6 +550,7 @@ async function initApp() {
     },
   });
   registerCleanup(initNavTooltips());
+  registerCleanup(initSidebar());
   initNoSubscriptionState();
   initChart();
   initTrayEventListeners().catch((err) => apiLogger.warn('[Zephyr] tray listener init failed', err));

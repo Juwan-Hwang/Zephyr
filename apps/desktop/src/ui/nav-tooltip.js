@@ -99,6 +99,12 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
         clearShowTimer();
         const label = getNavLabel(btn);
         if (!label) return;
+        // An expanded sidebar already shows each label beside its icon; only
+        // a label cut off by the sidebar width still gets the tooltip.
+        if (document.documentElement.classList.contains('sidebar-expanded')) {
+            const text = btn.querySelector('.nav-label');
+            if (!(text instanceof HTMLElement) || text.scrollWidth <= text.clientWidth) return;
+        }
         tip.textContent = label;
         position(btn);
         current = btn;

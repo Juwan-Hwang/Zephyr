@@ -1689,11 +1689,12 @@ button:focus-visible:not(:disabled, [disabled]),
 /* ============================================
    Proxies Page — Auto-fill grid
    Columns are added/removed automatically based on
-   available width. Minimum card width 180px.
+   available width. Minimum card width 200px, so a
+   long node name and its latency still fit on one row.
    Unlimited max columns.
    ============================================ */
 #proxies-list {
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     /* .proxy-wrapper reaches 8px past the grid's right edge by design (room
        for the selection badge); with only overflow-y set, the horizontal axis
        computes to auto and those 8px surface as a useless horizontal
@@ -2306,6 +2307,119 @@ html:not(.dark) .home-hero-chart { opacity: .6; }
   box-shadow: none;
 }
 
+/* Sidebar: icon + short label, collapsible to icons only (ui/sidebar.js).
+   Buttons are start-aligned with a fixed start padding in both states, so the
+   icons never move; only the sidebar width changes. Labels are clipped, never
+   wrapped, while the width animates. Expanding: width first, label fades in
+   80ms later. Collapsing: label fades out first, width follows 40ms later. */
+:root {
+  --sidebar-w-collapsed: 80px;
+  --sidebar-w-expanded: 160px;
+}
+/* Longer labels outside CJK ("Subscriptions", "Connections") */
+html:not(:lang(zh)):not(:lang(ja)):not(:lang(ko)) { --sidebar-w-expanded: 192px; }
+#sidebar-nav {
+  width: var(--sidebar-drag-w, var(--sidebar-w-collapsed));
+  flex: 0 0 auto;
+  align-items: stretch;
+  padding-inline: 16px;
+  transition: width var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out) 40ms,
+              margin var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out) 40ms,
+              background-color var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out),
+              box-shadow var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out);
+}
+.sidebar-expanded #sidebar-nav {
+  width: var(--sidebar-drag-w, var(--sidebar-w-expanded));
+  transition-delay: 0s;
+}
+#sidebar-nav .nav-btn {
+  width: 100%;
+  justify-content: flex-start;
+  padding-inline-start: 12px;
+  gap: 12px;
+  overflow: hidden;
+  box-shadow: none;
+  --un-ring-width: 0px;
+}
+#sidebar-nav .nav-btn .icon { flex: 0 0 24px; }
+#sidebar-nav .nav-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: inherit;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity var(--zephyr-time-micro) var(--zephyr-easing-ease-out),
+              transform var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+[dir='rtl'] .nav-label { transform: translateX(4px); }
+.sidebar-expanded .nav-label {
+  opacity: 1;
+  transform: none;
+  transition-delay: 80ms;
+}
+/* Selected item: a flat tint, like the system sidebars, not a raised box */
+.nav-indicator { box-shadow: 0 0 0 1px var(--zephyr-border-subtle); }
+html:not(.dark) .nav-indicator { background: rgb(0 0 0 / .06); }
+html.dark .nav-indicator { background: rgb(255 255 255 / .1); }
+html.dark #sidebar-nav .nav-btn:not(.is-active) { color: rgb(255 255 255 / .74); }
+html.dark #sidebar-nav .nav-btn:not(.is-active):hover { color: var(--text-primary); }
+
+/* Edge handle: a thin accent line shows on hover; drag or double-click it */
+.sidebar-edge {
+  position: absolute;
+  inset-block: 16px;
+  inset-inline-end: -4px;
+  width: 8px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sidebar-edge::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent-primary);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease-out) 120ms;
+}
+.sidebar-edge:hover::after,
+.sidebar-dragging .sidebar-edge::after { opacity: .7; }
+.sidebar-dragging, .sidebar-dragging * { cursor: col-resize !important; user-select: none !important; }
+.sidebar-dragging #sidebar-nav,
+.sidebar-dragging .nav-label,
+.sidebar-instant #sidebar-nav,
+.sidebar-instant .nav-label { transition: none !important; }
+/* Narrow window: expanding lays the sidebar over the content */
+.sidebar-overlay #sidebar-nav {
+  margin-inline-end: calc(var(--sidebar-w-collapsed) - var(--sidebar-w-expanded));
+  z-index: 40;
+  background: color-mix(in srgb, var(--zephyr-bg-elevated) 92%, transparent);
+  box-shadow: var(--zephyr-shadow-md);
+}
+.sidebar-menu-kbd {
+  margin-inline-start: auto;
+  padding-inline-start: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-height: 600px) {
+  #sidebar-nav { gap: 12px; padding-block: 20px; }
+  #sidebar-nav .nav-btn { flex-shrink: 0; min-height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #sidebar-nav { transition: none; }
+  .nav-label { transition: opacity var(--zephyr-time-micro) linear; transform: none; }
+}
+
 /* Background glows cross-fade (opacity only); hidden ones stop painting once faded out */
 .page-glow {
   opacity: 0;
@@ -2512,6 +2626,67 @@ html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
 /* Full-width tabs inside dialogs get a roomier 40px track */
 .seg-tabs.seg-tabs-lg { height: 40px; padding: 4px; }
 .seg-tabs-lg .seg-tab { font-size: 13px; }
+
+/* Choice cards: single choice among a few options that each need a short
+   explanation line (a name + one line of detail). Use segmented tabs when the
+   labels explain themselves; use choice cards when each option needs a line.
+   Markup: <div class="choice-grid" role="radiogroup">
+             <button type="button" role="radio" aria-checked="true" class="choice-card">
+               <span class="choice-card-title">…</span><span class="choice-card-desc">…</span>
+             </button>…</div>
+   Selected = aria-checked="true" (or .is-selected): accent border, tinted
+   fill and a 3px glow ring. */
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--choice-cols, 2), minmax(0, 1fr));
+  gap: 8px;
+}
+.choice-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--zephyr-border-subtle);
+  background: var(--zephyr-bg-muted);
+  text-align: start;
+  cursor: pointer;
+  transition: border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), box-shadow var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.choice-card-title { font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--text-primary); }
+.choice-card-desc { font-size: 11px; line-height: 1.4; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.choice-card:hover:not([aria-checked="true"], .is-selected, :disabled) {
+  border-color: var(--zephyr-border-strong);
+  background: color-mix(in srgb, var(--text-primary) 3%, var(--zephyr-bg-muted));
+}
+.choice-card:is([aria-checked="true"], .is-selected) {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--zephyr-bg-muted));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 10%, transparent);
+}
+.choice-card:is([aria-checked="true"], .is-selected) .choice-card-title { color: var(--accent-ink); }
+.choice-card:focus-visible:not(:disabled) {
+  outline: 2px solid transparent;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--zephyr-focus-ring);
+}
+.choice-card:is([aria-checked="true"], .is-selected):focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 28%, transparent); }
+.choice-card:disabled { opacity: .5; cursor: not-allowed; }
+html.dark .choice-card { background: var(--zephyr-bg-subtle); }
+html.dark .choice-card:hover:not([aria-checked="true"], .is-selected, :disabled) { background: var(--zephyr-bg-muted); }
+html.dark .choice-card:is([aria-checked="true"], .is-selected) {
+  border-color: color-mix(in srgb, var(--accent-primary) 65%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+/* Title-only cards: centred, about the height of a segmented control */
+.choice-card.choice-card-compact { align-items: center; justify-content: center; text-align: center; padding-block: 11px; }
+@media (forced-colors: active) {
+  .choice-card:is([aria-checked="true"], .is-selected) { border: 2px solid Highlight; }
+}
 
 /* Rule library: groups read as quiet section labels (like settings), files
    sit flush on the page edge; groups are 24px apart */
@@ -3070,6 +3245,11 @@ html:not(.dark) .ctx-menu-root.glass-card { background: rgb(252, 252, 253); }
 .glass-card:hover .node-retest-btn, .glass-card:focus-within .node-retest-btn, .node-retest-btn:focus-visible, .node-retest-btn.is-spinning { opacity: 1; }
 /* No hover on touch / pen: keep the button visible. */
 @media (hover: none) { .node-retest-btn { opacity: 1; } }
+/* While hidden it takes no room, so the card's subtitle is not cut short by
+   an invisible 20px button. */
+@media (hover: hover) {
+  .glass-card:not(:hover):not(:focus-within) .node-retest-btn:not(.is-spinning):not(:focus-visible) { position: absolute; pointer-events: none; }
+}
 .node-retest-btn:hover { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
 .node-retest-btn.is-spinning svg { animation: spin 0.9s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .node-retest-btn.is-spinning svg { animation: none; } }
@@ -3322,3 +3502,27 @@ html:not(.kb-nav) :is(.proxy-search, .settings-search):focus-within {
 .upd-spin { animation: upd-spin 0.9s linear infinite; }
 @keyframes upd-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .upd-progress-bar { transition: none; } }
+
+/* ============================================
+   Contrast (WCAG AA, 4.5:1 for small text)
+   Brand blue #007AFF stays on icons, sliders and selection outlines. Where
+   white text sits on blue, or blue text on a light surface, it uses one step
+   darker (as macOS "Increase contrast" does); dark mode lifts blue and red
+   text one step instead. Tertiary/muted text tokens are raised in
+   packages/tokens/src/semantic.json.
+   ============================================ */
+:root:not(.dark) .btn-primary { background-color: #0062d6; }
+:root:not(.dark) .btn-primary:hover { background-color: #0056bd; }
+:root:not(.dark) .btn-ghost[class], :root:not(.dark) .btn-accent span, :root:not(.dark) .sub-in-use,
+:root:not(.dark) .choice-card[aria-checked='true'] .choice-card-title { color: #0058c2; }
+:root:not(.dark) .btn-ghost.text-\[var\(--text-secondary\)\] { color: var(--text-secondary); }
+:root:not(.dark) .btn-danger span { color: #b91c1c; }
+:root:not(.dark) .text-upload { color: #b4232f; }
+:root:not(.dark) .text-download { color: #0058c2; }
+:root:not(.dark) .proxy-card .text-emerald-400 { color: #065f46; }
+:root:not(.dark) .settings-section-desc { color: var(--zephyr-text-muted); }
+html.dark .btn-primary { background-color: #0062d6; }
+html.dark .btn-primary:hover { background-color: #0a6ee8; }
+html.dark .btn-accent span, html.dark .sub-in-use, html.dark .row-action, html.dark .row-action span,
+html.dark .choice-card[aria-checked='true'] .choice-card-title, html.dark .text-download { color: #4da3ff; }
+html.dark .btn-danger span, html.dark .text-\[var\(--zephyr-color-danger\)\] { color: #f87171; }

@@ -31,6 +31,12 @@ export function isRTL(lang) {
 
 export const translations = {
     en: {
+        navProxies: "Proxies",
+        navSubscriptions: "Subscriptions",
+        navConnections: "Connections",
+        navRules: "Rules",
+        sidebarCollapse: "Collapse Sidebar",
+        sidebarExpand: "Expand Sidebar",
         sandboxSecurityWarningTitle: "Security Warning",
         sandboxSecurityWarningDesc: "Enabling Child Process or Filesystem access significantly weakens script sandbox isolation. Only enable these permissions for scripts you completely trust. Do you want to continue?",
         home: "Home",
@@ -1115,6 +1121,12 @@ export const translations = {
     },
 
     zh: {
+        navProxies: "节点",
+        navSubscriptions: "订阅",
+        navConnections: "连接",
+        navRules: "规则",
+        sidebarCollapse: "收起边栏",
+        sidebarExpand: "展开边栏",
         sandboxSecurityWarningTitle: "安全警告",
         sandboxSecurityWarningDesc: "启用子进程或文件系统访问将显著降低脚本沙箱的隔离保护。请仅为您完全信任的脚本开启此权限。是否继续？",
         home: "首页",
@@ -2199,6 +2211,12 @@ export const translations = {
     },
 
     ja: {
+        navProxies: "プロキシ",
+        navSubscriptions: "購読",
+        navConnections: "接続",
+        navRules: "ルール",
+        sidebarCollapse: "サイドバーを折りたたむ",
+        sidebarExpand: "サイドバーを展開",
         sandboxSecurityWarningTitle: "セキュリティ警告",
         sandboxSecurityWarningDesc: "子プロセスまたはファイルシステムへのアクセスを有効にすると、スクリプトサンドボックスの分離が大幅に低下します。完全に信頼できるスクリプトに対してのみ有効にしてください。続行しますか？",
         actionName: "アクション名",
@@ -3238,6 +3256,12 @@ export const translations = {
     },
 
     ko: {
+        navProxies: "프록시",
+        navSubscriptions: "구독",
+        navConnections: "연결",
+        navRules: "규칙",
+        sidebarCollapse: "사이드바 접기",
+        sidebarExpand: "사이드바 펼치기",
         sandboxSecurityWarningTitle: "보안 경고",
         sandboxSecurityWarningDesc: "자식 프로세스 또는 파일 시스템 접근을 활성화하면 스크립트 샌드박스 격리가 크게 약화됩니다. 완전히 신뢰할 수 있는 스크립트에 대해서만 활성화하세요. 계속하시겠습니까?",
         actionName: "동작 이름",
@@ -4276,6 +4300,12 @@ export const translations = {
         dnsServersApplyFailed: "DNS 서버는 저장했지만 코어에 적용하지 못했습니다. DNS 누출 방지를 껐다가 다시 켜서 다시 시도하세요.",
     },
     ru: {
+        navProxies: "Прокси",
+        navSubscriptions: "Подписки",
+        navConnections: "Соединения",
+        navRules: "Правила",
+        sidebarCollapse: "Свернуть боковую панель",
+        sidebarExpand: "Развернуть боковую панель",
         sandboxSecurityWarningTitle: "Предупреждение безопасности",
         sandboxSecurityWarningDesc: "Включение доступа к дочерним процессам или файловой системе значительно снижает изоляцию песочницы скриптов. Включайте эти разрешения только для полностью доверенных скриптов. Продолжить?",
         home: "Главная",
@@ -5310,6 +5340,12 @@ export const translations = {
         dnsServersApplyFailed: "DNS-серверы сохранены, но ядро не переключилось на них. Выключите и снова включите защиту от утечки DNS.",
     },
     es: {
+        navProxies: "Proxies",
+        navSubscriptions: "Suscripciones",
+        navConnections: "Conexiones",
+        navRules: "Reglas",
+        sidebarCollapse: "Contraer barra lateral",
+        sidebarExpand: "Expandir barra lateral",
         sandboxSecurityWarningTitle: "Advertencia de seguridad",
         sandboxSecurityWarningDesc: "Habilitar el acceso a procesos secundarios o al sistema de archivos debilita significativamente el aislamiento de la sandbox de scripts. Habilite estos permisos solo para scripts de total confianza. ¿Desea continuar?",
         home: "Inicio",
@@ -6344,6 +6380,12 @@ export const translations = {
         dnsServersApplyFailed: "Los servidores DNS se guardaron, pero el núcleo no pudo usarlos. Desactiva y vuelve a activar la protección contra fugas de DNS.",
     },
     fa: {
+        navProxies: "پراکسی‌ها",
+        navSubscriptions: "اشتراک‌ها",
+        navConnections: "اتصال‌ها",
+        navRules: "قوانین",
+        sidebarCollapse: "جمع کردن نوار کناری",
+        sidebarExpand: "باز کردن نوار کناری",
         sandboxSecurityWarningTitle: "هشدار امنیتی",
         sandboxSecurityWarningDesc: "فعال کردن دسترسی به فرآیندهای فرزند یا سیستم فایل به طور قابل توجهی ایزولاسیون سندباکس اسکریپت را کاهش می‌دهد. این مجوزها را فقط برای اسکریپت‌های کاملاً مورد اعتماد فعال کنید. آیا مایل به ادامه هستید؟",
         home: "خانه",
@@ -7378,6 +7420,12 @@ export const translations = {
         dnsServersApplyFailed: "سرورهای DNS ذخیره شدند، اما هسته نتوانست به آن‌ها تغییر کند. محافظت از نشت DNS را خاموش و دوباره روشن کنید.",
     },
     tk: {
+        navProxies: "Proksiler",
+        navSubscriptions: "Abunalar",
+        navConnections: "Birikmeler",
+        navRules: "Düzgünler",
+        sidebarCollapse: "Gapdal paneli ýygnamak",
+        sidebarExpand: "Gapdal paneli açmak",
         sandboxSecurityWarningTitle: "Howpsuzlyk duýduryşy",
         sandboxSecurityWarningDesc: "Çaga proseslerine ýa-da faýl ulgamyna girmegi işletmek skript sandbaksynyň goragyny ep-esli gowşadýar. Bu ygtyýarnamalary diňe doly ynanýan skriptleriňiz üçin işlediň. Dowam etmek isleýärsiňizmi?",
         home: "Baş sahypa",
@@ -8412,6 +8460,12 @@ export const translations = {
         dnsServersApplyFailed: "DNS serwerleri saklandy, emma ýadro olara geçip bilmedi. DNS syzmagyndan goragy öçürip, täzeden ýakyň.",
     },
     my: {
+        navProxies: "ပရောက်စီ",
+        navSubscriptions: "စာရင်းသွင်းမှု",
+        navConnections: "ချိတ်ဆက်မှု",
+        navRules: "စည်းမျဉ်း",
+        sidebarCollapse: "ဘေးဘားကို ခေါက်ရန်",
+        sidebarExpand: "ဘေးဘားကို ဖြန့်ရန်",
         sandboxSecurityWarningTitle: "လုံခြုံရေး သတိပေးချက်",
         sandboxSecurityWarningDesc: "Child Process သို့မဟုတ် Filesystem သုံးစွဲခွင့်ကို ဖွင့်ခြင်းသည် script sandbox သီးခြားခွဲထားမှုကို သိသိသာသာ လျော့ကျစေသည်။ အပြည့်အဝ ယုံကြည်ရသော script များအတွက်သာ ဤခွင့်ပြုချက်များကို ဖွင့်ပါ။ ဆက်လုပ်လိုပါသလား။",
         actionName: "လုပ်ဆောင်ချက် အမည်",
@@ -9446,6 +9500,12 @@ export const translations = {
         dnsServersApplyFailed: "DNS ဆာဗာများကို သိမ်းပြီးပါပြီ၊ သို့သော် core က ၎င်းတို့ထံ မပြောင်းနိုင်ပါ။ DNS ယိုစိမ့်မှု ကာကွယ်ရေးကို ပိတ်ပြီး ပြန်ဖွင့်ပါ။",
     },
     ar: {
+        navProxies: "الوكلاء",
+        navSubscriptions: "الاشتراكات",
+        navConnections: "الاتصالات",
+        navRules: "القواعد",
+        sidebarCollapse: "طي الشريط الجانبي",
+        sidebarExpand: "توسيع الشريط الجانبي",
         sandboxSecurityWarningTitle: "تحذير أمني",
         sandboxSecurityWarningDesc: "يؤدي تمكين الوصول إلى العمليات الفرعية أو نظام الملفات إلى إضعاف عزل بيئة وضع الحماية للبرامج النصية بشكل كبير. لا تقم بتمكين هذه الأذونات إلا للبرامج النصية الموثوقة تمامًا. هل ترغب في المتابعة؟",
         home: "الصفحة الرئيسية",
@@ -10480,6 +10540,12 @@ export const translations = {
         dnsServersApplyFailed: "حُفظت خوادم DNS، لكن تعذّر على النواة التبديل إليها. أوقف حماية تسرّب DNS ثم شغّلها مجددًا.",
     },
     ur: {
+        navProxies: "پراکسیز",
+        navSubscriptions: "سبسکرپشنز",
+        navConnections: "کنکشنز",
+        navRules: "قواعد",
+        sidebarCollapse: "سائیڈبار سمیٹیں",
+        sidebarExpand: "سائیڈبار کھولیں",
         sandboxSecurityWarningTitle: "سیکیورٹی وارننگ",
         sandboxSecurityWarningDesc: "چائلڈ پروسیس یا فائل سسٹم تک رسائی کو فعال کرنے سے اسکرپٹ سینڈ باکس کی حفاظت نمایاں طور پر کمزور ہو جاتی ہے۔ ان اجازتوں کو صرف ان اسکرپٹس کے لیے فعال کریں جن پر آپ کو مکمل اعتماد ہو۔ کیا آپ جاری رکھنا چاہتے ہیں؟",
         home: "صفحہ اول",
@@ -11515,6 +11581,12 @@ export const translations = {
     },
 
     sw: {
+        navProxies: "Proksi",
+        navSubscriptions: "Usajili",
+        navConnections: "Miunganisho",
+        navRules: "Sheria",
+        sidebarCollapse: "Kunja upau wa kando",
+        sidebarExpand: "Panua upau wa kando",
         sandboxSecurityWarningTitle: "Onyo la Usalama",
         sandboxSecurityWarningDesc: "Kuwezesha ufikiaji wa mchakato wa mtoto au mfumo wa faili kunapunguza kwa kiasi kikubwa utengaji wa sandbox ya hati. Wezesha ruhusa hizi kwa hati unazoziamini kikamilifu tu. Je, unataka kuendelea?",
         home: "Nyumbani",
@@ -12599,6 +12671,12 @@ export const translations = {
     },
 
     tr: {
+        navProxies: "Proxy'ler",
+        navSubscriptions: "Abonelikler",
+        navConnections: "Bağlantılar",
+        navRules: "Kurallar",
+        sidebarCollapse: "Kenar çubuğunu daralt",
+        sidebarExpand: "Kenar çubuğunu genişlet",
         sandboxSecurityWarningTitle: "Güvenlik Uyarısı",
         sandboxSecurityWarningDesc: "Alt işlem veya dosya sistemi erişimini etkinleştirmek, komut dosyası korumalı alan yalıtımını önemli ölçüde zayıflatır. Bu izinleri yalnızca tamamen güvendiğiniz komut dosyaları için etkinleştirin. Devam etmek istiyor musunuz?",
         home: "Ana Sayfa",
@@ -13683,6 +13761,12 @@ export const translations = {
     },
 
     vi: {
+        navProxies: "Proxy",
+        navSubscriptions: "Đăng ký",
+        navConnections: "Kết nối",
+        navRules: "Quy tắc",
+        sidebarCollapse: "Thu gọn thanh bên",
+        sidebarExpand: "Mở rộng thanh bên",
         sandboxSecurityWarningTitle: "Cảnh báo bảo mật",
         sandboxSecurityWarningDesc: "Bật quyền truy cập tiến trình con hoặc hệ thống tệp sẽ làm giảm đáng kể khả năng cô lập của hộp cát tập lệnh. Chỉ bật các quyền này cho các tập lệnh mà bạn hoàn toàn tin cậy. Bạn có muốn tiếp tục không?",
         home: "Trang chủ",
