@@ -66,6 +66,7 @@ import { initSettings, initUwpExemption } from './ui/settings.js';
 import { autoApplyIfNeeded } from './ui/network-optim.js';
 import { initNavigation, switchPage, navigateTo } from './ui/navigation.js';
 import { initNavTooltips } from './ui/nav-tooltip.js';
+import { initSidebar } from './ui/sidebar.js';
 import { initProxyControls, syncCoreConfig, refreshProxies } from './ui/proxies.js';
 import { initPlugins } from './ui/plugins.js';
 import { initModeSelector } from './ui/modes.js';
@@ -472,6 +473,10 @@ async function initApp() {
   // wait for it to complete (with a 3 s timeout built in).
   await _backendListenersReady;
   registerCleanup(cleanupBackendEventListeners);
+
+  // Restore the sidebar's expanded/collapsed state before the window is
+  // shown, so it does not jump open once the core has started.
+  registerCleanup(initSidebar());
 
   apiLogger.info(`[Zephyr] initApp started at ${new Date().toLocaleTimeString()}`);
 
