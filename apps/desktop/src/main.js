@@ -474,6 +474,10 @@ async function initApp() {
   await _backendListenersReady;
   registerCleanup(cleanupBackendEventListeners);
 
+  // Restore the sidebar's expanded/collapsed state before the window is
+  // shown, so it does not jump open once the core has started.
+  registerCleanup(initSidebar());
+
   apiLogger.info(`[Zephyr] initApp started at ${new Date().toLocaleTimeString()}`);
 
   // 0a. Reset transient locks that may have been persisted to localStorage
@@ -550,7 +554,6 @@ async function initApp() {
     },
   });
   registerCleanup(initNavTooltips());
-  registerCleanup(initSidebar());
   initNoSubscriptionState();
   initChart();
   initTrayEventListeners().catch((err) => apiLogger.warn('[Zephyr] tray listener init failed', err));

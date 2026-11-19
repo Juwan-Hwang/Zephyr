@@ -2399,7 +2399,7 @@ html.dark #sidebar-nav .nav-btn:not(.is-active):hover { color: var(--text-primar
 .sidebar-instant .nav-label { transition: none !important; }
 /* Narrow window: expanding lays the sidebar over the content */
 .sidebar-overlay #sidebar-nav {
-  margin-inline-end: calc(var(--sidebar-w-collapsed) - var(--sidebar-w-expanded));
+  margin-inline-end: calc(var(--sidebar-w-collapsed) - var(--sidebar-drag-w, var(--sidebar-w-expanded)));
   z-index: 40;
   background: color-mix(in srgb, var(--zephyr-bg-elevated) 92%, transparent);
   box-shadow: var(--zephyr-shadow-md);
@@ -2673,7 +2673,7 @@ html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 3px var(--zephyr-focus-ring);
 }
-.choice-card:is([aria-checked="true"], .is-selected):focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 28%, transparent); }
+.choice-card:is([aria-checked="true"], .is-selected):focus-visible { box-shadow: 0 0 0 2px var(--zephyr-bg-elevated), 0 0 0 4px var(--accent-primary); }
 .choice-card:disabled { opacity: .5; cursor: not-allowed; }
 html.dark .choice-card { background: var(--zephyr-bg-subtle); }
 html.dark .choice-card:hover:not([aria-checked="true"], .is-selected, :disabled) { background: var(--zephyr-bg-muted); }
@@ -3513,9 +3513,8 @@ html:not(.kb-nav) :is(.proxy-search, .settings-search):focus-within {
    ============================================ */
 :root:not(.dark) .btn-primary { background-color: #0062d6; }
 :root:not(.dark) .btn-primary:hover { background-color: #0056bd; }
-:root:not(.dark) .btn-ghost[class], :root:not(.dark) .btn-accent span, :root:not(.dark) .sub-in-use,
+:root:not(.dark) .btn-ghost.active, :root:not(.dark) .btn-accent span, :root:not(.dark) .sub-in-use,
 :root:not(.dark) .choice-card[aria-checked='true'] .choice-card-title { color: #0058c2; }
-:root:not(.dark) .btn-ghost.text-\[var\(--text-secondary\)\] { color: var(--text-secondary); }
 :root:not(.dark) .btn-danger span { color: #b91c1c; }
 :root:not(.dark) .text-upload { color: #b4232f; }
 :root:not(.dark) .text-download { color: #0058c2; }

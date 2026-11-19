@@ -68,6 +68,28 @@ function cssPx(name, fallback) {
     return Number.isFinite(v) && v > 0 ? v : fallback;
 }
 
+/**
+ * Whether the shortcut should be left to whatever has focus: a text field or
+ * editor (Ctrl+B is bold, ⌃⌘S can be save), or any open modal dialog,
+ * which covers the sidebar anyway.
+ * @param {KeyboardEvent} e
+ * @returns {boolean}
+ */
+export function shortcutBelongsElsewhere(e) {
+    if (e.defaultPrevented) return true;
+    const t = e.target;
+    if (t instanceof Element && t.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .cm-editor')) return true;
+    return [...document.querySelectorAll('[aria-modal="true"]')].some(
+        (el) => el instanceof HTMLElement && !el.classList.contains('hidden') && !el.hidden,
+    );
+}
+
+/** The body is scaled by --ui-scale; layout sizes are its CSS pixels. */
+function uiScale() {
+    const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'));
+    return Number.isFinite(v) && v > 0 ? v : 1;
+}
+
 /** @returns {'expanded' | 'collapsed' | null} */
 function readSaved() {
     try {
@@ -99,7 +121,7 @@ export function initSidebar() {
     const mac = isMacPlatform();
     const shortcutLabel = mac ? '⌃⌘S' : 'Ctrl+B';
 
-    const isNarrow = () => window.innerWidth < NARROW_PX;
+    const isNarrow = () => window.innerWidth / uiScale() < NARROW_PX;
     /** True while expanded in a narrow window, where it overlays the content. */
     let overlayOpen = false;
 
@@ -117,6 +139,7 @@ export function initSidebar() {
         root.classList.toggle('sidebar-expanded', expanded);
         root.classList.toggle('sidebar-overlay', overlayOpen);
         nav.dataset.expanded = expanded ? 'true' : 'false';
+        document.dispatchEvent(new CustomEvent('zephyr:sidebar-change'));
         // Only a choice made in a wide window is remembered: auto-collapse
         // and the temporary overlay must not overwrite it.
         if (opts.persist && !narrow) save(expanded ? 'expanded' : 'collapsed');
@@ -134,7 +157,7 @@ export function initSidebar() {
     edge.setAttribute('aria-hidden', 'true');
     nav.appendChild(edge);
 
-    /** @type {{ startX: number, startW: number, rtl: boolean, moved: boolean, min: number, max: number } | null} */
+    /** @type {{ startX: number, startW: number, rtl: boolean, moved: boolean, min: number, max: number, scale: number } | null} */
     let drag = null;
 
     /** @param {PointerEvent} e */
@@ -142,9 +165,12 @@ export function initSidebar() {
         if (e.button !== 0) return;
         e.preventDefault();
         const rtl = getComputedStyle(nav).direction === 'rtl';
+        const scale = uiScale();
         drag = {
             startX: e.clientX,
-            startW: nav.getBoundingClientRect().width,
+            // Rendered pixels -> CSS pixels, to match the clamp and --sidebar-drag-w.
+            startW: nav.getBoundingClientRect().width / scale,
+            scale,
             rtl,
             moved: false,
             min: cssPx('--sidebar-w-collapsed', COLLAPSED_W),
@@ -152,11 +178,14 @@ export function initSidebar() {
         };
         edge.setPointerCapture?.(e.pointerId);
         root.classList.add('sidebar-dragging');
+        // In a narrow window the sidebar overlays the content while dragged,
+        // so the page does not reflow under the pointer.
+        if (isNarrow()) root.classList.add('sidebar-overlay');
     };
     /** @param {PointerEvent} e */
     const onMove = (e) => {
         if (!drag) return;
-        const dx = (e.clientX - drag.startX) * (drag.rtl ? -1 : 1);
+        const dx = ((e.clientX - drag.startX) / drag.scale) * (drag.rtl ? -1 : 1);
         if (Math.abs(dx) > 3) drag.moved = true;
         if (!drag.moved) return;
         const w = Math.max(drag.min, Math.min(drag.max, drag.startW + dx));
@@ -172,7 +201,7 @@ export function initSidebar() {
         edge.releasePointerCapture?.(e.pointerId);
         root.classList.remove('sidebar-dragging');
         nav.style.removeProperty('--sidebar-drag-w');
-        if (moved) apply(snapExpanded(w, min, max), { persist: true });
+        apply(moved ? snapExpanded(w, min, max) : isExpanded(), { persist: moved });
     };
     const onDbl = () => toggle();
     edge.addEventListener('pointerdown', onDown);
@@ -184,7 +213,7 @@ export function initSidebar() {
     // --- Keyboard shortcut -----------------------------------------------
     /** @param {KeyboardEvent} e */
     const onKey = (e) => {
-        if (isToggleShortcut(e, mac)) {
+        if (isToggleShortcut(e, mac) && !shortcutBelongsElsewhere(e)) {
             e.preventDefault();
             toggle();
         } else if (e.key === 'Escape' && overlayOpen) {
@@ -227,6 +256,9 @@ export function initSidebar() {
         apply(narrow ? false : preferred(), { instant: true });
     };
     window.addEventListener('resize', onResize);
+    // A UI scale change in settings changes the layout width without a resize.
+    const scaleObserver = new MutationObserver(onResize);
+    scaleObserver.observe(root, { attributes: true, attributeFilter: ['style'] });
 
     return () => {
         edge.remove();
@@ -234,5 +266,6 @@ export function initSidebar() {
         document.removeEventListener('click', onDocClick);
         nav.removeEventListener('contextmenu', onContext);
         window.removeEventListener('resize', onResize);
+        scaleObserver.disconnect();
     };
 }

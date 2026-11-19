@@ -38,6 +38,7 @@ describe('initSidebar', () => {
     beforeEach(() => {
         localStorage.clear();
         root.className = '';
+        root.removeAttribute('style');
         document.body.innerHTML = '<nav id="sidebar-nav"><button class="nav-btn"><span class="nav-label">Home</span></button></nav>';
         setWidth(1200);
     });
@@ -91,6 +92,29 @@ describe('initSidebar', () => {
         document.dispatchEvent(key({ key: 'Escape' }));
         expect(root.classList.contains('sidebar-expanded')).toBe(false);
         expect(root.classList.contains('sidebar-overlay')).toBe(false);
+    });
+
+    it('leaves the shortcut to text fields and open dialogs', () => {
+        document.body.insertAdjacentHTML('beforeend', '<textarea id="ta"></textarea><div id="dlg" role="dialog" aria-modal="true" class="hidden"></div>');
+        cleanup = initSidebar();
+        const ta = /** @type {HTMLElement} */ (document.getElementById('ta'));
+        const inField = key({ key: 'b', ctrlKey: true });
+        ta.dispatchEvent(inField);
+        expect(inField.defaultPrevented).toBe(false);
+        expect(root.classList.contains('sidebar-expanded')).toBe(true);
+        document.getElementById('dlg')?.classList.remove('hidden');
+        document.dispatchEvent(key({ key: 'b', ctrlKey: true }));
+        expect(root.classList.contains('sidebar-expanded')).toBe(true);
+    });
+
+    it('uses layout width under UI scaling', async () => {
+        root.style.setProperty('--ui-scale', '1.5');
+        setWidth(1200); // 800 CSS px of layout
+        cleanup = initSidebar();
+        expect(root.classList.contains('sidebar-expanded')).toBe(false);
+        root.style.setProperty('--ui-scale', '1'); // 1200 CSS px: wide again
+        await Promise.resolve();
+        expect(root.classList.contains('sidebar-expanded')).toBe(true);
     });
 
     it('toggles on a double-click of the edge', () => {
