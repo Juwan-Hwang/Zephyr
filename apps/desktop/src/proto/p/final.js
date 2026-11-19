@@ -2,8 +2,9 @@
 //   __F__.feat  — home（默认，按 ?home= 走简洁或控制台）、coredown、speed-*、
 //                或者一个已有原型名（bypass-dialog、cards-200、privnet-after …）
 //   __F__.ip    — 「显示 IP 地址」打开
-// 所有屏都套定稿外壳：纯文字侧栏（sidetext）+ 辅助文字对比度修正（final.css）+ 简洁首页随窗口缩放的规则（fsize.css）。
-import { $, $$, html, icon, ICONS, until, wait } from './_kit.js';
+//   __F__.side  — 'collapsed' | 'expanded'（默认按记住的状态，展开）
+// 所有屏都套定稿外壳：原来的图标 + 文字侧栏，拖右边缘 / 快捷键 / 右键 / 窗口变窄来展开和收起（sideedge）+ 辅助文字对比度修正（final.css）+ 简洁首页随窗口缩放的规则（fsize.css）。
+import { $, $$, html, icon, ICONS, wait } from './_kit.js';
 
 const F = (window.__F__ = window.__F__ || {});
 const feat = F.feat || 'home';
@@ -27,7 +28,9 @@ const SPEED = feat.startsWith('speed-');
 const OWN = ['home', 'coredown', 'exitip-setting'];
 
 export async function pre() {
-  await css('sidetext');
+  if (F.side) /** @type {any} */ (window).__PROTO_SIDE__ = F.side;
+  await css('sidelabel');
+  await css('sideedge');
   await css('homeb');
   await css('choice');
   await css('speedtest');
@@ -152,7 +155,7 @@ async function coredown() {
 }
 
 export async function post() {
-  const side = await import('./sidetext.js');
+  const side = await import('./sideedge.js');
   await side.post();
   await wait(50);
   if (feat === 'home') await home();

@@ -1,0 +1,84 @@
+/* 定稿侧栏（第三版）：展开 / 收起不靠按钮。
+   右边缘是一条 8 px 宽的拖动区，平时完全看不见；悬停 150 ms 后出现一条 2 px 的细线，光标变成左右箭头。
+   拖动、键盘聚焦时细线换成强调色。侧栏底部只剩「设置」，不再有「隐藏边栏」。 */
+.proto-side-edge #sidebar-nav { overflow: visible; }
+.proto-side-edge-handle {
+  position: absolute;
+  top: 16px;
+  bottom: 16px;
+  right: -4px;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 2;
+  touch-action: none;
+  outline: none;
+  /* 不是 nav-btn，不参与侧栏的 flex 排列 */
+  margin: 0 !important;
+}
+.proto-side-edge-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  border-radius: 1px;
+  /* 悬停时是一条强调色的细线（VS Code 分隔条的做法），一看就知道这里能拖；拖动和键盘聚焦时颜色再实一档 */
+  background: color-mix(in srgb, var(--color-accent, #0062d6) 55%, transparent);
+  opacity: 0;
+  transition: opacity var(--zephyr-time-micro, 120ms) var(--zephyr-easing-ease-out, ease-out);
+}
+.proto-side-edge-handle:hover::after,
+.proto-side-edge-show .proto-side-edge-handle::after { opacity: 1; transition-delay: 150ms; }
+.proto-side-edge-show .proto-side-edge-handle::after { transition: none; }
+.proto-side-dragging .proto-side-edge-handle::after,
+.proto-side-edge-handle:focus-visible::after { opacity: 1; background: var(--color-accent, #0062d6); transition-delay: 0s; }
+.proto-side-dragging, .proto-side-dragging * { cursor: ew-resize !important; user-select: none; }
+
+/* 右键菜单：和系统菜单一样，一项文字 + 右边灰色的快捷键 */
+.proto-side-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 172px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--zephyr-bg-elevated, #fff);
+  border: 1px solid var(--zephyr-border-subtle, rgba(0, 0, 0, 0.08));
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16), 0 1px 3px rgba(15, 23, 42, 0.1);
+}
+.proto-side-menu[hidden] { display: none; }
+html.dark .proto-side-menu { background: #2a2c31; border-color: rgba(255, 255, 255, 0.1); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+.proto-side-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 5px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: transparent;
+  cursor: default;
+  outline: none;
+}
+.proto-side-menu-item:hover, .proto-side-menu-item:focus-visible { background: #0062d6; color: #fff; }
+.psm-key { font: inherit; font-size: 12px; color: var(--text-secondary); letter-spacing: 0.02em; }
+.proto-side-menu-item:hover .psm-key, .proto-side-menu-item:focus-visible .psm-key { color: rgba(255, 255, 255, 0.85); }
+
+/* 选中项的名字跟图标同色。final.css 里未选中项的规则写的是 .active，而 main 的选中类是 .is-active，
+   结果选中项的字反而是次要文字色（深色下 60% 白，比未选中的 74% 还暗）。 */
+.proto-side-fold #sidebar-nav .nav-btn.is-active .proto-nav-label { color: inherit !important; }
+
+/* 没有「隐藏边栏」按钮之后，底部只剩「设置」：去掉给按钮留的位置，设置的下边距和顶部第一项的上边距一致 */
+.proto-side-edge #proto-side-toggle { display: none !important; }
+
+/* 窄窗口临时展开时浮在内容上方：投影加深一档，和下面的内容分得开（选完页面、按 Esc、点外面就收回） */
+.proto-side-fold.proto-side-overlay #sidebar-nav {
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18), 0 2px 6px rgba(15, 23, 42, 0.1), 0 0 0 1px var(--zephyr-border-subtle, rgba(0, 0, 0, 0.06));
+}
+html.dark.proto-side-fold.proto-side-overlay #sidebar-nav {
+  background: #232529;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
