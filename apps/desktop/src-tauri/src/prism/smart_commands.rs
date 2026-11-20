@@ -8,7 +8,7 @@ use clash_prism_smart::history::NodeHistory;
 use clash_prism_smart::{AdaptiveScheduler, SmartConfig, SmartScorer};
 
 use crate::core_manager::write_file_secure;
-use crate::prism::types::check_name_size;
+use crate::prism::types::{check_input_size, check_name_size};
 use crate::prism::PrismState;
 
 /// Build a `SmartScorer` from the current smart.toml config.
@@ -85,6 +85,11 @@ pub fn smart_config_save(
     state: State<PrismState>,
     config_json: serde_json::Value,
 ) -> Result<(), String> {
+    // Security: Validate input payload size to prevent DoS via memory/storage exhaustion
+    let serialized =
+        serde_json::to_string(&config_json).map_err(|e| format!("Invalid config JSON: {e}"))?;
+    check_input_size(&serialized, "Smart config")?;
+
     // Extract `enabled` before deserializing (SmartConfig doesn't have it)
     let enabled = config_json
         .get("enabled")
@@ -93,6 +98,12 @@ pub fn smart_config_save(
 
     let config: SmartConfig =
         serde_json::from_value(config_json).map_err(|e| format!("Invalid config JSON: {e}"))?;
+
+    // Security & Data Integrity: Validate smart configuration bounds before persisting to disk
+    if let Err(errors) = config.validate() {
+        return Err(format!("Config validation failed: {}", errors.join("; ")));
+    }
+
     let mut toml_str =
         toml::to_string_pretty(&config).map_err(|e| format!("Failed to serialize to TOML: {e}"))?;
 
@@ -262,7 +273,8 @@ pub fn smart_trim_history(state: State<PrismState>, max_records: usize) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use crate::prism::types::{check_name_size, MAX_NAME_SIZE};
+    use crate::prism::types::{check_input_size, check_name_size, MAX_INPUT_SIZE, MAX_NAME_SIZE};
+    use clash_prism_smart::SmartConfig;
 
     #[test]
     fn test_smart_node_name_size_validation() {
@@ -272,5 +284,23 @@ mod tests {
         assert!(res.unwrap_err().contains("Node name too large"));
 
         assert!(check_name_size("valid_node_name", "Node name").is_ok());
+    }
+
+    #[test]
+    fn test_smart_config_input_size_validation() {
+        let oversized_config = "c".repeat(MAX_INPUT_SIZE + 1);
+        let res = check_input_size(&oversized_config, "Smart config");
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("Smart config too large"));
+
+        assert!(check_input_size("{}", "Smart config").is_ok());
+    }
+
+    #[test]
+    fn test_smart_config_parameter_validation() {
+        let mut invalid_config = SmartConfig::default();
+        invalid_config.score.weights.latency_p90 = -1.0;
+        let validation_res = invalid_config.validate();
+        assert!(validation_res.is_err());
     }
 }
