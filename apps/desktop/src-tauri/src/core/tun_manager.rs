@@ -58,6 +58,147 @@ pub fn is_tun_toggling() -> bool {
     TUN_TOGGLING.load(Ordering::SeqCst)
 }
 
+/// TUN state the running core has confirmed after an override hot-reload,
+/// kept apart from the saved `tun_enabled` preference.
+///
+/// An override script only rewrites the running config, so the state it
+/// puts the core into is a fact about *this* core, not a preference the
+/// user chose: recording it into `settings.json` would let it outlive
+/// the script, because every later core start writes the preference back
+/// into `run_config.yaml`. The confirmed state therefore lives only in
+/// memory. Tray status reads it ahead of the saved preference, and it is
+/// dropped whenever a TUN flow records a preference of its own, when a
+/// core start generates a fresh running config, and when the core stops
+/// — so it can never describe a core that is no longer running, nor a
+/// state the user has since chosen themselves.
+static LIVE_TUN_OVERRIDE: std::sync::Mutex<(Option<bool>, u64)> = std::sync::Mutex::new((None, 0));
+
+/// Lock the live TUN override record: the value and its generation.
+///
+/// The generation is bumped on every publish or drop of the override.
+/// Slow flows snapshot it before they wait on something (asking the
+/// core what it applied, a macOS authorization dialog) and compare it
+/// before acting on the snapshot afterwards: a different generation
+/// means a newer confirmed state — or a preference record, which drops
+/// the override — landed in between, and the snapshot's view of the
+/// running core is no longer the latest word on it. The value and the
+/// generation live under this one lock so a reader can never pair a
+/// value with a generation it does not belong to: with the generation
+/// in a separate atomic, a publish that lands between the value write
+/// and the generation bump would hand out the new value under the old
+/// generation, and a later generation check would then vouch for a
+/// value it never belonged to.
+fn lock_live_tun_override() -> std::sync::MutexGuard<'static, (Option<bool>, u64)> {
+    LIVE_TUN_OVERRIDE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The current generation of the live TUN override record.
+#[must_use]
+pub fn live_tun_state_epoch() -> u64 {
+    lock_live_tun_override().1
+}
+
+/// The live TUN override recorded for the running core, if any.
+#[must_use]
+pub fn live_tun_override() -> Option<bool> {
+    lock_live_tun_override().0
+}
+
+/// The live TUN override together with the generation it belongs to.
+///
+/// Both fields are read under the record's one lock (see
+/// [`lock_live_tun_override`]), so the pair is always consistent.
+#[must_use]
+pub fn live_tun_snapshot() -> (Option<bool>, u64) {
+    *lock_live_tun_override()
+}
+
+/// Record the running core's confirmed TUN state as the live override.
+pub fn set_live_tun_override(enabled: bool) {
+    let mut guard = lock_live_tun_override();
+    guard.0 = Some(enabled);
+    guard.1 = guard.1.wrapping_add(1);
+}
+
+/// Drop the live TUN override, if one is recorded.
+pub fn clear_live_tun_override() {
+    let mut guard = lock_live_tun_override();
+    guard.0 = None;
+    guard.1 = guard.1.wrapping_add(1);
+}
+
+/// Set the live override to `value`, but only while its generation is
+/// still `expected_epoch`. The check and the write share one critical
+/// section under the record's own lock, so a writer that never holds
+/// the settings lock (a core stop/start clearing the override) cannot
+/// land between them and be overwritten by the older `value`.
+fn compare_and_set_live_tun_override(value: Option<bool>, expected_epoch: u64) -> bool {
+    let mut guard = lock_live_tun_override();
+    if guard.1 != expected_epoch {
+        return false;
+    }
+    guard.0 = value;
+    guard.1 = guard.1.wrapping_add(1);
+    true
+}
+
+/// Publish `enabled` as the live override, but only while its
+/// generation is still `expected_epoch` and it does not already hold
+/// that value. Check and write share one critical section, as in
+/// [`compare_and_set_live_tun_override`]: republishing the held value
+/// reports no change instead of bumping the generation for nothing.
+fn publish_live_tun_override_if_current(enabled: bool, expected_epoch: u64) -> bool {
+    let mut guard = lock_live_tun_override();
+    if guard.1 != expected_epoch || guard.0 == Some(enabled) {
+        return false;
+    }
+    guard.0 = Some(enabled);
+    guard.1 = guard.1.wrapping_add(1);
+    true
+}
+
+/// Drop the live override, but only while its generation is still
+/// `expected_epoch` and one is recorded. Check and write share one
+/// critical section, as in [`compare_and_set_live_tun_override`].
+fn drop_live_tun_override_if_current(expected_epoch: u64) -> bool {
+    let mut guard = lock_live_tun_override();
+    if guard.1 != expected_epoch || guard.0.is_none() {
+        return false;
+    }
+    guard.0 = None;
+    guard.1 = guard.1.wrapping_add(1);
+    true
+}
+
+/// Put back a snapshot of the live TUN override, but only while the
+/// record's generation is still `expected_epoch`.
+///
+/// The check and the write are one critical section under the live
+/// record's own lock (see [`compare_and_set_live_tun_override`]), so
+/// they cannot interleave with any other publish or drop — including
+/// the ones that never take the settings lock, like a core stop
+/// clearing the override: a reconciliation that confirmed a newer
+/// state for the still-running core in the meantime keeps its result,
+/// and this older snapshot is dropped instead. The settings lock is
+/// held as well, the same lock `record_tun_reconciled` publishes
+/// under, so the two settings-locked paths stay ordered too.
+/// Returns whether the snapshot was restored.
+#[must_use]
+pub fn restore_live_tun_override_if_current(
+    app: &AppHandle,
+    snapshot: Option<bool>,
+    expected_epoch: u64,
+) -> bool {
+    let state = app.state::<crate::SettingsState>();
+    let _guard = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    compare_and_set_live_tun_override(snapshot, expected_epoch)
+}
+
 #[cfg(target_os = "macos")]
 use zephyr_core::config::tun::{extract_secret_from_yaml, set_secret_in_yaml};
 use zephyr_core::config::tun::{
@@ -765,6 +906,21 @@ mod tests {
             .iter()
             .map(|v| v.as_str().map(std::borrow::ToOwned::to_owned))
             .collect()
+    }
+
+    #[test]
+    fn test_live_tun_override_roundtrip() {
+        // The live override is a plain in-memory record: set, read back,
+        // and clear. It starts empty in a fresh process; other tests do
+        // not touch it, so the sequence cannot race them.
+        clear_live_tun_override();
+        assert_eq!(live_tun_override(), None);
+        set_live_tun_override(true);
+        assert_eq!(live_tun_override(), Some(true));
+        set_live_tun_override(false);
+        assert_eq!(live_tun_override(), Some(false));
+        clear_live_tun_override();
+        assert_eq!(live_tun_override(), None);
     }
 
     #[test]
@@ -1516,7 +1672,15 @@ pub fn disable_tun_cmd(app: tauri::AppHandle) -> Result<(), String> {
 /// `save_settings` / `patch_settings` use: a concurrent writer cannot land in
 /// between, and a failed write leaves memory unchanged.
 pub fn sync_tun_settings(app: &AppHandle, enable: bool) -> Result<(), String> {
-    crate::commit_settings(app, |s| s.tun_enabled = Some(enable))
+    let result = crate::commit_settings(app, |s| s.tun_enabled = Some(enable));
+    if result.is_ok() {
+        // The preference a TUN flow just recorded is the state the core
+        // is in (or is about to be restarted into) on the user's own
+        // behalf, so a live override an override script left behind must
+        // not shadow it.
+        clear_live_tun_override();
+    }
+    result
 }
 
 /// Record TUN as off after the root core is already gone.
@@ -1540,10 +1704,46 @@ pub fn record_tun_disabled(app: &AppHandle) -> bool {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     guard.tun_enabled = Some(false);
     drop(guard);
+    // The in-memory preference above is now the recorded state, so a live
+    // override from an override script must not shadow it either.
+    clear_live_tun_override();
     crate::emit_warn!(
         Config,
         CONFIG_PERSIST_FAILED,
         "TUN is off, but saving that to settings failed: {err}"
+    );
+    false
+}
+
+/// Record TUN as on after the core is already running it.
+///
+/// Mirror of [`record_tun_disabled`] for the on direction, used where
+/// TUN has *already* started, so a failed `settings.json` write cannot
+/// be reported as "TUN still off". The in-memory preference is set to
+/// `true` even then: the tray status reads that memory, and a stale
+/// `false` there would keep showing the non-TUN icon for a core that
+/// is running TUN. The failed write is surfaced as a warning.
+///
+/// Returns whether the preference reached `settings.json`.
+#[must_use]
+pub fn record_tun_started(app: &AppHandle) -> bool {
+    let Err(err) = sync_tun_settings(app, true) else {
+        return true;
+    };
+    let state = app.state::<crate::SettingsState>();
+    let mut guard = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    guard.tun_enabled = Some(true);
+    drop(guard);
+    // The in-memory preference above is now the recorded state, so a live
+    // override from an override script must not shadow it either.
+    clear_live_tun_override();
+    crate::emit_warn!(
+        Config,
+        CONFIG_PERSIST_FAILED,
+        "TUN is on, but saving that to settings failed: {err}"
     );
     false
 }
@@ -1584,25 +1784,39 @@ pub fn set_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String
     set_tun_enabled_internal(&app, enable)
 }
 
-/// Record the TUN preference after a caller has already applied TUN to the core.
+/// Record the TUN preference for a state a caller has applied — or, with
+/// `already_applied: false`, is about to apply.
 ///
-/// [`set_tun_enabled`] is the command for "make the core like this"; this one is
-/// for the flows that have already done that themselves — the privileged
-/// macOS restart, the non-macOS config patch, the Linux permission-gated
-/// restart — and only need the setting recorded. It deliberately does not touch
+/// [`set_tun_enabled`] is the command for "make the core like this"; this one
+/// is for the flows that handle the core themselves — the privileged macOS
+/// restart, the non-macOS config patch, the Linux permission-gated restart —
+/// and only need the setting recorded. It deliberately does not touch
 /// `run_config.yaml`, so it cannot undo a change those flows made.
 ///
 /// It exists so `patch_settings` can reject a non-null `tun_enabled`: a generic
 /// settings write is not aware that the flag describes the *running* core, and a
 /// stale or racing one could persist a value that disagrees with it. macOS
 /// startup reads this flag to choose the TUN path.
+///
+/// `already_applied` decides what a failed `settings.json` write leaves
+/// behind. When the core is already in the recorded state, the in-memory
+/// preference is updated even then: the error only tells the caller to warn
+/// that the saved preference is stale, so the next launch could pick the
+/// wrong path. The Linux permission-grant flow is the one caller that
+/// records *before* its restart, and it aborts on a failed write precisely
+/// so the state stays exactly as it was — for it a failed write must leave
+/// memory unchanged too, or the next core start would bring TUN up on a
+/// preference the user was just told did not take effect.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn record_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String> {
-    // Every caller records `false` after TUN has already stopped.
-    // `record_tun_disabled` switches this session to the non-TUN path even when
-    // the write fails; the error only tells the caller to warn that the saved
-    // preference is stale, so the next launch could bring TUN back.
+pub fn record_tun_enabled(
+    app: tauri::AppHandle,
+    enable: bool,
+    already_applied: bool,
+) -> Result<(), String> {
+    if !already_applied {
+        return sync_tun_settings(&app, enable);
+    }
     if !enable {
         return if record_tun_disabled(&app) {
             Ok(())
@@ -1610,7 +1824,170 @@ pub fn record_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), Str
             Err("TUN is off, but saving that preference failed".to_owned())
         };
     }
-    sync_tun_settings(&app, true)
+    if record_tun_started(&app) {
+        Ok(())
+    } else {
+        Err("TUN is on, but saving that preference failed".to_owned())
+    }
+}
+
+/// Reconcile the live TUN state with the `tun.enable` the running core
+/// has confirmed it applied.
+///
+/// Override scripts and patch batches rewrite the running config and
+/// hot-reload the core without going through the TUN commands, so the
+/// saved preference can disagree with the core that is actually
+/// running — and tray status trusts the recorded state over the file.
+/// When the two disagree, the confirmed state is recorded as the live
+/// override (see [`live_tun_override`]), which tray status reads ahead
+/// of the preference.
+///
+/// The saved preference itself is deliberately never written here: the
+/// override's effect belongs to the running core alone, so the next
+/// core start — which writes the preference into `run_config.yaml` —
+/// must still apply the user's own choice once the script is disabled
+/// or removed. With nothing recorded yet the tray falls back to the
+/// file itself, which already says the right thing, so there is
+/// nothing to reconcile in that case either.
+///
+/// `applied` must be the value the core itself reported after the
+/// reload (see `trigger_hot_reload_and_reconcile_tun` in the Prism
+/// pipeline): the value written into `run_config.yaml` alone is never
+/// enough, because a reload the core refused would otherwise change
+/// what the tray reports for a core that never applied it — the same
+/// reason the TUN toggle flows record only after the core confirms.
+/// On macOS an enabled value is only recorded when a root TUN core is
+/// running: a non-root core cannot apply TUN, so its reported value is
+/// not a state the tray may show.
+///
+/// Best-effort, and guarded against racing a TUN toggle: a toggle in
+/// progress owns the record, and the state is only recorded while
+/// `run_config.yaml` still carries the confirmed value — a newer write
+/// (a toggle, a later override) supersedes this reconciliation, and its
+/// own flow records the outcome instead. The recording step re-checks
+/// both guards while holding the settings lock (see
+/// `record_tun_reconciled`), so a toggle that records between the
+/// checks above and the write below is never overwritten by this
+/// older result.
+///
+/// `epoch` is the live-state generation the caller snapshot before it
+/// reloaded and asked the core (see [`live_tun_state_epoch`]): a
+/// preference record or a newer confirmed state landing while the core
+/// was being asked bumps the generation and voids this older result,
+/// including when the recorded preference value itself did not change.
+///
+/// Returns whether the reconciliation changed the live state. The
+/// caller then repaints the tray (icon refresh and, in lightweight
+/// mode, the menu rebuild) itself: tray writes run on the main thread
+/// and wait for it, so they must never run while the caller still
+/// holds the reload-and-reconcile sequence lock — a main-thread caller
+/// waiting on that lock would deadlock against the repaint (see the
+/// tray icon claim record in `tray.rs`).
+#[must_use]
+pub fn reconcile_tun_with_core(app: &AppHandle, applied: bool, epoch: u64) -> bool {
+    if is_tun_toggling() || live_tun_state_epoch() != epoch {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    if applied && !is_tun_mode() {
+        return false;
+    }
+    let Ok(paths) = resolve_app_paths(app) else {
+        return false;
+    };
+    let Ok(content) = std::fs::read_to_string(paths.core_dir.join("run_config.yaml")) else {
+        return false;
+    };
+    if extract_tun_enabled_from_yaml(&content) != applied {
+        return false;
+    }
+    let recorded = {
+        let state = app.state::<crate::SettingsState>();
+        let guard = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if guard.tun_enabled == Some(applied) {
+            // The saved preference already describes the running core, so
+            // no live override is needed; drop one an earlier reload
+            // recorded before the preference caught up with the core. The
+            // drop is a compare-and-clear under the live record's own
+            // lock, so a stale reconciliation cannot drop a newer
+            // override published after its generation snapshot — by a
+            // writer holding the settings lock or by one that never
+            // takes it — nor lose its own drop to one.
+            let dropped = drop_live_tun_override_if_current(epoch);
+            drop(guard);
+            return dropped;
+        }
+        guard.tun_enabled
+    };
+    recorded.is_some() && record_tun_reconciled(app, applied, recorded, epoch)
+}
+
+/// Repaint the tray after [`reconcile_tun_with_core`] changed the live
+/// state: the icon is backend-owned in lightweight mode, where no
+/// frontend sync runs to repaint it, and the menu rebuild stays
+/// lightweight-only for the same reason. Call this only after the
+/// reload-and-reconcile sequence lock has been released (see
+/// [`reconcile_tun_with_core`]).
+pub fn refresh_tray_after_reconcile(app: &AppHandle) {
+    crate::tray::refresh_tray_icon(app);
+    crate::tray::rebuild_tray_menu_from_state_if_lightweight(app);
+}
+
+/// Record `applied` as the live TUN override, atomically against the
+/// snapshot `recorded` that the reconciliation read earlier.
+///
+/// The whole check-and-set runs under the settings lock — the same
+/// lock every preference writer records under (see `commit_settings`)
+/// — and the override only lands when the recorded preference is still
+/// that snapshot, no toggle has claimed the record in the meantime,
+/// and `run_config.yaml` still carries the confirmed value. A toggle
+/// that recorded a newer value after the snapshot therefore keeps it:
+/// its own recording also clears the live override, and this stale
+/// reconciliation must not bring the older value back. The settings
+/// themselves are never touched: the override is memory-only, so it
+/// ends with this core and with this session.
+fn record_tun_reconciled(
+    app: &AppHandle,
+    applied: bool,
+    recorded: Option<bool>,
+    epoch: u64,
+) -> bool {
+    let state = app.state::<crate::SettingsState>();
+    let guard = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if guard.tun_enabled != recorded || is_tun_toggling() || live_tun_state_epoch() != epoch {
+        return false;
+    }
+    let Ok(paths) = resolve_app_paths(app) else {
+        return false;
+    };
+    let Ok(content) = std::fs::read_to_string(paths.core_dir.join("run_config.yaml")) else {
+        return false;
+    };
+    if extract_tun_enabled_from_yaml(&content) != applied {
+        return false;
+    }
+    // Publish while the settings guard is still held, and as one
+    // compare-and-set under the live record's own lock: the generation
+    // is rechecked at the write itself, so a drop that landed during
+    // the file reads above — from a preference writer after its commit,
+    // or from a core stop/start, which never takes the settings lock —
+    // voids this older result instead of being overwritten by it. The
+    // same critical section also covers the no-change case: a reload
+    // that confirms the state the override already holds reports no
+    // change, so the caller does not repaint the tray (and, in
+    // lightweight mode, rebuild the menu) on every such reload for no
+    // reason. A preference record whose drop has not landed yet is
+    // unaffected either way: its drop runs after this publish and
+    // removes the override, as its own recording requires.
+    let published = publish_live_tun_override_if_current(applied, epoch);
+    drop(guard);
+    published
 }
 
 /// Initialize TUN mode flag from config file (call at app startup)

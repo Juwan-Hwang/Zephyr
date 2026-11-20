@@ -1,0 +1,12 @@
+# versions used for the delivered v3 render (Python 3.12, Debian 13 aarch64)
+playwright==1.64.0          # Chromium build 1248 (python -m playwright install chromium)
+numpy==2.5.4
+scipy==1.18.1
+pillow==13.0.0
+fonttools==4.61.1
+soundfile
+soxr
+pyloudnorm
+brotli
+# earshot (SFX bank) pinned to commit 925ebe56a1b755e5d354ab642bb8f344440cfa9c
+# ffmpeg 7.1.5 (libx264)

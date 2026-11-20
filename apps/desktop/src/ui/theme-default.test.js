@@ -40,6 +40,16 @@ describe('default theme', () => {
         expect(normalizeTheme('')).toBe('blue');
     });
 
+    it('normalizeTheme keeps #rgb / #rrggbb and drops malformed hex', async () => {
+        const { normalizeTheme } = await import('./theme.js');
+        expect(normalizeTheme('#ABC')).toBe('#ABC');
+        expect(normalizeTheme(' #00ff7a ')).toBe('#00ff7a');
+        expect(normalizeTheme('#')).toBe('blue');
+        expect(normalizeTheme('#12345')).toBe('blue');
+        expect(normalizeTheme('#zzzzzz')).toBe('blue');
+        expect(normalizeTheme('#00ff7a; color: red')).toBe('blue');
+    });
+
     it('applyTheme("purple") applies the blue preset', async () => {
         const theme = await import('./theme.js');
         theme.applyTheme('purple');

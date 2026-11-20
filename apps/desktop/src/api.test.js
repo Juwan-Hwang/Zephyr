@@ -584,8 +584,35 @@ describe('listen', () => {
 });
 
 describe('openUrl', () => {
-    it('throws when Tauri IPC is not available', async () => {
+    it('throws when Tauri IPC is not available for valid URLs', async () => {
         await expect(openUrl('https://example.com')).rejects.toThrow('[API] Tauri IPC not available');
+    });
+
+    it('rejects non-http and non-https URL schemes', async () => {
+        await expect(openUrl('file:///C:/Windows/System32/calc.exe')).rejects.toThrow('openUrl only supports http and https URLs');
+        // eslint-disable-next-line no-script-url
+        await expect(openUrl('javascript:alert(1)')).rejects.toThrow('openUrl only supports http and https URLs');
+        await expect(openUrl('data:text/html,hello')).rejects.toThrow('openUrl only supports http and https URLs');
+        await expect(openUrl('powershell:Start-Process calc')).rejects.toThrow('openUrl only supports http and https URLs');
+        await expect(openUrl(/** @type {any} */ (null))).rejects.toThrow('openUrl only supports http and https URLs');
+    });
+
+    it('invokes opener plugin for valid http and https URLs', async () => {
+        const invokeSpy = vi.fn().mockResolvedValue(undefined);
+        vi.stubGlobal('__TAURI_INTERNALS__', {
+            invoke: invokeSpy,
+            transformCallback: vi.fn(),
+        });
+        vi.resetModules();
+        const api = await import('./api.js');
+
+        await api.openUrl('  https://example.com/test  ');
+        expect(invokeSpy).toHaveBeenCalledWith('plugin:opener|open_url', { url: 'https://example.com/test' });
+
+        await api.openUrl('http://127.0.0.1:8080');
+        expect(invokeSpy).toHaveBeenCalledWith('plugin:opener|open_url', { url: 'http://127.0.0.1:8080' });
+
+        vi.unstubAllGlobals();
     });
 });
 

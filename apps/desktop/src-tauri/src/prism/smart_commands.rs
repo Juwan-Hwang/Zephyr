@@ -65,17 +65,13 @@ pub fn smart_config(state: State<PrismState>) -> Result<serde_json::Value, Strin
     let config_path = prism_dir.join("smart.toml");
     if config_path.exists() {
         let toml_str = std::fs::read_to_string(&config_path).unwrap_or_default();
-        if let Some(line) = toml_str.lines().find(|l| l.starts_with("enabled")) {
-            let enabled = line
-                .strip_prefix("enabled")
-                .map(str::trim)
-                .and_then(|s| s.strip_prefix('='))
-                .map(str::trim)
-                .map(|s| s == "true")
-                .unwrap_or(false);
-            if let Some(obj) = val.as_object_mut() {
-                obj.insert("enabled".to_owned(), serde_json::Value::Bool(enabled));
-            }
+        // Parse the file instead of matching text, so `enabled = true # note`
+        // and a key like `enabled_x` are read correctly.
+        let parsed = toml::from_str::<toml::Table>(&toml_str)
+            .ok()
+            .and_then(|table| table.get("enabled").and_then(toml::Value::as_bool));
+        if let (Some(flag), Some(obj)) = (parsed, val.as_object_mut()) {
+            obj.insert("enabled".to_owned(), serde_json::Value::Bool(flag));
         }
     }
 

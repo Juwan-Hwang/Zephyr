@@ -1,0 +1,136 @@
+--- a/mock-api.js
++++ b/mock-api.js
+@@ -30,7 +30,7 @@
+ let tunEnabled = false;
+ let autostartEnabled = false;
+ let currentMode = 'rule';
+-let selectedProxy = '🔀 自动选择';
++let selectedProxy = '🚀 节点选择';
+ let coreRunning = true;
+ let uiScale = 1.0;
+ 
+@@ -59,7 +59,7 @@
+ 
+ const overrides = [
+   { id: 'ov-1', name: '广告拦截', ext: '.yaml', type: 'script', enabled: true, content: 'payload:\n  - DOMAIN-SUFFIX,ad.com,REJECT', created: '2026-04-15' },
+-  { id: 'ov-2', name: '分流增强', ext: '.yaml', type: 'script', enabled: false, content: 'payload:\n  - DOMAIN-KEYWORD,openai,Proxy', created: '2026-04-14' },
++  { id: 'ov-2', name: '分流增强', ext: '.yaml', type: 'script', enabled: false, content: "# 分流增强 · Prism DSL\n__when__:\n  platform: [macos, windows]\n  enabled: true\n\nrules:\n  $prepend:\n    - \"DOMAIN-SUFFIX,anthropic.com,🤖 AI 服务\"\n    - \"DOMAIN-SUFFIX,openai.com,🤖 AI 服务\"\n    - \"DOMAIN-KEYWORD,adservice,REJECT\"\n  $append:\n    - \"MATCH,{{proxy}}\"\n\ndns:\n  $override:\n    enable: true\n    enhanced-mode: fake-ip\n    nameserver:\n      - https://doh.pub/dns-query\n", created: '2026-04-14' },
+ ];
+ 
+ const connections = new Map();
+@@ -125,29 +125,37 @@
+   }
+ }
+ 
+-// Initialize mock connections
++// Initialize mock connections (film dataset)
+ function initConnections() {
+-  const domains = ['google.com', 'github.com', 'api.openai.com', 'reddit.com', 'twitter.com'];
+-  for (let i = 0; i < 5; i++) {
++  const rows = [
++    ['api.anthropic.com','Claude','🤖 AI 服务','🇯🇵 日本 东京 01','DOMAIN-SUFFIX'],
++    ['github.com','Safari','🚀 节点选择','🇭🇰 香港 03 IPLC','DOMAIN-SUFFIX'],
++    ['www.youtube.com','Chrome','🚀 节点选择','🇭🇰 香港 03 IPLC','GEOSITE'],
++    ['rr3---sn-i3b7kn7s.googlevideo.com','Chrome','🚀 节点选择','🇭🇰 香港 03 IPLC','GEOSITE'],
++    ['api.openai.com','ChatGPT','🤖 AI 服务','🇯🇵 日本 东京 01','DOMAIN-SUFFIX'],
++    ['registry.npmjs.org','node','🚀 节点选择','🇭🇰 香港 03 IPLC','DOMAIN-SUFFIX'],
++    ['objects.githubusercontent.com','git','🚀 节点选择','🇭🇰 香港 03 IPLC','DOMAIN-SUFFIX'],
++    ['www.figma.com','Figma','🚀 节点选择','🇭🇰 香港 03 IPLC','MATCH'],
++    ['open.spotify.com','Spotify','🚀 节点选择','🇸🇬 新加坡 01','MATCH'],
++    ['www.bilibili.com','Safari','DIRECT','DIRECT','GEOIP'],
++    ['x.com','Arc','🚀 节点选择','🇭🇰 香港 03 IPLC','DOMAIN-SUFFIX'],
++    ['crates.io','cargo','🚀 节点选择','🇭🇰 香港 03 IPLC','DOMAIN-SUFFIX'],
++  ];
++  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
++  rows.forEach((r, i) => {
+     const id = `conn-${connectionIdCounter++}`;
+     connections.set(id, {
+       id,
+-      metadata: {
+-        host: domains[i],
+-        sourceIP: '192.168.1.100',
+-        sourcePort: 54000 + i,
+-        destinationIP: `142.250.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`,
+-        destinationPort: 443,
+-        process: ['Chrome', 'Firefox', 'Electron'][Math.floor(Math.random() * 3)],
+-        type: 'HTTP'
+-      },
+-      upload: Math.floor(Math.random() * 10000),
+-      download: Math.floor(Math.random() * 50000),
+-      start: Date.now() - Math.floor(Math.random() * 60000),
+-      chains: ['🇯🇵 日本-东京-01'],
+-      rule: 'GLOBAL'
++      metadata: { host: r[0], sourceIP: '192.168.1.100', sourcePort: 52100 + i * 37,
++        destinationIP: `${[104,140,142,151,185][i%5]}.${Math.floor(rnd()*255)}.${Math.floor(rnd()*255)}.${Math.floor(rnd()*255)}`,
++        destinationPort: 443, process: r[1], network: i % 4 === 3 ? 'udp' : 'tcp', type: 'HTTPS' },
++      upload: Math.floor(rnd() * 900000 + 20000),
++      download: Math.floor(rnd() * 48000000 + 300000),
++      start: Date.now() - Math.floor(rnd() * 600000),
++      chains: r[2] === 'DIRECT' ? ['DIRECT'] : [r[3], r[2]],
++      rule: r[4], rulePayload: r[0]
+     });
+-  }
++  });
+ }
+ initConnections();
+ 
+@@ -245,7 +253,7 @@
+   },
+   'stop_core': () => { coreRunning = false; return null; },
+   'get_core_version': () => MOCK_VERSION.version,
+-  'get_core_uptime': () => ({ uptime_secs: 3600 }),
++  'get_core_uptime': () => 93784,
+   'update_core': () => null,
+   'get_latest_version': () => ({ version: '1.19.0', name: 'Meta' }),
+   'get_latest_client_version': () => ({ version: '0.5.0', download_url: '', notes: '' }),
+@@ -263,7 +271,8 @@
+ 
+   // ─── Tray ──────────────────────────────────────────────────────────
+   'get_tray_status': () => ({ sysProxy: sysProxyEnabled, tun: tunEnabled, mode: currentMode }),
+-  'get_tray_proxy_status': () => ({ proxy: selectedProxy, group: 'GLOBAL' }),
++  // mirrors tray.rs get_tray_proxy_status: "stopped" | "tun" | "running"
++  'get_tray_proxy_status': () => (tunEnabled ? 'tun' : 'running'),
+   'get_tray_menu_state': () => trayMenuState,
+   'set_tray_menu_state': (args) => { if (args) Object.assign(trayMenuState, args); return null; },
+   'change_tray_icon': () => null,
+@@ -271,14 +280,16 @@
+   'update_tray_toggle_states': () => null,
+ 
+   // ─── TUN ───────────────────────────────────────────────────────────
+-  'set_tun_enabled': () => { tunEnabled = true; emitTauriEvent('tray-tun-changed', { enabled: true }); return null; },
+-  'disable_tun_cmd': () => { tunEnabled = false; emitTauriEvent('tray-tun-changed', { enabled: false }); return null; },
++  'set_tun_enabled': () => { tunEnabled = true; configState.tun = Object.assign({}, configState.tun, { enable: true }); emitTauriEvent('tray-tun-changed', { enabled: true }); return null; },
++  'disable_tun_cmd': () => { tunEnabled = false; configState.tun = Object.assign({}, configState.tun, { enable: false }); emitTauriEvent('tray-tun-changed', { enabled: false }); return null; },
+   'release_tun_toggle': () => null,
+   'restart_core_as_root_cmd': () => null,
+   'kill_all_mihomo_as_root_cmd': () => null,
+   'grant_linux_tun_permission': () => ({ success: true }),
+   'apply_windows_tcp_optimizations': () => ({ success: true }),
+   'get_configs': () => ({ tun: tunEnabled, mixed_port: 7890, mode: currentMode }),
++  // demo-only: mirrors the Rust switch_mode command (hot-reload the core mode, persist, notify tray)
++  'switch_mode': (args) => { const m = (args && args.mode) || 'rule'; currentMode = m; try { configState.mode = m; } catch {} emitTauriEvent('tray-mode-changed', { mode: m }); return m; },
+ 
+   // ─── Autostart ─────────────────────────────────────────────────────
+   'plugin:autostart|enable': () => { autostartEnabled = true; return null; },
+@@ -436,7 +447,7 @@
+   },
+   'override_get_content': (args) => {
+     const ov = overrides.find(o => o.id === args?.id);
+-    return ov ? { content: ov.content } : { content: '' };
++    return ov ? ov.content : '';
+   },
+   'override_set_content': (args) => {
+     const ov = overrides.find(o => o.id === args?.id);
+@@ -752,7 +763,11 @@
+       return mockResponse(MOCK_VERSION);
+     }
+     if (path.includes('/delay')) {
+-      const delay = Math.floor(Math.random() * 300 + 50);
++      let nm = ''; try { nm = decodeURIComponent(path.split('/')[2] || ''); } catch(e) {}
++      const base = (proxyState.proxies && proxyState.proxies[nm] && proxyState.proxies[nm].history && proxyState.proxies[nm].history[0]) ? proxyState.proxies[nm].history[0].delay : 120;
++      let h = 0; for (const c of nm) h = (h * 31 + c.charCodeAt(0)) % 997;
++      const delay = Math.max(8, base - 6 + (h % 9));
++      await new Promise(r => setTimeout(r, 180 + (h % 7) * 70));
+       return mockResponse({ delay });
+     }
+ 

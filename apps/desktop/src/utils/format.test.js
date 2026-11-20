@@ -22,6 +22,10 @@ describe('formatFileSize', () => {
     it('1.00 MB', () => expect(formatFileSize(1048576)).toBe('1.00 MB'));
     it('1.00 TB', () => expect(formatFileSize(1099511627776)).toBe('1.00 TB'));
     it('negative produces NaN result', () => expect(formatFileSize(-1)).toBe('NaN undefined'));
+    it('numeric string is coerced', () => expect(formatFileSize('1024')).toBe('1.00 KB'));
+    it('numeric string zero', () => expect(formatFileSize('0')).toBe('0 B'));
+    it('non-numeric string produces NaN result', () => expect(formatFileSize('abc')).toBe('NaN undefined'));
+    it('values Number() cannot convert produce NaN result', () => expect(formatFileSize(/** @type {any} */ (Symbol('x')))).toBe('NaN undefined'));
 });
 
 describe('formatBytes (decimal)', () => {
@@ -30,6 +34,22 @@ describe('formatBytes (decimal)', () => {
     it('1000 bytes = 1.00 KB', () => expect(formatBytes(1000)).toBe('1.00 KB'));
     it('1.00 MB for 1000000', () => expect(formatBytes(1000000)).toBe('1.00 MB'));
     it('1.02 KB for 1024', () => expect(formatBytes(1024)).toBe('1.02 KB'));
+});
+
+describe('formatBytes (invalid input)', () => {
+    it.each([[-100], [null], [undefined], [NaN], [Infinity], [-Infinity], ['invalid']])('%s → 0 B', (v) => {
+        expect(formatBytes(/** @type {any} */ (v))).toBe('0 B');
+    });
+    it('values Number() cannot convert → 0 B', () => {
+        const throwing = { valueOf() { throw new Error('nope'); } };
+        expect(formatBytes(/** @type {any} */ (Symbol('x')))).toBe('0 B');
+        expect(formatBytes(/** @type {any} */ (throwing))).toBe('0 B');
+        expect(formatSpeed(/** @type {any} */ (Symbol('x')))).toBe('0 B/s');
+    });
+    it('sub-byte values stay in B', () => expect(formatBytes(0.5)).toBe('0.50 B'));
+    it('numeric strings are parsed', () => expect(formatBytes(/** @type {any} */ ('1000'))).toBe('1.00 KB'));
+    it('clamps to TB', () => expect(formatBytes(1e15)).toBe('1000.00 TB'));
+    it('formatSpeed of NaN is 0 B/s', () => expect(formatSpeed(NaN)).toBe('0 B/s'));
 });
 
 describe('formatSpeed', () => {

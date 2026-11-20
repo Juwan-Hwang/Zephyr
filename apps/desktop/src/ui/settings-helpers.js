@@ -42,6 +42,24 @@ export function saveSetting(key, value) {
 }
 
 /**
+ * Like saveSetting(), but the returned promise rejects when the write fails, for
+ * callers that must report or undo it.
+ * @param {string} key
+ * @param {any} value
+ * @returns {Promise<void>}
+ */
+export function saveSettingChecked(key, value) {
+    const run = saveQueue.then(async () => {
+        await invoke(COMMANDS.PATCH_SETTINGS, { patch: { [key]: value } });
+        invalidateSettingsCache();
+    });
+    saveQueue = run.catch((e) => {
+        settingsLogger.warn(`Failed to save ${key}:`, e);
+    });
+    return run;
+}
+
+/**
  * Save multiple fields to settings.json in a single atomic patch.
  *
  * @param {Record<string, *>} patch - Key-value pairs to merge into settings.

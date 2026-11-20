@@ -64,6 +64,12 @@ let _chartThemeObserver = null;
 /** @type {boolean} Whether the document is currently visible. */
 let _isVisible = !document.hidden;
 
+/**
+ * Reusable points buffer for chart rendering to eliminate per-frame allocations.
+ * @type {Array<{ x: number, y: number }>}
+ */
+const _pointsBuffer = [];
+
 /** @type {boolean} Whether data was received while hidden (needs re-render on visible). */
 let _pendingRender = false;
 
@@ -423,21 +429,33 @@ function renderChart() {
 
   if (trafficHistory.length < 2) return;
 
-  // Filter out any non-numeric entries for safety
-  const validData = trafficHistory.filter(
-    (d) => !isNaN(d.up) && !isNaN(d.down),
-  );
-  if (validData.length < 2) return;
-
-  // Dynamic Y-axis scale with a floor of 10 KB/s
-  let maxVal = Math.max(...validData.map((d) => Math.max(d.up, d.down)));
-  maxVal = Math.max(maxVal, 1024 * 10);
+  // Single-pass computation of Y-axis scale (min 10 KB/s floor) and validity check.
+  // Avoids per-frame array allocations (`trafficHistory.filter(...)` and `.map(...)`).
+  // Samples are coerced with Number() and must be finite: numeric strings count
+  // (the legacy isNaN check accepted them), while NaN and ±Infinity are excluded
+  // here and normalised to 0 when drawn, so one bad sample cannot poison the scale.
+  // Each series is judged on its own: drawArea() plots a finite value even when
+  // the sample's other series is invalid, so a finite value must always count
+  // towards the scale — otherwise its curve would be drawn far off-canvas.
+  let maxVal = 1024 * 10;
+  let validCount = 0;
+  for (const d of trafficHistory) {
+    const up = Number(d.up);
+    const down = Number(d.down);
+    const upValid = Number.isFinite(up);
+    const downValid = Number.isFinite(down);
+    if (upValid && up > maxVal) maxVal = up;
+    if (downValid && down > maxVal) maxVal = down;
+    if (upValid || downValid) validCount++;
+  }
+  if (validCount < 2) return;
 
   const getY = (/** @type {number} */ v) => height - ((v / maxVal) * (height - 20)) - 10;
 
   // Downstream — fixed blue, solid line + gradient fill (primary series)
   drawArea(
-    trafficHistory.map((d) => d.down || 0),
+    trafficHistory,
+    'down',
     currentColors.download,
     getY,
     { lineWidth: 2, fillAlpha: 0.3 },
@@ -445,7 +463,8 @@ function renderChart() {
 
   // Upstream — fixed coral, slightly thinner solid line + faint fill
   drawArea(
-    trafficHistory.map((d) => d.up || 0),
+    trafficHistory,
+    'up',
     currentColors.upload,
     getY,
     { lineWidth: 1.5, fillAlpha: 0.08 },
@@ -455,24 +474,43 @@ function renderChart() {
 /**
  * Draw a single filled area curve with a gradient fade.
  *
- * @param {number[]} data - Y-values for each data point
+ * Optimised to reuse `_pointsBuffer` in-place without allocating temporary arrays or point objects per frame.
+ *
+ * @param {Array<{ up: number, down: number, time: number }>} history - Traffic history samples
+ * @param {'down' | 'up'} key - Which speed property to render ('down' or 'up')
  * @param {{ r: number, g: number, b: number }} color - RGB colour for this series
  * @param {(val: number) => number} getY - Maps a data value to a canvas Y coordinate
  * @param {{ lineWidth?: number, fillAlpha?: number }} [style] - Stroke width and top-of-gradient fill opacity
  * @private
  */
-function drawArea(data, color, getY, { lineWidth = 2, fillAlpha = 0.3 } = {}) {
+function drawArea(history, key, color, getY, { lineWidth = 2, fillAlpha = 0.3 } = {}) {
   if (!canvas || !ctx) return;
 
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
+  const len = history.length;
   // Anchor the newest sample to the right edge so a short history still reads as a
   // live tail instead of a sliver hugging the left edge (the home hero is full width).
-  const offset = Math.max(0, MAX_DATA_POINTS - data.length);
+  const offset = Math.max(0, MAX_DATA_POINTS - len);
   const getX = (/** @type {number} */ i) => ((i + offset) / (MAX_DATA_POINTS - 1)) * width;
 
+  // Populate reusable _pointsBuffer in-place to avoid per-render array and object allocations
+  while (_pointsBuffer.length < len) {
+    _pointsBuffer.push({ x: 0, y: 0 });
+  }
+  _pointsBuffer.length = len;
+
+  for (let i = 0; i < len; i++) {
+    const pt = _pointsBuffer[i];
+    pt.x = getX(i);
+    // Same coercion rule as the scale pass in renderChart(): finite numbers
+    // (including numeric strings) draw at face value, anything else becomes 0.
+    const v = Number(history[i][key]);
+    pt.y = getY(Number.isFinite(v) ? v : 0);
+  }
+
   ctx.beginPath();
-  traceSmoothCurve(ctx, data.map((v, i) => ({ x: getX(i), y: getY(v) })));
+  traceSmoothCurve(ctx, _pointsBuffer);
 
   // Stroke
   ctx.strokeStyle = rgba(color, 0.8);
@@ -488,7 +526,7 @@ function drawArea(data, color, getY, { lineWidth = 2, fillAlpha = 0.3 } = {}) {
 
   // Close the fill straight down from the newest point (where the curve now
   // ends) and back along the baseline.
-  ctx.lineTo(getX(data.length - 1), height);
+  ctx.lineTo(getX(len - 1), height);
   ctx.lineTo(getX(0), height);
   ctx.closePath();
   ctx.fillStyle = gradient;

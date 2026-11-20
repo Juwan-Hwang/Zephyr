@@ -217,4 +217,5 @@ export const Events = Object.freeze({
     PRISM_EVENT: 'prism-event',
     PRISM_APPLIED: 'prism-applied',
     PRISM_FAILED: 'prism-failed',
+    FAILOVER_POLICY_CHANGED: 'failover-policy-changed',
 });

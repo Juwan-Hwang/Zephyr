@@ -1,8 +1,5 @@
 // @ts-check
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 vi.mock('../api.js', () => ({
     invoke: vi.fn().mockResolvedValue({}),
@@ -12,22 +9,7 @@ import { translations, setLanguage } from '../i18n.js';
 import { renderTunStatus } from './tun-status.js';
 import { initNavTooltips, getNavLabel, NAV_TOOLTIP_HOVER_DELAY } from './nav-tooltip.js';
 import { Bus, Events } from './events.js';
-
-const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const read = (/** @type {string} */ rel) => fs.readFileSync(path.join(SRC, rel), 'utf8');
-
-/**
- * Parse index.html without letting happy-dom fetch its stylesheets/scripts:
- * `<script>` and `<link>` are renamed to inert elements before parsing (plain
- * string substitution on our own trusted file, not sanitization).
- */
-const parseIndex = () => {
-    const html = read('index.html')
-        .split('<script').join('<template data-inert-script')
-        .split('</script>').join('</template>')
-        .split('<link').join('<meta data-inert-link');
-    return new DOMParser().parseFromString(html, 'text/html');
-};
+import { readSrc as read, parseIndex } from '../test/index-dom.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  1. TUN status labels
@@ -462,5 +444,43 @@ describe('sidebar nav tooltips', () => {
         const css = read('styles.css');
         expect(css).toMatch(/\.nav-tooltip\s*\{/);
         expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.nav-tooltip\s*\{\s*transition:\s*none/);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Flag emoji survive letter-spacing
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('flag emoji with letter-spacing', () => {
+    const css = read('styles.css');
+    // Every `@font-face` body, kept apart so one face must carry both the
+    // family and the range.
+    const faces = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)].map((m) => m[1]);
+    const root = [...css.matchAll(/(?:^|[};\s]):root\s*\{([^}]*)\}/g)].map((m) => m[1]).join('\n');
+
+    it('the flag font is declared for regional indicators', () => {
+        expect(faces.some((face) =>
+            /font-family:\s*"Zephyr Country Flags"/.test(face)
+            && /unicode-range:[^;]*U\+1F1E6-1F1FF/.test(face),
+        )).toBe(true);
+    });
+
+    it('the preflight hooks enable liga so Blink keeps flag ligatures under tracking', () => {
+        expect(root).toMatch(/--default-font-featureSettings:\s*"liga"/);
+        expect(root).toMatch(/--default-monoFont-featureSettings:\s*"liga"/);
+    });
+
+    it('the preflight reads those hooks on html and on monospace elements', async () => {
+        // Generate the preflight from our own UnoCSS config instead of reading
+        // the build output, which is gitignored and absent on a clean checkout.
+        const { createGenerator } = await import('unocss');
+        const { default: config } = await import('../../uno.config.js');
+        const { css: preflight } = await (await createGenerator(config)).generate('', { preflights: true });
+        expect(preflight).toMatch(/(?:^|[};\s])html,\s*:host\s*\{[^}]*font-feature-settings:\s*var\(--default-font-featureSettings,/);
+        expect(preflight).toMatch(/(?:^|[};\s])code,\s*kbd,\s*samp,\s*pre\s*\{[^}]*font-feature-settings:\s*var\(--default-monoFont-featureSettings,/);
+    });
+
+    it('nothing else resets font-feature-settings in our stylesheet', () => {
+        expect(css.match(/font-feature-settings\s*:/g) ?? []).toHaveLength(0);
     });
 });

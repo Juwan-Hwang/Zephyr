@@ -27,7 +27,12 @@ impl Bucket {
 
     /// Returns `Ok(())` if the call is allowed, `Err(retry_after)` if rate-limited.
     fn check(&mut self) -> Result<(), Duration> {
-        let now = Instant::now();
+        self.check_at(Instant::now())
+    }
+
+    /// `check` against an explicit clock reading, so tests can drive time
+    /// deterministically instead of sleeping.
+    fn check_at(&mut self, now: Instant) -> Result<(), Duration> {
         let cutoff = now.checked_sub(self.window).unwrap_or_else(|| {
             self.timestamps
                 .first()
@@ -127,5 +132,82 @@ mod tests {
         assert!(limiter.check("a").is_ok());
         assert!(limiter.check("a").is_err()); // a is rate-limited
         assert!(limiter.check("b").is_ok()); // b is not
+    }
+
+    /// Fixed clock origin far enough from boot that `now - window` never underflows.
+    fn origin() -> Instant {
+        Instant::now() + Duration::from_secs(3600)
+    }
+
+    #[test]
+    fn test_sliding_window_expiration() {
+        let window = Duration::from_millis(100);
+        let mut bucket = Bucket::new(2, window);
+        let t0 = origin();
+
+        assert!(bucket.check_at(t0).is_ok());
+        assert!(bucket.check_at(t0).is_ok());
+        assert!(bucket.check_at(t0).is_err());
+
+        // Still inside the window right up to its edge.
+        assert!(bucket
+            .check_at(t0 + window - Duration::from_millis(1))
+            .is_err());
+        // Both calls expire once the window has passed.
+        assert!(bucket
+            .check_at(t0 + window + Duration::from_millis(1))
+            .is_ok());
+    }
+
+    #[test]
+    fn test_partial_expiration_pruning() {
+        let window = Duration::from_millis(300);
+        let mut bucket = Bucket::new(2, window);
+        let t0 = origin();
+        let t1 = t0 + Duration::from_millis(150);
+
+        assert!(bucket.check_at(t0).is_ok());
+        assert!(bucket.check_at(t1).is_ok());
+        assert!(bucket.check_at(t1).is_err());
+
+        // Past t0's window but inside t1's: only the first call is pruned.
+        let t2 = t0 + Duration::from_millis(350);
+        assert!(bucket.check_at(t2).is_ok());
+        assert!(bucket.check_at(t2).is_err());
+        assert_eq!(bucket.timestamps, vec![t1, t2]);
+    }
+
+    #[test]
+    fn test_retry_after_duration_calculation() {
+        let window = Duration::from_millis(200);
+        let mut bucket = Bucket::new(1, window);
+        let t0 = origin();
+
+        assert!(bucket.check_at(t0).is_ok());
+        let err = bucket.check_at(t0 + Duration::from_millis(50)).unwrap_err();
+        // The oldest call expires 150ms later; 1ns is added so the retry lands past it.
+        assert_eq!(err, Duration::from_millis(150) + Duration::from_nanos(1));
+    }
+
+    #[test]
+    fn test_zero_max_calls() {
+        let mut limiter = RateLimiter::new();
+        limiter.register("test", 0, Duration::from_secs(1));
+
+        let err = limiter.check("test").unwrap_err();
+        assert!(err > Duration::from_secs(0));
+    }
+
+    #[test]
+    fn test_rapid_limit_and_recovery_cycle() {
+        let window = Duration::from_millis(50);
+        let mut bucket = Bucket::new(1, window);
+        let mut now = origin();
+
+        for _ in 0..3 {
+            assert!(bucket.check_at(now).is_ok());
+            assert!(bucket.check_at(now).is_err());
+            now += window + Duration::from_millis(1);
+        }
     }
 }

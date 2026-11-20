@@ -1,8 +1,11 @@
 <div align="center">
 
-<img src="apps/desktop/src-tauri/icons/icon.png" alt="Zephyr - Modern Mihomo GUI Client Logo" width="128" height="128">
-
-# Zephyr
+<h1>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="apps/desktop/src-tauri/icons/lockup-white.svg">
+  <img src="apps/desktop/src-tauri/icons/lockup.svg" alt="Zephyr - Modern Mihomo GUI Client Logo" width="420">
+</picture>
+</h1>
 
 **Secure by Design · Light by Nature · Beautiful by Choice**
 
@@ -349,6 +352,17 @@ This project uses [MIT License](LICENSE).
     <td valign="middle">
       Free code signing provided by <a href="https://about.signpath.io/">SignPath.io</a>, certificate by <a href="https://signpath.org/">SignPath Foundation</a>.<br>
       <sub>Windows release binaries are digitally signed via SignPath Foundation. See <a href="CODE_SIGNING_POLICY.md">Code Signing Policy</a>.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="https://mergestorm.ai/?ref=zephyr">
+        <img src="https://avatars.githubusercontent.com/u/290165854?s=200&v=4" width="50" alt="Mergestorm">
+      </a>
+    </td>
+    <td valign="middle">
+      Free AI code review provided by <a href="https://mergestorm.ai/?ref=zephyr">Mergestorm</a>.<br>
+      <sub>Every pull request is reviewed by Mergestorm before it merges.</sub>
     </td>
   </tr>
 </table>

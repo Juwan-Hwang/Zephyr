@@ -94,6 +94,7 @@ import { bind } from './ui/bind.js';
 import { appStore } from './ui/state.js';
 import { Bus, Events } from './ui/events.js';
 import { normalizeVersion, isRemoteNewer } from './utils/version-utils.js';
+import { initInputModality } from './ui/input-modality.js';
 
 /** @type {any} */
 const _win = /** @type {any} */ (window);
@@ -217,7 +218,7 @@ async function retryStartWithoutTun(settings, startArgs, startErr) {
   if (typeof startErr !== 'string' || !startErr.startsWith(TUN_START_FAILED_MARKER)) {
     throw startErr;
   }
-  await invoke(COMMANDS.RECORD_TUN_ENABLED, { enable: false }).catch((e) => {
+  await invoke(COMMANDS.RECORD_TUN_ENABLED, { enable: false, alreadyApplied: true }).catch((e) => {
     apiLogger.warn('[Zephyr] saving TUN off before the retry failed', e);
   });
   apiLogger.warn('[Zephyr] TUN start failed; retrying without TUN', startErr);
@@ -227,8 +228,12 @@ async function retryStartWithoutTun(settings, startArgs, startErr) {
   } catch (retryErr) {
     apiLogger.warn('[Zephyr] start without TUN failed too', retryErr);
     // `tun_enabled` only accepts null through PATCH_SETTINGS (the reset).
+    // The core is stopped here, so putting the preference back is a plain
+    // settings write, not a record of an applied state: with
+    // `alreadyApplied: false` a failed write leaves memory matching the
+    // file instead of claiming TUN is on for a core that never started.
     const restore = settings.tun_enabled === true
-      ? invoke(COMMANDS.RECORD_TUN_ENABLED, { enable: true })
+      ? invoke(COMMANDS.RECORD_TUN_ENABLED, { enable: true, alreadyApplied: false })
       : invoke(COMMANDS.PATCH_SETTINGS, { patch: { tun_enabled: null } });
     await restore.catch((e) => {
       apiLogger.warn('[Zephyr] restoring the TUN preference failed', e);
@@ -763,6 +768,7 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 window.addEventListener('DOMContentLoaded', () => {
+    initInputModality();
   initApp().catch((err) => {
     apiLogger.error('Fatal: initApp threw an unhandled error', err);
   });

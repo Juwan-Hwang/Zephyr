@@ -97,8 +97,7 @@ winreg = "0.52"
 #
 # Do NOT bump this beyond what tauri/wry uses. When upgrading tauri, check
 # `cargo tree -i webview2-com` for the new version and update this pin to match.
-# Dependabot bumps for this crate should be closed (add to .github/dependabot.yml
-# ignore list if necessary).
+# Renovate is configured to skip this crate (see renovate.json).
 webview2-com = "=0.39.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]

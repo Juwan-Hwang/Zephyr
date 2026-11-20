@@ -5,6 +5,21 @@
  */
 
 /**
+ * Whether an element is laid out (not display:none itself or through an ancestor,
+ * and not visibility:hidden), so focus() on it can succeed.
+ * @param {Element} el
+ */
+function isRendered(el) {
+    const view = el.ownerDocument.defaultView;
+    if (!view) return true;
+    if (view.getComputedStyle(el).visibility === 'hidden') return false;
+    for (let node = /** @type {Element|null} */ (el); node; node = node.parentElement) {
+        if (view.getComputedStyle(node).display === 'none') return false;
+    }
+    return true;
+}
+
+/**
  * Initialize a custom dropdown.
  * @param {Object} opts
  * @param {string} opts.wrapId - Wrapper div id
@@ -185,6 +200,61 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
     });
     menu.addEventListener('mouseleave', syncUI, { signal });
 
+    // Keyboard: the menu is portalled to <body>, outside any dialog's focus trap,
+    // so it moves focus itself (arrows, Home/End) and hands it back on close.
+    const enabledItems = () => /** @type {HTMLElement[]} */ (Array.from(menu.querySelectorAll(`[${optionAttr}]`)))
+        .filter((item) => !item.matches(':disabled, [disabled], [aria-disabled="true"]'));
+    const focusItem = (/** @type {number} */ delta) => {
+        const items = enabledItems();
+        if (items.length === 0) return;
+        const at = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+        let next;
+        if (at < 0) {
+            const current = items.findIndex((item) => item.getAttribute(optionAttr) === select.value);
+            next = Math.max(current, 0);
+        } else {
+            next = (at + delta + items.length) % items.length;
+        }
+        items[next].focus();
+    };
+    const closeToTrigger = () => {
+        const hadFocus = menu.contains(document.activeElement);
+        closeMenu();
+        if (hadFocus) trigger.focus();
+    };
+    /**
+     * Tab from an open menu: close it and move on from the trigger, the way a native
+     * select does, staying inside the trigger's dialog (whose trap can't see the menu).
+     * @param {boolean} backwards
+     */
+    const tabOutOfMenu = (backwards) => {
+        closeToTrigger();
+        const scope = trigger.closest('[role="dialog"], dialog') || document.body;
+        const tabbables = /** @type {HTMLElement[]} */ (Array.from(scope.querySelectorAll(
+            'a[href], button, input, select, textarea, [tabindex]'
+        ))).filter((el) => el === trigger || (
+            el !== select && !menu.contains(el) && el.tabIndex >= 0
+            && !el.matches(':disabled, [type="hidden"]') && !el.closest('.hidden, [hidden], [inert]')
+        ));
+        const at = tabbables.indexOf(trigger);
+        if (at < 0 || tabbables.length < 2) return;
+        const inDialog = scope !== document.body;
+        const step = backwards ? -1 : 1;
+        // Rows hidden with an inline display:none (portable mode) or a hidden ancestor
+        // can't take focus; skip them so the Tab still lands somewhere.
+        for (let i = 1; i < tabbables.length; i++) {
+            let next = at + step * i;
+            if (next < 0 || next >= tabbables.length) {
+                if (!inDialog) return;
+                next = (next + tabbables.length) % tabbables.length;
+            }
+            const candidate = tabbables[next];
+            if (!isRendered(candidate)) continue;
+            candidate.focus();
+            if (document.activeElement === candidate) return;
+        }
+    };
+
     // Toggle — guard against disabled trigger (non-native elements don't block clicks)
     trigger.addEventListener('click', (e) => {
         if (trigger.matches(':disabled, [disabled], [aria-disabled="true"]')) {
@@ -193,8 +263,46 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
             return;
         }
         e.stopPropagation();
-        menu.classList.contains('hidden') ? openMenu() : closeMenu();
+        if (!menu.classList.contains('hidden')) { closeMenu(); return; }
+        openMenu();
+        // detail 0: activated with Enter / Space rather than a pointer.
+        if (e.detail === 0) focusItem(0);
     }, { signal });
+
+    trigger.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        if (trigger.matches(':disabled, [disabled], [aria-disabled="true"]')) return;
+        e.preventDefault();
+        if (menu.classList.contains('hidden')) openMenu();
+        focusItem(0);
+    }, { signal });
+
+    menu.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            focusItem(e.key === 'ArrowDown' ? 1 : -1);
+        } else if (e.key === 'Home' || e.key === 'End') {
+            e.preventDefault();
+            const items = enabledItems();
+            items[e.key === 'Home' ? 0 : items.length - 1]?.focus();
+        } else if (e.key === 'Tab') {
+            e.preventDefault();
+            e.stopPropagation();
+            tabOutOfMenu(e.shiftKey);
+        }
+    }, { signal });
+
+    // Escape from the open menu closes the menu, not the dialog around its trigger. A dialog's
+    // focus trap listens on document in the capture phase, before the menu sees the key, so
+    // take it earlier, on window. A pointer click opens the menu with focus left on the
+    // trigger, so Escape there counts as from the menu too.
+    window.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' || menu.classList.contains('hidden')) return;
+        if (!(e.target instanceof Node) || !(menu.contains(e.target) || trigger.contains(e.target))) return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeToTrigger();
+    }, { capture: true, signal });
 
     // Option click — guard against disabled items (non-native elements
     // don't block click events natively even with aria-disabled="true")
@@ -207,10 +315,10 @@ export function initCustomDropdown({ wrapId, triggerId, menuId, labelId, selectI
             }
             e.stopPropagation();
             const val = item.getAttribute(optionAttr);
-            if (val === null || val === select.value) { closeMenu(); return; }
+            if (val === null || val === select.value) { closeToTrigger(); return; }
             select.value = val;
             syncUI();
-            closeMenu();
+            closeToTrigger();
             if (onChange) onChange(val, select);
         }, { signal });
     });

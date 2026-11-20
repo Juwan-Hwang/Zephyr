@@ -40,6 +40,73 @@ export function isGroup(p) {
     return Array.isArray(p?.all);
 }
 
+/** Core adapter types that send traffic nowhere through a proxy (mihomo spells them Direct, RejectDrop, ...). */
+export const NON_PROXY_EXIT_TYPES = Object.freeze(new Set(['DIRECT', 'REJECT', 'REJECTDROP', 'PASS', 'COMPATIBLE', 'DNS']));
+
+/**
+ * A built-in DIRECT/REJECT-style entry (matched exactly: a node may be named "REJECT-Paris"),
+ * or a local outbound of such a type under its own name.
+ * @param {string} name
+ * @param {any} [node] - its /proxies record, if any
+ * @returns {boolean}
+ */
+export function isNonProxyExit(name, node) {
+    if (SPECIAL_PROXY_NAMES.has(String(name).toUpperCase())) return true;
+    return NON_PROXY_EXIT_TYPES.has(String(node?.type || '').toUpperCase().replace(/[-_]/g, ''));
+}
+
+/**
+ * A node that can win "fastest": not DIRECT/REJECT-like (by name or type) and not a group,
+ * even an empty one (a group's delay is only one of its members').
+ * @param {string} name
+ * @param {any} [node] - its /proxies record, if any
+ * @returns {boolean}
+ */
+export function isRealOutboundNode(name, node) {
+    return !isNonProxyExit(name, node) && !isGroup(node);
+}
+
+/**
+ * A provider-fed (`use:` / include-all) group whose own members are still only
+ * DIRECT/REJECT-style entries (or nothing): its provider's nodes have not arrived,
+ * whatever other groups hold. Local outbounds of those types under their own names count the same.
+ * @param {unknown[]} members
+ * @param {Record<string, any> | undefined} proxyMap
+ * @returns {boolean}
+ */
+export function providerMembersPending(members, proxyMap) {
+    return members.every((n) => isNonProxyExit(String(n), proxyMap?.[String(n)]));
+}
+
+/**
+ * Whether the page should keep waiting for a provider-fed group's nodes. Once the bounded
+ * provider poll has given up on the group, the DIRECT/REJECT members it does have are shown
+ * instead, so one of them can still be picked (an empty or fully filtered subscription).
+ * @param {{ usesProviders: boolean, members: unknown[], proxyMap?: Record<string, any>, pollExhausted: boolean }} state
+ * @returns {boolean}
+ */
+export function waitsForProviderNodes({ usesProviders, members, proxyMap, pollExhausted }) {
+    if (!usesProviders || !providerMembersPending(members, proxyMap)) return false;
+    return !pollExhausted || members.length === 0;
+}
+
+/**
+ * The proxies page's provider state for the open group: whether it still waits for provider
+ * nodes, and whether, the poll having given up, it shows the DIRECT/REJECT members it has.
+ * The resolver flags an include-all group holding only such members as loading; once the poll
+ * gave up that flag is cleared so the members can be picked instead of a retry screen.
+ * @param {{ resolverLoading: boolean, usesProviders: boolean, members: unknown[], proxyMap?: Record<string, any>, pollExhausted: boolean }} state
+ * @returns {{ loading: boolean, showMembersAfterPoll: boolean }}
+ */
+export function providerPageState({ resolverLoading, usesProviders, members, proxyMap, pollExhausted }) {
+    const showMembersAfterPoll = pollExhausted && usesProviders && members.length > 0
+        && providerMembersPending(members, proxyMap);
+    if (waitsForProviderNodes({ usesProviders, members, proxyMap, pollExhausted })) {
+        return { loading: true, showMembersAfterPoll };
+    }
+    return { loading: showMembersAfterPoll ? false : resolverLoading, showMembersAfterPoll };
+}
+
 /**
  * Returns true if the proxy type supports `PUT /proxies/{name}` to change `now`.
  * Only selector/select groups are writable via the mihomo API.
@@ -335,6 +402,7 @@ function determineUiPrimaryGroup(ctx) {
  * @property {Record<string, string[]>} graph - Group → children adjacency list
  * @property {boolean} providerLoading - True when uiGroup uses include-all or include-all-providers and all[] has no real proxy nodes (empty or special-only)
  * @property {boolean} hasProxyProviders - True when the config defines proxy-providers (regardless of loading state)
+ * @property {boolean} uiGroupUsesProviders - True when the uiGroup itself pulls nodes from a provider (`use:` or include-all)
  */
 
 /**
@@ -467,6 +535,11 @@ export async function fetchProxyGroups(options = {}) {
             && !groupNames.has(name)
         );
     const providerLoading = hasProxyProviders && isIncludeAllGroup && !isGlobalGroup && !hasProviderProxies;
+    const uiGroupDef = Array.isArray(runConfig?.['proxy-groups'])
+        ? runConfig['proxy-groups'].find(/** @param {any} g */ g => g?.name === uiGroupName)
+        : null;
+    const uiGroupUsesProviders = hasProxyProviders && !isGlobalGroup
+        && (isIncludeAllGroup || (Array.isArray(uiGroupDef?.use) && uiGroupDef.use.length > 0));
 
     return {
         // Legacy compat fields
@@ -496,6 +569,10 @@ export async function fetchProxyGroups(options = {}) {
         // state).  Callers can use this to decide if a missing node might
         // still arrive from a provider that hasn't finished downloading.
         hasProxyProviders,
+
+        // The open group itself is fed by a provider, so an empty-looking member list
+        // may still fill once the provider downloads.
+        uiGroupUsesProviders,
     };
 }
 
