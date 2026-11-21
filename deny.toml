@@ -27,10 +27,6 @@ ignore = [
   # glib 0.18.x — unsound VariantStrIter (RUSTSEC-2024-0429)
   # Locked by gtk-rs GTK3; fix requires glib >=0.20.0 (GTK4 migration)
   "RUSTSEC-2024-0429",
-  # h2 unbounded empty DATA frames (RUSTSEC-2026-0258)
-  # Transitive via hyper/h2; upgrade blocked by Tauri's reqwest/hyper stack.
-  # Track: https://rustsec.org/advisories/RUSTSEC-2026-0258.html
-  "RUSTSEC-2026-0258",
   # chrono unmaintained (RUSTSEC-2026-0543): maintenance notice only, no
   # vulnerability and no fixed release. It is a direct dependency (local
   # timestamps in logs, backups and events) and also comes in through
