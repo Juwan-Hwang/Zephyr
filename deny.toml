@@ -59,10 +59,6 @@ ignore = [
 # RUSTSEC-2026-0185: quinn-proto remote memory exhaustion
 #   Fixed by upgrading quinn-proto 0.11.14 → 0.11.16 (>=0.11.15)
 #
-# RUSTSEC-2026-0258: h2 unbounded empty DATA frames
-#   Transitive via hyper/h2 (Tauri's reqwest stack); upgrade to h2 >=0.4.16 blocked
-#   by current hyper/reqwest versions. Tracked until upstream stack updates.
-#   Track: https://rustsec.org/advisories/RUSTSEC-2026-0258.html
 #
 # RUSTSEC-2026-0543: chrono unmaintained, no fixed release
 #   Direct dependency and transitive via clash-prism-*, so the crate stays in
