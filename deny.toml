@@ -27,10 +27,6 @@ ignore = [
   # glib 0.18.x — unsound VariantStrIter (RUSTSEC-2024-0429)
   # Locked by gtk-rs GTK3; fix requires glib >=0.20.0 (GTK4 migration)
   "RUSTSEC-2024-0429",
-  # h2 unbounded empty DATA frames (RUSTSEC-2026-0258)
-  # Transitive via hyper/h2; upgrade blocked by Tauri's reqwest/hyper stack.
-  # Track: https://rustsec.org/advisories/RUSTSEC-2026-0258.html
-  "RUSTSEC-2026-0258",
   # chrono unmaintained (RUSTSEC-2026-0543): maintenance notice only, no
   # vulnerability and no fixed release. It is a direct dependency (local
   # timestamps in logs, backups and events) and also comes in through
@@ -63,10 +59,6 @@ ignore = [
 # RUSTSEC-2026-0185: quinn-proto remote memory exhaustion
 #   Fixed by upgrading quinn-proto 0.11.14 → 0.11.16 (>=0.11.15)
 #
-# RUSTSEC-2026-0258: h2 unbounded empty DATA frames
-#   Transitive via hyper/h2 (Tauri's reqwest stack); upgrade to h2 >=0.4.16 blocked
-#   by current hyper/reqwest versions. Tracked until upstream stack updates.
-#   Track: https://rustsec.org/advisories/RUSTSEC-2026-0258.html
 #
 # RUSTSEC-2026-0543: chrono unmaintained, no fixed release
 #   Direct dependency and transitive via clash-prism-*, so the crate stays in

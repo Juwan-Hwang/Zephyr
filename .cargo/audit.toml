@@ -21,7 +21,6 @@
 # RUSTSEC-2025-0141: bincode unmaintained (transitive dep)
 # RUSTSEC-2024-0370: proc-macro-error unmaintained (transitive dep)
 # RUSTSEC-2024-0436: paste unmaintained (transitive dep via gtk-rs)
-# RUSTSEC-2025-0075/0080/0081/0098/0100: unic-* unmaintained (transitive dep)
 # RUSTSEC-2026-0543: chrono unmaintained (direct dep and via clash-prism-*; no fixed release)
 ignore = [
   "RUSTSEC-2024-0411",
@@ -40,13 +39,5 @@ ignore = [
   "RUSTSEC-2025-0141",
   "RUSTSEC-2024-0370",
   "RUSTSEC-2024-0436",
-  "RUSTSEC-2025-0075",
-  "RUSTSEC-2025-0080",
-  "RUSTSEC-2025-0081",
-  "RUSTSEC-2025-0098",
-  "RUSTSEC-2025-0100",
   "RUSTSEC-2026-0543",
-  # h2 unbounded empty DATA frames (RUSTSEC-2026-0258)
-  # Transitive via hyper/h2; upgrade blocked by Tauri's reqwest/hyper stack.
-  "RUSTSEC-2026-0258",
 ]
