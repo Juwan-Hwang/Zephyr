@@ -26,6 +26,7 @@ pub mod network_coordinator;
 pub mod os_notification;
 pub mod prism;
 pub mod process_icon;
+pub mod speed_test;
 pub mod sys_proxy;
 pub mod tray;
 pub mod updater;
@@ -2260,6 +2261,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_third_party_licenses,
+            speed_test::speed_test_port,
+            speed_test::speed_test_cancel,
+            speed_test::speed_test_download,
+            speed_test::lookup_exit_ip,
             get_portable_mode,
             set_ui_scale,
             start_core,
