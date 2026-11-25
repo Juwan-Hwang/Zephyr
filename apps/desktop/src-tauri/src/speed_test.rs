@@ -11,9 +11,9 @@
 use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use futures_util::StreamExt;
+use futures_util::StreamExt as _;
 use serde::Serialize;
-use tauri::Emitter;
+use tauri::Emitter as _;
 
 /// Name of the hidden group the speed-test listener routes through.
 pub const SPEED_TEST_GROUP: &str = "ZEPHYR-SPEED-TEST";
@@ -74,7 +74,7 @@ pub fn inject(yaml: &mut serde_yaml::Value, port: u16) -> Option<u16> {
         }
     }
     let mut taken = names_in(map.get(&groups_key));
-    taken.extend(names_in(map.get(&key("proxies"))));
+    taken.extend(names_in(map.get(key("proxies"))));
     if taken.iter().any(|n| n == SPEED_TEST_GROUP) {
         return None;
     }
@@ -127,6 +127,7 @@ pub fn inject_for_runtime(yaml: &mut serde_yaml::Value) {
 
 /// Port of the speed-test listener, or `None` when the running config has none.
 #[tauri::command]
+#[must_use]
 pub fn speed_test_port() -> Option<u16> {
     match ACTIVE_PORT.load(Ordering::SeqCst) {
         0 => None,
@@ -140,7 +141,7 @@ pub fn speed_test_cancel() {
     CANCEL_GEN.fetch_add(1, Ordering::SeqCst);
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeedResult {
     pub bytes: u64,
@@ -164,6 +165,15 @@ fn checked_url(url: &str) -> Result<url::Url, String> {
         "http" | "https" if parsed.host_str().is_some() => Ok(parsed),
         _ => Err("only http and https addresses are supported".to_owned()),
     }
+}
+
+/// Bytes per second, rounded down; 0 for an empty span.
+fn rate(bytes: u64, span: Duration) -> u64 {
+    let micros = span.as_micros();
+    if micros == 0 {
+        return 0;
+    }
+    u64::try_from(u128::from(bytes) * 1_000_000 / micros).unwrap_or(u64::MAX)
 }
 
 /// Tracks the best one-second window of a download.
@@ -191,7 +201,7 @@ impl PeakMeter {
         // Only a window close to a full second is a fair speed; a burst in the
         // first few milliseconds would read as an absurd peak.
         if span >= Duration::from_millis(900) {
-            let bps = ((total - b0) as f64 / span.as_secs_f64()) as u64;
+            let bps = rate(total.saturating_sub(b0), span);
             self.peak = self.peak.max(bps);
             return bps;
         }
@@ -200,13 +210,12 @@ impl PeakMeter {
 
     /// Best one-second speed, or the average when the download was too short
     /// to fill a second.
+    #[must_use]
     pub fn peak(&self, elapsed: Duration) -> u64 {
         if self.peak > 0 {
             self.peak
-        } else if elapsed.as_millis() > 0 {
-            (self.total as f64 / elapsed.as_secs_f64()) as u64
         } else {
-            0
+            rate(self.total, elapsed)
         }
     }
 }
@@ -223,8 +232,8 @@ pub async fn speed_test_download(
 ) -> Result<SpeedResult, String> {
     let target = checked_url(&url)?;
     let port = speed_test_port().ok_or("speed test is not available for this profile")?;
-    let max_secs = max_secs.clamp(1, MAX_SECS);
-    let max_bytes = max_bytes.unwrap_or(MAX_BYTES_CAP).min(MAX_BYTES_CAP);
+    let secs = max_secs.clamp(1, MAX_SECS);
+    let byte_cap = max_bytes.unwrap_or(MAX_BYTES_CAP).min(MAX_BYTES_CAP);
     let gen = CANCEL_GEN.load(Ordering::SeqCst);
 
     let proxy =
@@ -234,11 +243,11 @@ pub async fn speed_test_download(
         .connect_timeout(Duration::from_secs(8))
         .build()
         .map_err(|e| e.to_string())?;
-    let deadline = Duration::from_secs(max_secs);
+    let deadline = Duration::from_secs(secs);
     let start = Instant::now();
     let resp = tokio::time::timeout(deadline, client.get(target).send())
         .await
-        .map_err(|_| "timed out".to_owned())?
+        .map_err(|elapsed| format!("timed out: {elapsed}"))?
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status().as_u16()));
@@ -250,7 +259,7 @@ pub async fn speed_test_download(
     let mut cancelled = false;
     loop {
         let left = deadline.saturating_sub(start.elapsed());
-        if left.is_zero() || bytes >= max_bytes {
+        if left.is_zero() || bytes >= byte_cap {
             break;
         }
         if CANCEL_GEN.load(Ordering::SeqCst) != gen {
@@ -286,13 +295,13 @@ pub async fn speed_test_download(
     let elapsed = start.elapsed();
     Ok(SpeedResult {
         bytes,
-        elapsed_ms: elapsed.as_millis() as u64,
+        elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
         peak_bps: meter.peak(elapsed),
         cancelled,
     })
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
 pub struct ExitIp {
     pub ip: String,
     /// ISO 3166 country code, upper case; empty when unknown.
@@ -300,15 +309,16 @@ pub struct ExitIp {
 }
 
 /// Parse Cloudflare's `/cdn-cgi/trace` body.
+#[must_use]
 pub fn parse_trace(body: &str) -> Option<ExitIp> {
     let mut out = ExitIp::default();
     for line in body.lines() {
-        if let Some(v) = line.strip_prefix("ip=") {
-            out.ip = v.trim().to_owned();
-        } else if let Some(v) = line.strip_prefix("loc=") {
-            let v = v.trim();
-            if v.len() == 2 && v.chars().all(|c| c.is_ascii_alphabetic()) && v != "XX" {
-                out.country = v.to_ascii_uppercase();
+        if let Some(ip) = line.strip_prefix("ip=") {
+            ip.trim().clone_into(&mut out.ip);
+        } else if let Some(loc) = line.strip_prefix("loc=") {
+            let code = loc.trim();
+            if code.len() == 2 && code.chars().all(|c| c.is_ascii_alphabetic()) && code != "XX" {
+                out.country = code.to_ascii_uppercase();
             }
         }
     }
