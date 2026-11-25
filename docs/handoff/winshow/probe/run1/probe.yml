@@ -1,0 +1,31 @@
+name: probe-winshow
+
+on:
+  push:
+    branches: [probe/winshow]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download portable build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download $env:ZVER -R Juwan-Hwang/Zephyr -p Zephyr_x64-portable.zip -D $env:RUNNER_TEMP
+      - name: Probe
+        shell: pwsh
+        run: ./probe.ps1
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-out
+          path: ${{ runner.temp }}/out
+    env:
+      ZVER: v2.5.0

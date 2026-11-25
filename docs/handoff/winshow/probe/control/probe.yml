@@ -1,0 +1,68 @@
+name: probe-winshow
+
+on:
+  push:
+    branches: [probe/winshow]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      ZVER: v2.5.0
+      MAIN_SHA: 5f90f3f1d0c118d2bff58d8c5ac7c55a11c47776
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: probe
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MAIN_SHA }}
+          path: src
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: src/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Patch probe switch
+        shell: bash
+        working-directory: src
+        run: |
+          git apply --ignore-whitespace ../probe/defer.patch
+          git diff --stat
+          mkdir -p apps/desktop/src-tauri/bundled
+          echo placeholder > apps/desktop/src-tauri/bundled/placeholder.txt
+      - name: Build
+        shell: bash
+        working-directory: src
+        env:
+          CARGO_PROFILE_RELEASE_DEBUG: 'line-tables-only'
+          CARGO_PROFILE_RELEASE_STRIP: 'none'
+          CARGO_PROFILE_RELEASE_LTO: 'false'
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+        run: |
+          pnpm install --ignore-scripts && pnpm rebuild esbuild @parcel/watcher
+          pnpm --filter @zephyr/desktop tauri build --no-bundle
+          ls -la target/release/*.exe target/release/*.pdb || true
+      - name: Download portable build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download $env:ZVER -R Juwan-Hwang/Zephyr -p Zephyr_x64-portable.zip -D $env:RUNNER_TEMP
+      - name: Probe
+        shell: pwsh
+        timeout-minutes: 30
+        run: |
+          $env:BUILT_EXE = (Resolve-Path src/target/release/zephyr.exe -ErrorAction SilentlyContinue)
+          if (-not $env:BUILT_EXE) { $env:BUILT_EXE = (Get-ChildItem src/target/release -Filter *.exe | Select-Object -First 1).FullName }
+          ./probe/probe.ps1
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-out
+          path: ${{ runner.temp }}/out
