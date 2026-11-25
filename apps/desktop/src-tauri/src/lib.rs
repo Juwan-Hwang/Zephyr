@@ -1778,7 +1778,15 @@ pub fn run() {
             elevation::forward_to_elevated_instance();
             builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
                 // Focus the existing window, or recreate it if the webview is dead.
-                show_or_recreate_main_window(app);
+                if std::env::var_os("ZEPHYR_PROBE_DEFER").is_some() {
+                    let app2 = app.clone();
+                    std::thread::spawn(move || {
+                        let app3 = app2.clone();
+                        let _ = app2.run_on_main_thread(move || show_or_recreate_main_window(&app3));
+                    });
+                } else {
+                    show_or_recreate_main_window(app);
+                }
                 // Forward deep link arguments from the second instance to the first.
                 for arg in args {
                     if arg.starts_with("clash://") {
