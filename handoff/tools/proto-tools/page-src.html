@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zephyr 界面原型</title>
+<style>
+.shots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:8px 0 20px}
+.shots.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.shots.one{grid-template-columns:minmax(0,1fr)}
+.shots figure{margin:0}
+.shots img{display:block;width:100%;height:auto;border:1px solid var(--rule);border-radius:8px;background:var(--card)}
+.shots figcaption{margin-top:5px;font:12px/1.45 var(--sans);color:var(--muted)}
+.shots figcaption b{color:var(--ink);font-weight:600}
+.tag{display:inline-block;margin:0 0 3px;padding:1px 6px;border:1px solid var(--ink);border-radius:4px;font:11px/1.5 var(--mono);color:var(--ink)}
+.note-line{font:13px/1.55 var(--sans);color:var(--muted);margin:4px 0 8px}
+.table-wrap{overflow-x:auto;margin:8px 0 12px}
+table.copy{width:100%;border-collapse:collapse;font:13px/1.5 var(--sans)}
+table.copy th,table.copy td{text-align:left;vertical-align:top;padding:7px 8px;border-bottom:1px solid var(--rule,#ddd)}
+table.copy th{font-weight:600;color:var(--ink);white-space:nowrap}
+table.copy td:first-child{white-space:nowrap;color:var(--muted)}
+@media (max-width:700px){.shots,.shots.three{grid-template-columns:minmax(0,1fr)}}
+</style>
+</head>
+<body><div class="wrap">
+<h1>Zephyr 界面建议：原型截图对比</h1>
+<p class="kicker">原型对比，按建议分组，简洁首页和控制台首页并排</p>
+<p class="updated">整理于 2026 年 11 月 19 日</p>
+<p class="lede">这一版：简洁首页 B 加上最快节点，选择卡片只用在 4 个及以上选项，侧边栏改成可隐藏的展开边栏，新增在连接页直接改规则，所有新文案按系统设置的写法重写。「代理组旁边显示命中的规则」已按你的意见删掉。</p>
+<ul>
+<li>待你定：<a href="#exitip">IP 地址</a>的三种摆放选一种。</li>
+<li>待你确认：<a href="#home">简洁首页方案 B</a> 加最快节点后不再空，建议最快节点放在开关条下面。</li>
+<li><a href="#copy">新旧文案对照表</a>在最后。</li>
+</ul>
+
+<nav class="jump"><a href="#home">首页布局</a><a href="#exitip">IP 地址</a><a href="#coredown">内核停止</a><a href="#topnodes">最快节点</a><a href="#chartlink">图表跳转</a><a href="#testurl">测速地址</a><a href="#choice">新组件：选择卡片</a><a href="#cards">卡片宽度</a><a href="#bypass">忽略的主机与域</a><a href="#corners">窗口四角</a><a href="#sidelabel">可隐藏的边栏</a><a href="#speedtest">下载测速</a><a href="#connrule">连接页改规则</a><a href="#privnet">本地网络地址</a><a href="#flatpak">Flatpak</a><a href="#others">其他</a><a href="#copy">文案对照</a></nav>
+
+<h2 id="home">首页：核心开关上移，加订阅切换</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/673">#673</a>。两个方案都把系统代理、模式、TUN 挪到上面，并加订阅下拉。左边简洁首页，右边控制台首页。</p>
+<div class="shots">
+<figure><img src="@home-before" alt="简洁首页改动前"><figcaption><b>简洁 · 改动前</b>：开关卡在图表和统计下面</figcaption></figure>
+<figure><img src="@con-home-before" alt="控制台首页改动前"><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+<figure><img src="@home-a" alt="简洁首页方案 A"><figcaption><b>简洁 · 方案 A</b>：开关卡整体移到最上面，订阅下拉放进系统代理卡</figcaption></figure>
+<figure><img src="@con-home-a" alt="控制台首页方案 A"><figcaption><b>控制台 · 方案 A</b>：快捷控制卡挪到右栏最上面，加订阅下拉</figcaption></figure>
+<figure><img src="@home-a-open" alt="简洁首页方案 A 订阅下拉展开"><figcaption><b>简洁 · 方案 A</b>，订阅下拉展开</figcaption></figure>
+<figure><img src="@con-home-a-open" alt="控制台首页方案 A 订阅下拉展开"><figcaption><b>控制台 · 方案 A</b>，订阅下拉展开</figcaption></figure>
+<figure><img src="@home-b" alt="简洁首页方案 B"><figcaption><span class="tag">上一版：下方偏大，见下面加最快节点的版本</span><br><b>简洁 · 方案 B</b>：三个开关压成顶部一条，订阅切换在流量卡左上角</figcaption></figure>
+<figure><img src="@con-home-b" alt="控制台首页方案 B"><figcaption><span class="tag">用户倾向的方案</span><br><b>控制台 · 方案 B</b>：去掉「控制台」标题，开关条放在原来标题的位置；订阅卡移到右栏，订阅名换成下拉</figcaption></figure>
+<figure><img src="@home-b-open" alt="简洁首页方案 B 订阅下拉展开"><figcaption><b>简洁 · 方案 B</b>，订阅下拉展开</figcaption></figure>
+<figure><img src="@con-home-b-open" alt="控制台首页方案 B 订阅下拉展开"><figcaption><b>控制台 · 方案 B</b>，订阅下拉展开（往上开，免得被窗口底边截掉）</figcaption></figure>
+</div>
+<p class="group">简洁 · 方案 B 加最快节点</p>
+<p class="note-line">加上最快节点条后，930×680 下流量卡从 522 px 降到 416 px，图表和统计都还在，下方不再空，不用另调流量卡高度。720×540 下两种顺序都不用滚动。建议用第一种：开关条和最快节点都是要点的东西，放在一起；流量卡占剩下的空间，窗口变高时只有图表变高。上一轮截图里「最快节点放最下面」那张没有最快节点条，是因为原型文件没加载上，不是被挤出去了，已修好。</p>
+<div class="shots">
+<figure><img src="@home-b-top" alt="简洁首页方案 B，最快节点在开关条下面"><figcaption><span class="tag">建议</span><br><b>开关条 → 最快节点 → 流量卡</b></figcaption></figure>
+<figure><img src="@home-b-top-bottom" alt="简洁首页方案 B，最快节点在最下面"><figcaption><b>开关条 → 流量卡 → 最快节点</b></figcaption></figure>
+<figure><img src="@home-b-top-dark" alt=""><figcaption><b>开关条 → 最快节点 → 流量卡</b>，深色模式</figcaption></figure>
+<figure><img src="@size-min-home-b-top" alt=""><figcaption><b>720×540</b>，最快节点在开关条下面</figcaption></figure>
+<figure><img src="@size-min-home-b-top-bottom" alt=""><figcaption><b>720×540</b>，最快节点在最下面</figcaption></figure>
+</div>
+<p class="group">最小窗口 720×540</p>
+<div class="shots">
+<figure><img src="@size-min-home-before" alt=""><figcaption><b>简洁 · 改动前</b></figcaption></figure>
+<figure><img src="@size-min-con-home-before" alt=""><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+<figure><img src="@size-min-home-a" alt=""><figcaption><b>简洁 · 方案 A</b></figcaption></figure>
+<figure><img src="@size-min-con-home-a" alt=""><figcaption><b>控制台 · 方案 A</b></figcaption></figure>
+<figure><img src="@size-min-home-b" alt=""><figcaption><span class="tag">上一版</span><br><b>简洁 · 方案 B</b></figcaption></figure>
+<figure><img src="@size-min-con-home-b" alt=""><figcaption><span class="tag">用户倾向的方案</span><br><b>控制台 · 方案 B</b></figcaption></figure>
+</div>
+
+<h2 id="exitip">显示 IP 地址</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/321">#321</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/673">#673</a>。设置里加「显示 IP 地址」开关，默认关闭。打开后自动查询，切换节点时自动刷新，没有「查询」按钮。首页不再加胶囊，三种方案都并进现有的一行。</p>
+<p class="group">设置里的开关</p>
+<div class="shots">
+<figure><img src="@exitip-setting-before" alt=""><figcaption><b>改动前</b>：外观里的主页模式</figcaption></figure>
+<figure><img src="@exitip-setting" alt=""><figcaption><b>改动后</b>：主页模式下面加「显示 IP 地址」，默认关闭</figcaption></figure>
+</div>
+<p class="group">改动前</p>
+<div class="shots">
+<figure><img src="@exitip-before" alt=""><figcaption><b>简洁 · 改动前</b></figcaption></figure>
+<figure><img src="@con-exitip-before" alt=""><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+</div>
+<p class="group">方案一：节点名下面的副标题</p>
+<div class="shots">
+<figure><img src="@exitip-sub" alt=""><figcaption><b>简洁</b>：节点胶囊下面一行小字，网速读数稍往下挪</figcaption></figure>
+<figure><img src="@con-exitip-sub" alt=""><figcaption><b>控制台（方案 B）</b>：「当前节点」卡里，节点地址下面多一行</figcaption></figure>
+</div>
+<p class="group">方案二：系统代理那一行</p>
+<div class="shots">
+<figure><img src="@exitip-status" alt=""><figcaption><b>简洁</b>：系统代理卡的状态句「已准备好保护您的流量」换成 IP 地址</figcaption></figure>
+<figure><img src="@con-exitip-status" alt=""><figcaption><b>控制台（方案 B）</b>：开关条里「127.0.0.1:7890」换成 IP 地址；930 宽时这格只有约 100 px，只放国旗和 IP</figcaption></figure>
+</div>
+<p class="group">方案三：统计行</p>
+<div class="shots">
+<figure><img src="@exitip-stats" alt=""><figcaption><b>简洁</b>：底部统计从三项变四项</figcaption></figure>
+<figure><img src="@con-exitip-stats" alt=""><figcaption><b>控制台（方案 B）</b>：「节点延迟」卡的脚注换成 IP 地址。流量卡底部的统计行在默认窗口里要往下滚才看得到，没放那里</figcaption></figure>
+</div>
+
+<h2 id="coredown">内核停止横幅</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/182">#182</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/217">#217</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/318">#318</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/609">#609</a>。标题「内核已停止运行」，正文只说影响：「重新启动前将无法连接互联网。」按钮「关闭系统代理」和「重新启动」。</p>
+<div class="shots">
+<figure><img src="@coredown-before" alt=""><figcaption><b>简洁 · 改动前</b></figcaption></figure>
+<figure><img src="@coredown-after" alt=""><figcaption><b>简洁 · 改动后</b></figcaption></figure>
+<figure><img src="@con-coredown-before" alt=""><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+<figure><img src="@con-coredown-after" alt=""><figcaption><b>控制台（方案 B）· 改动后</b>：横幅在最上面、开关条上方，在布局里占位</figcaption></figure>
+</div>
+
+<h2 id="topnodes">首页显示延迟最低的几个节点</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>。</p>
+<div class="shots">
+<figure><img src="@topnodes-before" alt=""><figcaption><b>简洁 · 改动前</b></figcaption></figure>
+<figure><img src="@topnodes-after" alt=""><figcaption><b>简洁 · 改动后</b></figcaption></figure>
+<figure><img src="@con-topnodes-before" alt=""><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+<figure><img src="@con-topnodes-after" alt=""><figcaption><b>控制台（方案 B）· 改动后</b></figcaption></figure>
+</div>
+
+<h2 id="chartlink">从流量图进入连接页</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>。双击是隐藏手势，所以做了看得见的「查看连接」链接版，和双击加悬停提示版。</p>
+<div class="shots three">
+<figure><img src="@chartlink-before" alt=""><figcaption><b>简洁 · 改动前</b></figcaption></figure>
+<figure><img src="@chartlink-link" alt=""><figcaption><b>简洁 · 链接版</b></figcaption></figure>
+<figure><img src="@chartlink-hover" alt=""><figcaption><b>简洁 · 双击版</b>，悬停提示</figcaption></figure>
+<figure><img src="@con-chartlink-before" alt=""><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+<figure><img src="@con-chartlink-link" alt=""><figcaption><b>控制台（方案 B）· 链接版</b></figcaption></figure>
+<figure><img src="@con-chartlink-hover" alt=""><figcaption><b>控制台（方案 B）· 双击版</b>，悬停提示</figcaption></figure>
+</div>
+
+<h2 id="testurl">自定义测速地址</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a>。设置里加一项，点开是弹窗；弹窗里的常用地址改回辉光选择卡片。</p>
+<div class="shots">
+<figure><img src="@testurl-before" alt=""><figcaption><b>设置 · 改动前</b></figcaption></figure>
+<figure><img src="@testurl-after" alt=""><figcaption><b>设置 · 改动后</b>：新增「测速地址」</figcaption></figure>
+<figure><img src="@testurl-dialog-before" alt=""><figcaption><b>弹窗 · 上一版</b>：分段控件</figcaption></figure>
+<figure><img src="@testurl-dialog" alt=""><figcaption><b>弹窗 · 现在</b>：选择卡片，每项一个名字加一行域名</figcaption></figure>
+</div>
+
+<h2 id="choice">新组件：选择卡片</h2>
+<p class="note-line">写进了 styles.css，类名 <code>.choice-grid</code>（容器，<code>--choice-cols</code> 调列数）和 <code>.choice-card</code>（标题，可加一行说明）。选中时 accent 描边、浅色底加 3px 辉光环；另有悬停、键盘焦点、禁用和深色模式，只用现有设计变量。</p>
+<p><b>规则：4 个及以上选项的单选用选择卡片，2–3 个选项用分段滑块（<code>.seg-tabs</code>）。</b>工具栏里的筛选（比如日志页的级别）不算，继续用原来的控件。</p>
+<ul>
+<li><b>测速地址弹窗</b>：4 个常用地址，保留选择卡片。</li>
+<li><b>订阅编辑弹窗的「自动更新」</b>：关闭、每 12 小时、每天、每 3 天，4 个，换成选择卡片，一行四张。按钮的 data-value 和 role=radio 不变，原来的点击处理只需把 <code>.seg-tab</code> 换成 <code>.choice-card</code>。</li>
+<li><b>导出日志的「导出内容」</b>（3 个）和<b>外观里的「主页模式」</b>（2 个）：改回分段控件，上一版的原型和截图已删。</li>
+<li>其他单选都只有 2–3 个选项，或者是下拉菜单，没有别的需要换。</li>
+</ul>
+<div class="shots">
+<figure><img src="@choice-states" alt=""><figcaption><b>状态</b>：Google 键盘焦点、Cloudflare 选中、Apple 悬停、小米常态</figcaption></figure>
+<figure><img src="@testurl-dialog-dark" alt=""><figcaption><b>深色模式</b>，测速地址弹窗</figcaption></figure>
+<figure><img src="@choice-subauto-before" alt=""><figcaption><b>自动更新 · 改动前</b>：分段控件</figcaption></figure>
+<figure><img src="@choice-subauto-after" alt=""><figcaption><b>自动更新 · 改动后</b>：四张选择卡片</figcaption></figure>
+</div>
+
+<h2 id="cards">节点卡片最小宽度：200</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a>。默认窗口下 180 和 200 截出来一样（都是 4 列），所以只放 1440×900 的对比。</p>
+<div class="shots">
+<figure><img src="@size-big-cards-before" alt=""><figcaption><b>现在 180</b>：6 列，每列约 199 px</figcaption></figure>
+<figure><img src="@size-big-cards-200" alt=""><figcaption><b>200</b>：5 列，每列约 242 px，名字不再被截断</figcaption></figure>
+</div>
+
+<h2 id="bypass">可编辑不使用代理的地址</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/1477">#1477</a>。</p>
+<div class="shots three">
+<figure><img src="@bypass-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@bypass-after" alt=""><figcaption><b>改动后</b>：新增「忽略的主机与域」</figcaption></figure>
+<figure><img src="@bypass-dialog" alt=""><figcaption><b>编辑弹窗</b></figcaption></figure>
+</div>
+
+<h2 id="corners">窗口四个角都能拖动缩放</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>。四角各放一个 12×12 的透明热区，截图里用半透明色块标出来。</p>
+<div class="shots">
+<figure><img src="@corners-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@corners-after" alt=""><figcaption><b>改动后</b></figcaption></figure>
+</div>
+
+<h2 id="sidelabel">可隐藏的边栏</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>。默认是展开的边栏（图标加文字），可以隐藏成只有图标。图标下方小字的做法不用了。</p>
+<ul>
+<li><b>切换</b>：边栏底部的按钮，展开时写「隐藏边栏」，隐藏后只剩图标，提示「显示边栏」。快捷键 Ctrl+B（macOS 上 ⌘B），在输入框和编辑器里不拦截。状态存在 localStorage，下次打开保持。</li>
+<li><b>动效</b>：宽度 80 ↔ 160 px，200 ms，ease-in-out。展开时宽度先走，文字晚 80 ms 淡入并右移 4 px；隐藏时文字先在 120 ms 内淡出，宽度晚 40 ms 再收。按钮裁掉溢出、文字不换行，所以不会挤压或跳动；按钮左内边距固定，图标在两种状态下位置不变。选中项的高亮块在过渡期间逐帧跟住按钮。主内容区是 flex 布局里的下一项，跟着宽度平滑让位，不会整页重排。</li>
+<li><b>减弱动态效果</b>：系统打开「减弱动态效果」时宽度直接切换，文字只做淡入淡出。</li>
+<li><b>无障碍</b>：按钮有 aria-expanded、aria-label 和 aria-controls。隐藏时悬停或键盘聚焦图标，复用现有的边栏提示显示名称；展开时不显示提示。键盘焦点环和全局一致。</li>
+<li><b>窄窗口</b>：窗口宽度小于 860 px 时默认隐藏；这时点「显示边栏」，边栏浮在内容上方，不挤主内容区，选了页面、按 Esc 或点外面就收回，也不改记住的偏好。高度不到 600 px 时缩小导航项间距，按钮保持 40 px 高。</li>
+<li>只用了现有设计变量（<code>--zephyr-time-standard</code>、<code>--zephyr-easing-ease-in-out</code>、<code>--zephyr-time-micro</code> 等）。</li>
+</ul>
+<div class="shots">
+<figure><img src="@sidelabel-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@side-fold-anim" alt="边栏隐藏和显示的动画，慢放 10 倍"><figcaption><b>动效</b>：隐藏再显示一次，慢放 10 倍录制</figcaption></figure>
+<figure><img src="@side-fold-expanded" alt=""><figcaption><b>展开</b></figcaption></figure>
+<figure><img src="@side-fold-collapsed" alt=""><figcaption><b>隐藏</b>：只剩图标，位置和展开时一样</figcaption></figure>
+<figure><img src="@side-fold-tip" alt=""><figcaption><b>隐藏时悬停</b>：显示名称</figcaption></figure>
+<figure><img src="@side-fold-focus" alt=""><figcaption><b>键盘焦点</b>在切换按钮上</figcaption></figure>
+<figure><img src="@side-fold-mid" alt=""><figcaption><b>过渡中间一帧</b>：宽度过半，文字正在淡入</figcaption></figure>
+<figure><img src="@side-fold-930" alt=""><figcaption><b>简洁首页</b>，930×680，展开</figcaption></figure>
+<figure><img src="@side-fold-dark" alt=""><figcaption><b>深色 · 展开</b></figcaption></figure>
+<figure><img src="@side-fold-dark-collapsed" alt=""><figcaption><b>深色 · 隐藏</b></figcaption></figure>
+<figure><img src="@size-min-side-before" alt=""><figcaption><b>720×540 · 改动前</b></figcaption></figure>
+<figure><img src="@size-min-side-fold" alt=""><figcaption><b>720×540</b>：默认隐藏</figcaption></figure>
+<figure><img src="@size-min-side-fold-open" alt=""><figcaption><b>720×540 · 点了显示边栏</b>：浮在内容上方</figcaption></figure>
+</div>
+
+<h2 id="speedtest">真实下载测速</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a>。只对单个节点手动测一次。</p>
+<div class="shots three">
+<figure><img src="@speedtest-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@speedtest-menu" alt=""><figcaption><b>节点菜单里的入口</b></figcaption></figure>
+<figure><img src="@speedtest-result" alt=""><figcaption><b>测速结果</b></figcaption></figure>
+</div>
+
+<h2 id="connrule">在连接页直接改规则</h2>
+<p class="note-line">取代「代理组旁边显示命中的规则」（已否决）。点开一个连接，详情里显示它命中的规则（类型、匹配内容、策略组），下面两个按钮：「编辑规则」和「添加规则」。</p>
+<ul>
+<li><b>能不能编辑</b>：只有规则库里自己的规则（<code>*.prism.yaml</code>，活动规则列表里非只读的分组）能编辑。编辑走规则库现有的路径：读文件，替换那一行，用 <code>rebuildYamlWithRules</code> 写回，再 <code>prism.apply()</code>。</li>
+<li><b>只能添加的情况</b>：命中订阅里的规则、规则集（RULE-SET）里的规则或 MATCH 时，不显示「编辑规则」，卡片里写一句说明，只能添加一条规则盖过它。</li>
+<li><b>添加写到哪里</b>：写进规则库里的「我的规则」文件（没有就新建），格式 <code>rules: { $prepend: [...] }</code>，保存后 <code>prism.apply()</code>。这样切换订阅、更新订阅后规则还在，所有订阅都生效。不用 <code>prism.insertRuleStr</code>：它只改当前运行的配置，下一次重新应用就没了。也不写进订阅文件：更新订阅会覆盖。</li>
+<li><b>匹配方式</b>：从这个连接已有的字段预填，没有的字段不显示：域名后缀、完整域名、域名关键字（来自 host）、IP 段（目标 IP/32）、进程名（来自 process）。用选择卡片，5 个选项，每项一行预填值。</li>
+<li><b>策略组</b>：复用规则库的下拉。<b>位置</b>：默认「最前面」，保证生效；也可以放在某个分组之后；放「最后」会提示不会生效（在 MATCH 后面）。</li>
+</ul>
+<div class="shots">
+<figure><img src="@connrule-before" alt=""><figcaption><b>改动前</b>：详情里只有一行规则类型和内容</figcaption></figure>
+<figure><img src="@connrule-mine" alt=""><figcaption><b>命中「我的规则」</b>：可编辑，也可添加</figcaption></figure>
+<figure><img src="@connrule-set" alt=""><figcaption><b>命中规则集</b>：只能添加</figcaption></figure>
+<figure><img src="@connrule-match" alt=""><figcaption><b>没命中规则（MATCH）</b>：只能添加</figcaption></figure>
+<figure><img src="@connrule-add" alt=""><figcaption><b>添加规则</b>：匹配方式按连接预填，默认放最前面</figcaption></figure>
+<figure><img src="@connrule-edit" alt=""><figcaption><b>编辑规则</b></figcaption></figure>
+<figure><img src="@connrule-add-dark" alt=""><figcaption><b>添加规则</b>，深色模式</figcaption></figure>
+</div>
+
+<h2 id="privnet">允许本地网络地址</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/284">#284</a>。在订阅编辑弹窗里按订阅单独打开，不加全局总开关。</p>
+<div class="shots">
+<figure><img src="@privnet-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@privnet-after" alt=""><figcaption><b>改动后</b></figcaption></figure>
+</div>
+
+<h2 id="flatpak">Flatpak 版关闭自更新</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/1449">#1449</a>。检测到 FLATPAK_ID 时不再自己检查更新，提示「可以在软件中心检查更新。」</p>
+<div class="shots">
+<figure><img src="@flatpak-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@flatpak-after" alt=""><figcaption><b>改动后</b></figcaption></figure>
+</div>
+
+<h2 id="others">其他建议</h2>
+<p class="note-line">之前 issue 整理里的取舍是不做，原型只供对比。</p>
+<p class="group">当前节点也参与延迟排序 · <a href="https://github.com/Juwan-Hwang/Zephyr/issues/69">#69</a></p>
+<div class="shots">
+<figure><img src="@sortcur-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@sortcur-after" alt=""><figcaption><b>改动后</b></figcaption></figure>
+</div>
+<p class="group">标题栏加最小化、最大化 · <a href="https://github.com/Juwan-Hwang/Zephyr/issues/178">#178</a></p>
+<div class="shots">
+<figure><img src="@titlebar-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@titlebar-after" alt=""><figcaption><b>改动后</b>：和关闭圆点同一风格</figcaption></figure>
+</div>
+<p class="group">关闭按钮做得更大 · <a href="https://github.com/Juwan-Hwang/Zephyr/issues/69">#69</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/282">#282</a></p>
+<div class="shots three">
+<figure><img src="@closebig-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@closebig-dot" alt=""><figcaption><b>放大圆点</b></figcaption></figure>
+<figure><img src="@closebig-x" alt=""><figcaption><b>常规 × 按钮</b></figcaption></figure>
+</div>
+<p class="group">内核可选 · <a href="https://github.com/Juwan-Hwang/Zephyr/issues/490">#490</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/1127">#1127</a></p>
+<div class="shots">
+<figure><img src="@kernel-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@kernel-after" alt=""><figcaption><b>改动后</b>：mihomo / mihomo Smart / sing-box</figcaption></figure>
+</div>
+<p class="group">在应用里直接编辑订阅 YAML · <a href="https://github.com/Juwan-Hwang/Zephyr/issues/490">#490</a></p>
+<div class="shots">
+<figure><img src="@yamledit-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@yamledit-after" alt=""><figcaption><b>改动后</b></figcaption></figure>
+</div>
+
+<h2 id="copy">新旧文案对照</h2>
+<p class="note-line">新文案的规则已记进取舍记录，以后所有新文案都按它写：</p>
+<ul>
+<li>不讲实现细节，不用黑话和术语（机场、出口、绕过、解析、CIDR）。</li>
+<li>不写界面已经说明的东西；能不加说明就不加，要加就一句，说打开后会怎样。</li>
+<li>用系统常用句式：「如果……，可以……」「打开后，……」；用系统里已有的叫法：本地网络、IP 地址、忽略的主机与域、边栏。</li>
+<li>按钮用动词。说明是完整句子，以句号结尾；标题、按钮、选项不加标点。</li>
+</ul>
+<p class="note-line">依据：<a href="https://developer.apple.com/design/human-interface-guidelines/writing">Apple HIG · Writing</a>、<a href="https://m2.material.io/design/communication/writing.html">Material Design · Writing</a>。参照的系统文案摘自 Apple 和 Google 的简体中文支持页，链接在每行里。</p>
+<div class="table-wrap"><table class="copy">
+<thead><tr><th>位置</th><th>旧文案</th><th>新文案</th><th>参照的系统文案</th></tr></thead>
+<tbody>
+<tr><td>订阅编辑 · 开关</td><td>允许解析到内网地址</td><td><b>允许本地网络地址</b></td><td><a href="https://support.apple.com/zh-cn/102229">iOS 设置里的「本地网络」</a></td></tr>
+<tr><td>订阅编辑 · 说明</td><td>只对这条订阅生效。机场域名被判成私有 IP、更新一直失败时再打开。</td><td><b>如果此订阅总是更新失败，可以尝试打开。</b></td><td><a href="https://support.apple.com/zh-cn/102229">iOS「如果你不想让 App 访问本地网络……，可以轻点“不允许”。」</a></td></tr>
+<tr><td>设置 · 开关</td><td>显示出口 IP</td><td><b>显示 IP 地址</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mh27606/mac">macOS 网络设置里的「IP 地址」</a></td></tr>
+<tr><td>设置 · 说明</td><td>在首页显示当前出口 IP 和地区，切换节点后自动刷新</td><td><b>打开后，首页会显示当前节点的 IP 地址和地区。</b></td><td><a href="https://support.apple.com/zh-cn/102433">iOS「你可以打开低数据模式以限制后台使用网络……」</a></td></tr>
+<tr><td>首页 · IP 标签</td><td>出口 103.151.172.45 · 香港 HKT</td><td><b>IP 103.151.172.45 · 香港</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mh27606/mac">macOS「IP 地址」</a></td></tr>
+<tr><td>内核停止 · 正文</td><td>可能已被其他代理应用关闭。重新启动之前，你将无法连接网络。</td><td><b>重新启动前将无法连接互联网。</b></td><td><a href="https://support.apple.com/zh-cn/102509">iOS「……无法访问网络资源或互联网……」</a></td></tr>
+<tr><td>内核停止 · 状态</td><td>内核未运行</td><td><b>已停止</b></td><td><a href="https://support.google.com/android/answer/9089766?hl=zh-Hans">Android「如果始终开启的 VPN 连接停止工作……」</a></td></tr>
+<tr><td>测速地址 · 说明</td><td>节点延迟测试会请求这个地址。机场屏蔽 Google 时可以换一个。</td><td><b>如果延迟总是显示超时，可以换一个地址。</b></td><td><a href="https://support.apple.com/zh-cn/102229">iOS「如果你不想让 App 访问本地网络……，可以轻点“不允许”。」</a></td></tr>
+<tr><td>测速地址 · 输入框</td><td>留空则用默认地址 https://www.gstatic.com/generate_204</td><td><b>留空则使用 Google。</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">macOS「输入要忽略的主机和域。」（短句，不写技术细节）</a></td></tr>
+<tr><td>设置 · 测速地址说明</td><td>测延迟时请求的地址，应返回 204</td><td><b>测试节点延迟时访问的地址。</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">macOS「输入要忽略的主机和域。」</a></td></tr>
+<tr><td>设置 · 标题</td><td>系统代理绕过</td><td><b>忽略的主机与域</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">macOS 代理设置「忽略这些主机与域的代理设置」</a></td></tr>
+<tr><td>设置 · 说明</td><td>这些域名和网段不走系统代理，直接连接</td><td><b>访问这些地址时不使用代理。</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">macOS「忽略这些主机与域的代理设置」</a></td></tr>
+<tr><td>设置 · 当前值</td><td>默认 + 2 项</td><td><b>2 项</b></td><td>—（只留数量）</td></tr>
+<tr><td>编辑弹窗 · 说明</td><td>列表里的地址不走代理。每行一项，支持通配符和 CIDR。</td><td><b>每行输入一个主机或域。</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">macOS「输入要忽略的主机和域。使用逗号分隔多个项目。」</a></td></tr>
+<tr><td>编辑弹窗 · 选项</td><td>同时绕过本地和局域网地址</td><td><b>忽略本地网络地址</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">macOS「通过简单主机名忽略……的代理」、iOS「本地网络」</a></td></tr>
+<tr><td>编辑弹窗 · 输入框</td><td>自定义地址</td><td><b>自定义</b></td><td>—</td></tr>
+<tr><td>Flatpak · 说明</td><td>Flatpak 版由软件中心或 flatpak update 更新</td><td><b>可以在软件中心检查更新。</b></td><td><a href="https://support.apple.com/zh-cn/102229">iOS「……可以轻点“不允许”。」（「可以……」句式）</a></td></tr>
+<tr><td>下载测速 · 菜单</td><td>测下载速度 / 约消耗 25 MB</td><td><b>测试下载速度 / 约使用 25 MB 流量</b></td><td><a href="https://support.apple.com/zh-cn/102433">iOS「节省网络用量」「数据用量」</a></td></tr>
+<tr><td>下载测速 · 结果</td><td>消耗流量；测速文件来自 speed.cloudflare.com，结果受测速服务器影响。每测一次都会消耗机场流量。；再测一次</td><td><b>流量；（删掉脚注，菜单里已写流量）；重新测试</b></td><td>—（界面已说明的不重复）</td></tr>
+<tr><td>内核切换 · 说明</td><td>切换后重启内核。覆写、规则库和订阅转换只支持 mihomo</td><td><b>切换后会重新启动。覆写、规则和订阅转换仅支持 mihomo。</b></td><td><a href="https://support.apple.com/zh-cn/102509">iOS「……然后再次尝试相应操作」（说结果，不说内部步骤）</a></td></tr>
+<tr><td>YAML 编辑 · 提示</td><td>这是订阅文件，下次更新订阅（每 12 小时）时手改的内容会被覆盖。长期修改请用覆写。</td><td><b>更新订阅后，这里的修改会被覆盖。如果要长期保留，可以使用覆写。</b></td><td><a href="https://support.apple.com/zh-cn/102229">iOS「如果你……，可以轻点“不允许”。」</a></td></tr>
+<tr><td>YAML 编辑 · 按钮</td><td>保存后立即重载内核 / 改用覆写 / 保存并重载</td><td><b>保存后立即生效 / 使用覆写 / 保存</b></td><td><a href="https://support.google.com/android/answer/9089766?hl=zh-Hans">Android「如果需要，点按“保存”。」</a></td></tr>
+<tr><td>最快节点 · 副标题</td><td>「🚀 节点选择」· 2 分钟前测速</td><td><b>🚀 节点选择 · 2 分钟前</b></td><td>—（去掉多余的引号和动词）</td></tr>
+<tr><td>边栏 · 切换按钮</td><td>（新）</td><td><b>隐藏边栏 / 显示边栏</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mchl83c9e8b8/mac">macOS 访达「显示」菜单的「隐藏边栏」「显示边栏」</a></td></tr>
+<tr><td>连接详情 · 规则卡</td><td>（新）</td><td><b>规则 · 来自「我的规则」/ 来自订阅；按钮「编辑规则」「添加规则」</b></td><td><a href="https://support.google.com/android/answer/9089766?hl=zh-Hans">Android「点按“保存”」（按钮用动词）</a></td></tr>
+<tr><td>连接详情 · 规则集说明</td><td>（新）</td><td><b>规则集中的规则无法单独编辑。如果要更改此连接使用的策略组，可以添加规则。</b></td><td><a href="https://support.apple.com/zh-cn/102229">iOS「如果你不想让 App 访问本地网络……，可以轻点“不允许”。」</a></td></tr>
+<tr><td>连接详情 · MATCH 说明</td><td>（新）</td><td><b>此连接未命中任何规则。如果要更改它使用的策略组，可以添加规则。</b></td><td><a href="https://support.apple.com/zh-cn/102229">同上</a></td></tr>
+<tr><td>添加规则 · 弹窗</td><td>（新）</td><td><b>匹配方式 / 策略组 / 位置：最前面（推荐）、某分组之后、最后（不会生效）；规则会添加到「我的规则」。；按钮「添加」</b></td><td><a href="https://support.google.com/android/answer/9089766?hl=zh-Hans">Android「将 VPN 设为仅适用于……」（一句说清去向）</a></td></tr>
+</tbody></table></div>
+<p class="note-line">「双击查看连接」（流量图提示）和各处的选项名本来就短，没改。受影响的截图都已重截。</p>
+
+<div class="sources"><b>来源</b><ul><li><a href="https://github.com/Juwan-Hwang/Zephyr/issues">Juwan-Hwang/Zephyr 的 issue</a>，各节标题下列出了编号</li><li>系统文案样本：<a href="https://support.apple.com/zh-cn/102229">Apple：如果有 App 要连接到本地网络上的设备</a>、<a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">Apple：在 Mac 上更改代理设置</a>、<a href="https://support.apple.com/zh-cn/102509">Apple：使用私有无线局域网地址</a>、<a href="https://support.apple.com/zh-cn/102433">Apple：使用低数据模式</a>、<a href="https://support.apple.com/zh-cn/guide/mac-help/mh27606/mac">Apple：在 Mac 上解决 IP 地址冲突</a>、<a href="https://support.google.com/android/answer/9089766?hl=zh-Hans">Android 帮助：连接至 VPN</a>、<a href="https://support.apple.com/zh-cn/guide/mac-help/mchl83c9e8b8/mac">Apple：在 Mac 上自定义“访达”边栏</a></li><li>截图来自本地原型分支（基于 c1a0ded，未推送），简洁首页 930×680，控制台首页和其他页面 1082×691，重叠检查在 930×680 下做</li></ul></div>
+</div></body></html>

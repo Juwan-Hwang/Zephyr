@@ -1,0 +1,138 @@
+[
+{
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"out": "out-sz/a-home-720x540.png"
+},
+{
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"home": "console",
+"out": "out-sz/a-con-720x540.png"
+},
+{
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"out": "out-sz/a-home-930x680.png"
+},
+{
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"home": "console",
+"out": "out-sz/a-con-930x680.png"
+},
+{
+"width": 1280,
+"height": 800,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"out": "out-sz/a-home-1280x800.png"
+},
+{
+"width": 1280,
+"height": 800,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"home": "console",
+"out": "out-sz/a-con-1280x800.png"
+},
+{
+"width": 1440,
+"height": 900,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"out": "out-sz/a-home-1440x900.png"
+},
+{
+"width": 1440,
+"height": 900,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"home": "console",
+"out": "out-sz/a-con-1440x900.png"
+},
+{
+"width": 1920,
+"height": 1080,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"out": "out-sz/a-home-1920x1080.png"
+},
+{
+"width": 1920,
+"height": 1080,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"home": "console",
+"out": "out-sz/a-con-1920x1080.png"
+},
+{
+"width": 2560,
+"height": 1440,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"out": "out-sz/a-home-2560x1440.png"
+},
+{
+"width": 2560,
+"height": 1440,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"home": "console",
+"out": "out-sz/a-con-2560x1440.png"
+},
+{
+"width": 1920,
+"height": 800,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"out": "out-sz/a-home-1920x800.png"
+},
+{
+"width": 1920,
+"height": 800,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"home": "console",
+"out": "out-sz/a-con-1920x800.png"
+},
+{
+"width": 1000,
+"height": 1200,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"out": "out-sz/a-home-1000x1200.png"
+},
+{
+"width": 1000,
+"height": 1200,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true,
+"home": "console",
+"out": "out-sz/a-con-1000x1200.png"
+}
+]

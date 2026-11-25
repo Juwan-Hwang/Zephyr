@@ -1,0 +1,465 @@
+[
+ {
+  "out": "out/bypass-before.png",
+  "page": "settings",
+  "post": "document.querySelector('#port-config-btn').scrollIntoView({block:'center'})"
+ },
+ {
+  "out": "out/bypass-after.png",
+  "page": "settings",
+  "proto": "bypass"
+ },
+ {
+  "out": "out/bypass-dialog.png",
+  "page": "settings",
+  "proto": "bypass-dialog"
+ },
+ {
+  "out": "out/testurl-before.png",
+  "page": "settings",
+  "post": "document.querySelector('#setting-unified-delay').scrollIntoView({block:'center'})"
+ },
+ {
+  "out": "out/testurl-after.png",
+  "page": "settings",
+  "proto": "testurl"
+ },
+ {
+  "out": "out/testurl-dialog.png",
+  "page": "settings",
+  "proto": "testurl-dialog"
+ },
+ {
+  "out": "out/testurl-dialog-before.png",
+  "page": "settings",
+  "proto": "testurl-dialog-seg"
+ },
+ {
+  "out": "out/testurl-dialog-dark.png",
+  "page": "settings",
+  "proto": "testurl-dialog",
+  "theme": "dark"
+ },
+ {
+  "out": "out/choice-states.png",
+  "page": "settings",
+  "proto": "testurl-dialog",
+  "actions": [
+   {
+    "wait": 600
+   },
+   {
+    "eval": "document.querySelector('.choice-card').focus()"
+   },
+   {
+    "hover": ".choice-card:nth-child(3)",
+    "force": true
+   },
+   {
+    "wait": 300
+   }
+  ]
+ },
+ {
+  "out": "out/home-before.png"
+ },
+ {
+  "out": "out/home-a.png",
+  "proto": "homea"
+ },
+ {
+  "out": "out/home-a-open.png",
+  "proto": "homea",
+  "pre": "window.__PROTO_OPEN__=true"
+ },
+ {
+  "out": "out/home-b.png",
+  "proto": "homeb"
+ },
+ {
+  "out": "out/home-b-open.png",
+  "proto": "homeb",
+  "pre": "window.__PROTO_OPEN__=true"
+ },
+ {
+  "out": "out/coredown-before.png",
+  "proto": "coredown-before"
+ },
+ {
+  "out": "out/coredown-after.png",
+  "proto": "coredown-after"
+ },
+ {
+  "out": "out/corners-before.png",
+  "home": "console",
+  "proto": "corners-before"
+ },
+ {
+  "out": "out/corners-after.png",
+  "home": "console",
+  "proto": "corners-after"
+ },
+ {
+  "out": "out/cards-before.png",
+  "page": "proxies",
+  "proto": "cards-xx"
+ },
+ {
+  "out": "out/exitip-before.png"
+ },
+ {
+  "out": "out/exitip-setting-before.png",
+  "page": "settings",
+  "post": "document.querySelector('#setting-home-mode-container').scrollIntoView({block:'center'})"
+ },
+ {
+  "out": "out/exitip-setting.png",
+  "page": "settings",
+  "proto": "exitip-setting"
+ },
+ {
+  "out": "out/exitip-sub.png",
+  "proto": "exitip-sub"
+ },
+ {
+  "out": "out/exitip-status.png",
+  "proto": "exitip-status"
+ },
+ {
+  "out": "out/exitip-stats.png",
+  "proto": "exitip-stats"
+ },
+ {
+  "out": "out/topnodes-before.png"
+ },
+ {
+  "out": "out/topnodes-after.png",
+  "proto": "topnodes"
+ },
+ {
+  "out": "out/sidelabel-before.png",
+  "home": "console"
+ },
+ {
+  "out": "out/chartlink-before.png"
+ },
+ {
+  "out": "out/chartlink-link.png",
+  "proto": "chartlink-link"
+ },
+ {
+  "out": "out/chartlink-hover.png",
+  "proto": "chartlink-hover"
+ },
+ {
+  "out": "out/speedtest-before.png",
+  "page": "proxies"
+ },
+ {
+  "out": "out/speedtest-menu.png",
+  "page": "proxies",
+  "proto": "speedtest-menu"
+ },
+ {
+  "out": "out/speedtest-result.png",
+  "page": "proxies",
+  "proto": "speedtest-result"
+ },
+ {
+  "out": "out/privnet-before.png",
+  "page": "subscriptions",
+  "proto": "privnet-before"
+ },
+ {
+  "out": "out/privnet-after.png",
+  "page": "subscriptions",
+  "proto": "privnet-after"
+ },
+ {
+  "out": "out/flatpak-before.png",
+  "page": "settings",
+  "proto": "flatpak-before"
+ },
+ {
+  "out": "out/flatpak-after.png",
+  "page": "settings",
+  "proto": "flatpak-after"
+ },
+ {
+  "out": "out/sortcur-before.png",
+  "page": "proxies",
+  "proto": "sortcur-before"
+ },
+ {
+  "out": "out/sortcur-after.png",
+  "page": "proxies",
+  "proto": "sortcur-after"
+ },
+ {
+  "out": "out/titlebar-before.png",
+  "home": "console",
+  "actions": [
+   {
+    "hover": "#close-btn"
+   }
+  ]
+ },
+ {
+  "out": "out/titlebar-after.png",
+  "home": "console",
+  "proto": "titlebar",
+  "actions": [
+   {
+    "hover": "#close-btn"
+   }
+  ]
+ },
+ {
+  "out": "out/closebig-before.png",
+  "home": "console"
+ },
+ {
+  "out": "out/closebig-dot.png",
+  "home": "console",
+  "proto": "closebig-dot"
+ },
+ {
+  "out": "out/closebig-x.png",
+  "home": "console",
+  "proto": "closebig-x"
+ },
+ {
+  "out": "out/yamledit-before.png",
+  "page": "subscriptions"
+ },
+ {
+  "out": "out/yamledit-after.png",
+  "page": "subscriptions",
+  "proto": "yamledit"
+ },
+ {
+  "out": "out/kernel-before.png",
+  "page": "settings",
+  "post": "document.querySelector('#setting-unified-delay').scrollIntoView({block:'center'})"
+ },
+ {
+  "out": "out/kernel-after.png",
+  "page": "settings",
+  "proto": "kernel"
+ },
+ {
+  "out": "out/con-home-before.png",
+  "home": "console"
+ },
+ {
+  "out": "out/con-home-a.png",
+  "home": "console",
+  "proto": "homea"
+ },
+ {
+  "out": "out/con-home-a-open.png",
+  "home": "console",
+  "proto": "homea",
+  "pre": "window.__PROTO_OPEN__=true"
+ },
+ {
+  "out": "out/con-home-b.png",
+  "home": "console",
+  "proto": "homeb"
+ },
+ {
+  "out": "out/con-home-b-open.png",
+  "home": "console",
+  "proto": "homeb",
+  "pre": "window.__PROTO_OPEN__=true"
+ },
+ {
+  "out": "out/con-exitip-before.png",
+  "home": "console"
+ },
+ {
+  "out": "out/con-exitip-sub.png",
+  "home": "console",
+  "proto": "exitip-sub"
+ },
+ {
+  "out": "out/con-exitip-status.png",
+  "home": "console",
+  "proto": "exitip-status"
+ },
+ {
+  "out": "out/con-exitip-stats.png",
+  "home": "console",
+  "proto": "exitip-stats"
+ },
+ {
+  "out": "out/con-coredown-before.png",
+  "home": "console",
+  "proto": "coredown-before"
+ },
+ {
+  "out": "out/con-coredown-after.png",
+  "home": "console",
+  "proto": "coredown-after"
+ },
+ {
+  "out": "out/con-topnodes-before.png",
+  "home": "console"
+ },
+ {
+  "out": "out/con-topnodes-after.png",
+  "home": "console",
+  "proto": "topnodes"
+ },
+ {
+  "out": "out/con-chartlink-before.png",
+  "home": "console"
+ },
+ {
+  "out": "out/con-chartlink-link.png",
+  "home": "console",
+  "proto": "chartlink-link"
+ },
+ {
+  "out": "out/con-chartlink-hover.png",
+  "home": "console",
+  "proto": "chartlink-hover"
+ },
+ {
+  "out": "out/home-b-top.png",
+  "proto": "homeb-top",
+  "overlap": true
+ },
+ {
+  "out": "out/home-b-top-bottom.png",
+  "proto": "homeb-top-bottom",
+  "overlap": true
+ },
+ {
+  "out": "out/home-b-top-dark.png",
+  "proto": "homeb-top",
+  "theme": "dark"
+ },
+ {
+  "out": "out/choice-subauto-before.png",
+  "page": "subscriptions",
+  "proto": "choice-subauto-before",
+  "overlap": true
+ },
+ {
+  "out": "out/choice-subauto-after.png",
+  "page": "subscriptions",
+  "proto": "choice-subauto-after",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-before.png",
+  "page": "connections",
+  "proto": "connrule-before",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-mine.png",
+  "page": "connections",
+  "proto": "connrule",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-set.png",
+  "page": "connections",
+  "proto": "connrule-set",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-match.png",
+  "page": "connections",
+  "proto": "connrule-match",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-add.png",
+  "page": "connections",
+  "proto": "connrule-add",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-edit.png",
+  "page": "connections",
+  "proto": "connrule-edit",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-add-dark.png",
+  "page": "connections",
+  "proto": "connrule-add",
+  "theme": "dark"
+ },
+ {
+  "out": "out/side-fold-expanded.png",
+  "home": "console",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='expanded'",
+  "overlap": true
+ },
+ {
+  "out": "out/side-fold-collapsed.png",
+  "home": "console",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='collapsed'"
+ },
+ {
+  "out": "out/side-fold-tip.png",
+  "home": "console",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='collapsed'",
+  "actions": [
+   {
+    "hover": "[data-nav=\"connections\"]"
+   },
+   {
+    "wait": 700
+   }
+  ],
+  "wait": 300
+ },
+ {
+  "out": "out/side-fold-focus.png",
+  "home": "console",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='collapsed'",
+  "actions": [
+   {
+    "press": "Tab"
+   },
+   {
+    "eval": "document.querySelector('#proto-side-toggle').focus()"
+   },
+   {
+    "wait": 400
+   }
+  ],
+  "wait": 300
+ },
+ {
+  "out": "out/side-fold-dark.png",
+  "home": "console",
+  "theme": "dark",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='expanded'"
+ },
+ {
+  "out": "out/side-fold-dark-collapsed.png",
+  "home": "console",
+  "theme": "dark",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='collapsed'"
+ },
+ {
+  "out": "out/side-fold-930.png",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='expanded'",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ }
+]

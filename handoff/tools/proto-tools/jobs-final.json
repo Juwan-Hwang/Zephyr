@@ -1,0 +1,666 @@
+[
+{
+"out": "out/f-home-before.png",
+"width": 930,
+"height": 680
+},
+{
+"out": "out/f-home.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={}",
+"overlap": true
+},
+{
+"out": "out/f-home-ip.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true
+},
+{
+"out": "out/f-home-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-home-min.png",
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true
+},
+{
+"out": "out/f-home-min-dark.png",
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-home-big.png",
+"width": 1440,
+"height": 900,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"overlap": true
+},
+{
+"out": "out/f-con-before.png",
+"width": 930,
+"height": 680,
+"home": "console"
+},
+{
+"out": "out/f-con.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={}",
+"home": "console",
+"overlap": true
+},
+{
+"out": "out/f-con-ip.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"home": "console",
+"overlap": true,
+"post": "document.querySelector('#dz-node-name').closest('.glass-card').scrollIntoView({block:'end'})"
+},
+{
+"out": "out/f-con-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"home": "console",
+"theme": "dark",
+"overlap": true,
+"post": "document.querySelector('#dz-node-name').closest('.glass-card').scrollIntoView({block:'end'})"
+},
+{
+"out": "out/f-con-min.png",
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"home": "console",
+"overlap": true
+},
+{
+"out": "out/f-con-big.png",
+"width": 1440,
+"height": 900,
+"proto": "final",
+"pre": "window.__F__={ip:true}",
+"home": "console",
+"overlap": true
+},
+{
+"out": "out/f-coredown-before.png",
+"width": 930,
+"height": 680,
+"proto": "coredown-before"
+},
+{
+"out": "out/f-coredown.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'coredown'}",
+"overlap": true
+},
+{
+"out": "out/f-coredown-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'coredown'}",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-coredown-min.png",
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={feat:'coredown'}",
+"overlap": true
+},
+{
+"out": "out/f-con-coredown-before.png",
+"width": 930,
+"height": 680,
+"proto": "coredown-before",
+"home": "console"
+},
+{
+"out": "out/f-con-coredown.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'coredown'}",
+"home": "console",
+"overlap": true
+},
+{
+"out": "out/f-side-before.png",
+"width": 930,
+"height": 680
+},
+{
+"out": "out/f-side-min-before.png",
+"width": 720,
+"height": 540
+},
+{
+"out": "out/f-side-expanded.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={}",
+"overlap": true
+},
+{
+"out": "out/f-side-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={}",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-side-collapsed.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={side:'collapsed'}",
+"overlap": true
+},
+{
+"out": "out/f-side-collapsed-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={side:'collapsed'}",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-side-edge.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={}",
+"post": "window.__protoSide.edge(true)",
+"overlap": true
+},
+{
+"out": "out/f-side-menu.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={}",
+"post": "window.__protoSide.edge(true);(()=>{const r=document.querySelector('#sidebar-nav .nav-btn[data-nav=\"logs\"]').getBoundingClientRect();window.__protoSide.menu(r.left+r.width*0.6, r.bottom+40)})()"
+},
+{
+"out": "out/f-side-menu-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={side:'collapsed'}",
+"theme": "dark",
+"post": "(()=>{const r=document.querySelector('#sidebar-nav .nav-btn[data-nav=\"logs\"]').getBoundingClientRect();window.__protoSide.menu(r.left+r.width*0.6, r.bottom+40)})()"
+},
+{
+"out": "out/f-side-min.png",
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={}",
+"overlap": true
+},
+{
+"out": "out/f-side-min-dark.png",
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={}",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-side-min-open.png",
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={}",
+"post": "setTimeout(()=>window.__protoSide.set(true),300)"
+},
+{
+"out": "out/f-side-big.png",
+"width": 1440,
+"height": 900,
+"proto": "final",
+"pre": "window.__F__={}",
+"overlap": true
+},
+{
+"out": "out/f-ipset-before.png",
+"width": 930,
+"height": 680,
+"page": "settings",
+"post": "document.querySelector('#setting-home-mode-container').scrollIntoView({block:'center'})"
+},
+{
+"out": "out/f-ipset.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'exitip-setting'}",
+"page": "settings",
+"overlap": true
+},
+{
+"out": "out/f-testurl-before.png",
+"width": 930,
+"height": 680,
+"page": "settings",
+"post": "document.querySelector('#setting-unified-delay').scrollIntoView({block:'center'})"
+},
+{
+"out": "out/f-testurl.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'testurl'}",
+"page": "settings",
+"overlap": true
+},
+{
+"out": "out/f-testurl-dialog.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'testurl-dialog'}",
+"page": "settings",
+"overlap": true
+},
+{
+"out": "out/f-testurl-dialog-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'testurl-dialog'}",
+"page": "settings",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-speed-before.png",
+"width": 930,
+"height": 680,
+"page": "proxies"
+},
+{
+"out": "out/f-speed-menu.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-menu'}",
+"page": "proxies",
+"overlap": true
+},
+{
+"out": "out/f-speed-confirm.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-confirm'}",
+"page": "proxies",
+"overlap": true
+},
+{
+"out": "out/f-speed-run.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-run'}",
+"page": "proxies",
+"overlap": true
+},
+{
+"out": "out/f-speed-done.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-done'}",
+"page": "proxies",
+"overlap": true
+},
+{
+"out": "out/f-speed-sort.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-sort'}",
+"page": "proxies",
+"overlap": true
+},
+{
+"out": "out/f-speed-run-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-run'}",
+"page": "proxies",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-speed-run-min.png",
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-run'}",
+"page": "proxies",
+"overlap": true
+},
+{
+"out": "out/f-speed-done-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-done'}",
+"page": "proxies",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-speed-setting.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-setting'}",
+"page": "settings",
+"overlap": true
+},
+{
+"out": "out/f-speed-dialog.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-dialog'}",
+"page": "settings",
+"overlap": true
+},
+{
+"out": "out/f-speed-dialog-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-dialog'}",
+"page": "settings",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-speed-dialog-min.png",
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-dialog'}",
+"page": "settings",
+"overlap": true
+},
+{
+"out": "out/f-cards-before.png",
+"width": 1440,
+"height": 900,
+"page": "proxies",
+"proto": "cards-xx"
+},
+{
+"out": "out/f-cards.png",
+"width": 1440,
+"height": 900,
+"proto": "final",
+"pre": "window.__F__={feat:'cards-200'}",
+"page": "proxies",
+"overlap": true
+},
+{
+"out": "out/f-bypass-before.png",
+"width": 930,
+"height": 680,
+"page": "settings",
+"post": "document.querySelector('#port-config-btn').scrollIntoView({block:'center'})"
+},
+{
+"out": "out/f-bypass.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'bypass'}",
+"page": "settings",
+"overlap": true
+},
+{
+"out": "out/f-bypass-dialog.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'bypass-dialog'}",
+"page": "settings",
+"overlap": true
+},
+{
+"out": "out/f-bypass-dialog-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'bypass-dialog'}",
+"page": "settings",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-corners-before.png",
+"width": 930,
+"height": 680,
+"proto": "corners-before",
+"home": "console"
+},
+{
+"out": "out/f-corners.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'corners-after'}",
+"overlap": true
+},
+{
+"out": "out/f-connrule-before.png",
+"width": 930,
+"height": 680,
+"page": "connections",
+"proto": "connrule-before"
+},
+{
+"out": "out/f-connrule.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'connrule'}",
+"page": "connections",
+"overlap": true
+},
+{
+"out": "out/f-connrule-set.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'connrule-set'}",
+"page": "connections",
+"overlap": true
+},
+{
+"out": "out/f-connrule-match.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'connrule-match'}",
+"page": "connections",
+"overlap": true
+},
+{
+"out": "out/f-connrule-add.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'connrule-add'}",
+"page": "connections",
+"overlap": true
+},
+{
+"out": "out/f-connrule-edit.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'connrule-edit'}",
+"page": "connections",
+"overlap": true
+},
+{
+"out": "out/f-connrule-add-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'connrule-add'}",
+"page": "connections",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-connrule-add-min.png",
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={feat:'connrule-add'}",
+"page": "connections",
+"overlap": true
+},
+{
+"out": "out/f-privnet-before.png",
+"width": 930,
+"height": 680,
+"page": "subscriptions",
+"proto": "privnet-before"
+},
+{
+"out": "out/f-privnet.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'privnet-after'}",
+"page": "subscriptions",
+"overlap": true
+},
+{
+"out": "out/f-privnet-dark.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'privnet-after'}",
+"page": "subscriptions",
+"theme": "dark",
+"overlap": true
+},
+{
+"out": "out/f-privnet-min.png",
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={feat:'privnet-after'}",
+"page": "subscriptions",
+"overlap": true
+},
+{
+"out": "out/f-autoupd-before.png",
+"width": 930,
+"height": 680,
+"page": "subscriptions",
+"proto": "choice-subauto-before"
+},
+{
+"out": "out/f-autoupd.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'choice-subauto-after'}",
+"page": "subscriptions",
+"overlap": true
+},
+{
+"out": "out/f-choice-states.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'testurl-dialog'}",
+"page": "settings",
+"actions": [
+{
+"wait": 600
+},
+{
+"eval": "document.querySelector('.choice-card').focus()"
+},
+{
+"hover": ".choice-card:nth-child(3)",
+"force": true
+},
+{
+"wait": 300
+}
+],
+"overlap": true
+},
+{
+"out": "out/f-flatpak-before.png",
+"width": 930,
+"height": 680,
+"page": "settings",
+"proto": "flatpak-before"
+},
+{
+"out": "out/f-flatpak.png",
+"width": 930,
+"height": 680,
+"proto": "final",
+"pre": "window.__F__={feat:'flatpak-after'}",
+"page": "settings",
+"overlap": true
+},
+{
+"out": "out/f-speed-done-min.png",
+"width": 720,
+"height": 540,
+"proto": "final",
+"pre": "window.__F__={feat:'speed-done'}",
+"page": "proxies",
+"overlap": true
+}
+]

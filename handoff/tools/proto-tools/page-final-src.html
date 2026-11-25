@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zephyr 界面定稿</title>
+<style>
+.shots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:8px 0 20px}
+.shots.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.shots figure{margin:0}
+.shots img{display:block;width:100%;height:auto;border:1px solid var(--rule);border-radius:8px;background:var(--card)}
+.shots figcaption{margin-top:5px;font:12px/1.45 var(--sans);color:var(--muted)}
+.shots figcaption b{color:var(--ink);font-weight:600}
+.note-line{font:13px/1.55 var(--sans);color:var(--muted);margin:4px 0 8px}
+.why{font:14px/1.55 var(--sans);color:var(--ink);margin:6px 0}
+.why b{font-weight:600}
+table.copy{width:100%;border-collapse:collapse;font:13px/1.5 var(--sans)}
+table.copy th,table.copy td{text-align:left;vertical-align:top;padding:7px 8px;border-bottom:1px solid var(--rule)}
+table.copy th{font-weight:600;color:var(--ink);white-space:nowrap}
+table.copy td:first-child{color:var(--muted)}
+@media (max-width:700px){.shots,.shots.three{grid-template-columns:minmax(0,1fr)}}
+</style>
+</head>
+<body><div class="wrap">
+<h1>Zephyr 界面定稿：改动前后对比</h1>
+<p class="kicker">定稿原型，只含选定方案，每屏改动前后并排</p>
+<p class="updated">更新于 2026 年 11 月 19 日晚（侧栏按你的最新反馈又改过一次；窗口尺寸、按钮顺序照上一版）</p>
+<p class="lede">侧栏恢复成图标加文字，只去掉底部的「隐藏边栏」按钮，展开和收起改成拖右边缘、快捷键、右键菜单和窗口变窄自动收起；首页在 720×540 到 2560×1440 的每个尺寸下都有固定的缩放规则，不再让一张卡吃掉多出来的空间。</p>
+<ul>
+<li>这次的四处改动在最前面：<a href="#side">侧栏</a>、<a href="#sizes">不同窗口尺寸下的首页</a>、<a href="#order">测试延迟和测试下载速度的顺序</a>，以及右上角关闭按钮改回原来的红点。</li>
+<li>每处都把截图传到临时图床、用浏览器打开真正看过，再回到原型里量位置和尺寸。</li>
+<li>改动提交在本地 wt-ui-proto 分支，没有推送。<a href="#copy">新旧文案对照表</a>在最后。</li>
+</ul>
+
+<nav class="jump"><a href="#side">侧栏</a><a href="#sizes">窗口尺寸</a><a href="#order">按钮顺序</a><a href="#look">看图后的修改</a><a href="#home">简洁首页</a><a href="#con">控制台首页</a><a href="#ip">IP 地址</a><a href="#coredown">内核停止</a><a href="#speed">下载测速</a><a href="#v2rayn">对照 v2rayN</a><a href="#testurl">延迟测试地址</a><a href="#cards">卡片宽度</a><a href="#bypass">忽略的主机与域</a><a href="#corners">窗口四角</a><a href="#connrule">连接页改规则</a><a href="#privnet">本地网络地址</a><a href="#autoupd">自动更新</a><a href="#flatpak">Flatpak</a><a href="#a11y">对比度</a><a href="#copy">文案对照</a></nav>
+
+<h2 id="side">侧栏：恢复图标加文字，去掉「隐藏边栏」按钮，展开和收起不靠按钮</h2>
+<p class="note-line">你的反馈：「只是你增加了那个隐藏边栏的图标我不喜欢」「原来的图标我也喜欢」「但是展开和收起功能还是要有」。相关 issue：<a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>（用户说左侧图标看不懂，希望加文字）。</p>
+<p class="why"><b>上一版理解错了：</b>我把你说的「增加图标换另外的方式」当成不要图标，做了纯文字侧栏。你其实只是不喜欢底部新加的那个「隐藏边栏」图标按钮。纯文字侧栏已经撤回。</p>
+<ul>
+<li><b>侧栏恢复成看图后修改的那一版。</b>main 原来的图标一个没换，旁边加两个字的名字：首页、节点、订阅、连接、规则、日志、设置。选中项还是平铺浅底色，不加投影。另外修了一处：选中项的名字原来比图标暗（深色下 60% 白，比没选中的 74% 还暗），现在和图标同色。</li>
+<li><b>「隐藏边栏」按钮去掉了。</b>侧栏底部只剩「设置」，和顶部「首页」一样离侧栏边缘 32 px（720×540 下是 20 px），上下对称。</li>
+<li><b>收起时只留原来的图标，展开时是图标加文字。</b>收起后悬停图标，名字照旧用 main 原有的悬停提示显示。状态会记住。</li>
+</ul>
+<p class="why"><b>不加按钮，怎么展开和收起：</b>都是桌面应用里现成的做法，四种方式效果一样，用哪种都行。</p>
+<ul>
+<li><b>拖侧栏右边缘。</b>鼠标移到侧栏右边，停一下会出现一条蓝色细线，光标变成左右箭头。往左拖过一半就收起，往右拖过一半就展开，不会停在半中间。双击这条边也能切换。理由：Finder、VS Code、Notion 的侧栏都能这样拖，用户不用学；平时这条线看不见，所以不会多出任何东西。</li>
+<li><b>快捷键。</b>macOS 上是 ⌃⌘S，和 macOS 应用「显示」菜单里标准的「显示边栏 / 隐藏边栏」命令同一个快捷键；Windows 和 Linux 上是 Ctrl+B，和 VS Code 一样。输入框和编辑器里不抢这个快捷键。</li>
+<li><b>右键侧栏。</b>菜单里只有一项「收起边栏」或「展开边栏」，右边写着快捷键。这样拖动和快捷键都不知道的人也能找到，菜单顺便教会快捷键。用「收起」不用「隐藏」，因为侧栏收起后图标还在，不是整个藏起来。</li>
+<li><b>窗口窄于 860 px 时自动收起。</b>这时再展开，侧栏浮在内容上方、投影加深；选好页面、按 Esc 或点外面就收回，不改你记住的状态。</li>
+<li><b>键盘也能用。</b>右边缘可以用 Tab 聚焦（聚焦时是实心蓝线），按 ← 收起、→ 展开、回车切换；屏幕阅读器读到的是「收起边栏（Ctrl+B）」。</li>
+</ul>
+<div class="shots">
+<figure><img src="@f-side-prev-expanded" alt="上上版侧栏"><figcaption><b>看图后修改的那一版</b>：图标加文字，底部有「隐藏边栏」按钮</figcaption></figure>
+<figure><img src="@f-side-expanded" alt="现在的侧栏"><figcaption><b>现在</b>，930×680：同样的图标和文字，底部只剩「设置」</figcaption></figure>
+<figure><img src="@f-side-prev-dark" alt="深色上上版侧栏"><figcaption><b>深色 · 那一版</b></figcaption></figure>
+<figure><img src="@f-side-dark" alt="深色现在的侧栏"><figcaption><b>深色 · 现在</b>：选中项的名字和图标同色</figcaption></figure>
+<figure><img src="@f-side-edge" alt="悬停右边缘"><figcaption><b>悬停侧栏右边缘</b>：出现蓝色细线，可以拖</figcaption></figure>
+<figure><img src="@f-side-menu" alt="右键菜单"><figcaption><b>右键侧栏</b>：「收起边栏」和快捷键</figcaption></figure>
+<figure><img src="@f-side-collapsed" alt="收起后"><figcaption><b>收起后</b>：只剩原来的图标</figcaption></figure>
+<figure><img src="@f-side-menu-dark" alt="深色收起后右键菜单"><figcaption><b>深色 · 收起后右键</b>：菜单变成「展开边栏」</figcaption></figure>
+<figure><img src="@f-side-min" alt="最小窗口自动收起"><figcaption><b>720×540</b>：自动收起成只有图标</figcaption></figure>
+<figure><img src="@f-side-min-open" alt="最小窗口临时展开"><figcaption><b>720×540 · 临时展开</b>：浮在内容上方，选好页面就收回</figcaption></figure>
+<figure><img src="@f-side-min-dark" alt="最小窗口深色"><figcaption><b>720×540 · 深色</b></figcaption></figure>
+<figure><img src="@f-side-big" alt="1440×900 侧栏"><figcaption><b>1440×900</b></figcaption></figure>
+</div>
+<p class="why"><b>没用的做法：</b>侧栏底部的折叠图标按钮（你否决了）；纯文字侧栏（理解错了，撤回）；换一套新图标、图标在上名字在下（你喜欢原来的图标，侧栏不用重新设计）。</p>
+<ul>
+<li><b>右上角关闭按钮还是原来的红点。</b>这是你上次的决定，没有变。</li>
+</ul>
+
+<h2 id="sizes">不同窗口尺寸下的首页</h2>
+<p class="note-line">你的反馈：「如果窗口很大，中间卡片就又会显得太大了」「让不同分辨率窗口都看起来和谐，符合美学」；控制台首页在 1440×900 下「也显得不是很协调」。</p>
+<p class="why"><b>原来的问题：</b>多出来的宽度和高度全给了一张卡。简洁首页的流量卡在 1440×900 下占满中间，两个大数字悬在半空，图表几乎是一条平线；控制台首页的实时流量卡被右栏两张卡撑得又高又空，最底下的「1 分钟平均」那一行和订阅卡的「立即更新 / 管理订阅」被窗口底边截断。</p>
+<p class="why"><b>新规则：930×680 和 720×540 保持原样，窗口再大时，多出来的空间按下面的规则分。</b></p>
+<ul>
+<li><b>内容限宽、居中。</b>简洁首页的内容列最宽 = 窗口宽度的 70%（不少于 1040 px），并且不超过窗口高度的 1.75 倍，所以偏宽的窗口里内容也不会被拉成一条。控制台首页同理：70%（不少于 1240 px），不超过高度的 1.9 倍。</li>
+<li><b>卡片有最大高度。</b>简洁首页的流量卡从 430 px 起，窗口每高 100 px 只多 35 px，并且在列宽的 0.44 到 0.8 倍之间。控制台首页的流量行在 280–560 px 之间，底行在 300–440 px 之间，两行按 1.15 : 1 分高度。</li>
+<li><b>剩下的高度分到内容上下，上 2 下 3。</b>视觉中心比几何中心略高，内容看起来是稳的，不是往下掉。</li>
+<li><b>字号和间距只在大窗口里放大。</b>内容列超过 1040 px（控制台 1240 px）以后，大数字、小字、内边距和卡片间距按列宽小幅变大：大数字最大 100 px，三块之间的间距从 16 px 到 28 px。1440×900 以内保持系统字号。</li>
+<li><b>流量卡的数字固定在上方，图表从数字下面开始。</b>卡片变高时只有图表变高，曲线不会从数字后面穿过。截图时先填满 60 秒的模拟流量，图表不再只在最右端突然竖起来（真实应用里图表本来就会攒满 60 秒的历史）。</li>
+<li><b>控制台首页按 4 列网格排。</b>宽于 1081 px 时：指标卡各 1 列；实时流量 3 列、当前节点 1 列；底行活动连接 2 列，最近事件、订阅用量各 1 列，三行的竖线完全对齐。订阅用量从右栏移到底行，实时流量就不再被右栏撑高。1081–1279 px 宽时用 3 列。「延迟较低」能放几个放几个，放不下就整行藏起来，不露半行。</li>
+<li><b>一屏放不下时整页滚动。</b>比如控制台首页在 1280×800 下，每张卡保持完整高度，不在卡片中间截断。</li>
+</ul>
+<p class="why"><b>简洁首页，每个尺寸改动前后：</b></p>
+<div class="shots">
+<figure><img src="@sz-b-home-720x540" alt="720×540 改动前"><figcaption><b>720×540（最小窗口）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-home-720x540" alt="720×540 改动后"><figcaption><b>改动后</b>：和原来一样，侧栏自动收起成图标</figcaption></figure>
+<figure><img src="@sz-b-home-930x680" alt="930×680 改动前"><figcaption><b>930×680（默认窗口）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-home-930x680" alt="930×680 改动后"><figcaption><b>改动后</b>：和原来一样</figcaption></figure>
+<figure><img src="@sz-b-home-1280x800" alt="1280×800 改动前"><figcaption><b>1280×800（常见笔记本）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-home-1280x800" alt="1280×800 改动后"><figcaption><b>改动后</b></figcaption></figure>
+<figure><img src="@sz-b-home-1440x900" alt="1440×900 改动前"><figcaption><b>1440×900（你截图的尺寸）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-home-1440x900" alt="1440×900 改动后"><figcaption><b>改动后</b>：内容居中、限宽，流量卡不再占满中间</figcaption></figure>
+<figure><img src="@sz-b-home-1920x1080" alt="1920×1080 改动前"><figcaption><b>1920×1080（1080p 全屏）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-home-1920x1080" alt="1920×1080 改动后"><figcaption><b>改动后</b>：字号、间距随列宽小幅放大</figcaption></figure>
+<figure><img src="@sz-b-home-2560x1440" alt="2560×1440 改动前"><figcaption><b>2560×1440（2K 全屏）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-home-2560x1440" alt="2560×1440 改动后"><figcaption><b>改动后</b>：大数字 100 px 封顶，四周留白均衡</figcaption></figure>
+<figure><img src="@sz-b-home-1920x800" alt="1920×800 改动前"><figcaption><b>1920×800（偏宽）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-home-1920x800" alt="1920×800 改动后"><figcaption><b>改动后</b>：按窗口高度限宽，内容不被拉成一条</figcaption></figure>
+<figure><img src="@sz-b-home-1000x1200" alt="1000×1200 改动前"><figcaption><b>1000×1200（偏高）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-home-1000x1200" alt="1000×1200 改动后"><figcaption><b>改动后</b>：多出来的高度分到上下，上少下多</figcaption></figure>
+</div>
+<p class="why"><b>控制台首页，每个尺寸改动前后：</b></p>
+<div class="shots">
+<figure><img src="@sz-b-con-720x540" alt="720×540 改动前"><figcaption><b>720×540（最小窗口）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-con-720x540" alt="720×540 改动后"><figcaption><b>改动后</b>：和原来一样，整页滚动</figcaption></figure>
+<figure><img src="@sz-b-con-930x680" alt="930×680 改动前"><figcaption><b>930×680（默认窗口）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-con-930x680" alt="930×680 改动后"><figcaption><b>改动后</b>：和原来一样</figcaption></figure>
+<figure><img src="@sz-b-con-1280x800" alt="1280×800 改动前"><figcaption><b>1280×800（常见笔记本）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-con-1280x800" alt="1280×800 改动后"><figcaption><b>改动后</b>：一屏放不下时整页滚动，每张卡完整</figcaption></figure>
+<figure><img src="@sz-b-con-1440x900" alt="1440×900 改动前"><figcaption><b>1440×900（你截图的尺寸）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-con-1440x900" alt="1440×900 改动后"><figcaption><b>改动后</b>：流量卡不再空，底部和订阅卡按钮都不截断</figcaption></figure>
+<figure><img src="@sz-b-con-1920x1080" alt="1920×1080 改动前"><figcaption><b>1920×1080（1080p 全屏）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-con-1920x1080" alt="1920×1080 改动后"><figcaption><b>改动后</b>：4 列网格，三行边线对齐</figcaption></figure>
+<figure><img src="@sz-b-con-2560x1440" alt="2560×1440 改动前"><figcaption><b>2560×1440（2K 全屏）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-con-2560x1440" alt="2560×1440 改动后"><figcaption><b>改动后</b>：内容限宽居中，卡片有最大高度</figcaption></figure>
+<figure><img src="@sz-b-con-1920x800" alt="1920×800 改动前"><figcaption><b>1920×800（偏宽）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-con-1920x800" alt="1920×800 改动后"><figcaption><b>改动后</b>：两行按比例分高度</figcaption></figure>
+<figure><img src="@sz-b-con-1000x1200" alt="1000×1200 改动前"><figcaption><b>1000×1200（偏高）· 改动前</b></figcaption></figure>
+<figure><img src="@sz-a-con-1000x1200" alt="1000×1200 改动后"><figcaption><b>改动后</b>：窄于 1081 px，沿用原来的两栏</figcaption></figure>
+</div>
+<p class="note-line">8 个尺寸 × 两个首页，改动前后共 32 张截图，都做了重叠检查，全部没有重叠。另外在每个尺寸下量过：简洁首页没有被截断或互相重叠的文字；控制台首页在 1440×900、1920×1080、2560×1440 下一屏正好放下，没有一张卡在中间被截断。</p>
+
+<h2 id="order">测试延迟和测试下载速度：交换位置，先收起下载测速</h2>
+<p class="note-line">你的决定：「测试下载速度和延迟的按钮交换位置」「如果要折叠，优先折叠下载速度图标，而不是延迟测试按钮」。</p>
+<ul>
+<li><b>交换位置。</b>节点页顶部现在是「测试延迟」在前、「测试下载速度」在后；节点卡悬停时也是延迟测试按钮在前、下载测速按钮在后。</li>
+<li><b>空间不够时按这个顺序收：</b>① 测试下载速度只留图标，测速进行中也只留图标，进度写在悬停提示里；② 排序等其他按钮只留图标，测试延迟仍带文字；③ 搜索框收窄；④ 最后才让测试延迟只留图标。720×540 下只走到第 ② 步，测试延迟一直带文字。</li>
+</ul>
+<div class="shots">
+<figure><img src="@od-done-before" alt="节点页顶部改动前"><figcaption><b>930×680 · 改动前</b>：测试下载速度在前</figcaption></figure>
+<figure><img src="@od-done-after" alt="节点页顶部改动后"><figcaption><b>改动后</b>：测试延迟在前</figcaption></figure>
+<figure><img src="@od-menu-before" alt="节点卡悬停改动前"><figcaption><b>节点卡悬停 · 改动前</b></figcaption></figure>
+<figure><img src="@od-menu-after" alt="节点卡悬停改动后"><figcaption><b>改动后</b>：延迟测试按钮在前</figcaption></figure>
+<figure><img src="@od-min-before" alt="最小窗口测速中改动前"><figcaption><b>720×540 测速中 · 改动前</b>：测试延迟先收成图标</figcaption></figure>
+<figure><img src="@od-min-after" alt="最小窗口测速中改动后"><figcaption><b>改动后</b>：下载测速先收成图标，测试延迟带文字</figcaption></figure>
+</div>
+<div class="shots">
+<figure><img src="@od-done-min" alt="最小窗口测速完成"><figcaption><b>720×540 测速完成</b></figcaption></figure>
+</div>
+
+<h2 id="look">看图后的修改</h2>
+<p class="why"><b>怎么看的：</b>浏览器打不开这台机器上的本地地址，所以把截图传到临时图床 uguu.se（几个小时后自动删除），再用浏览器打开图片链接，让浏览器自带的视觉模型逐张描述画面、按 Apple 和 Google 设计师的标准挑问题。先用简洁首页试了一张，它准确说出了开关条、下载上传数字和节点名，确认是真的看到了画面。改之前看了 8 张整屏截图（简洁首页浅色、深色、720×540、1440×900，控制台首页 930×680 和 1440×900，测速中和测速完成）和 4 张局部放大；改完又看了 2 张整屏和 7 张局部放大。看出来的每条问题都回到原型里量过位置和尺寸，量得出来的才改。</p>
+<ul>
+<li><b>流量图的线从大数字后面穿过。</b>930×680 下，下载、上传的折线压在「KB/s」和数字后面；宽窗口里左半边没有线，线从半空突然出现。改法：图表上半部分淡出，左端淡入。改完再看：线不再碰到数字和单位，左端是平滑淡入的。</li>
+<li><b>1440×900 下「延迟较低」右边空了一大块。</b>节点胶囊有 200 px 的宽度上限，排不满一整行。改法：去掉上限，胶囊平分整行，延迟数字靠右对齐。窄窗口放几个不变。</li>
+<li><b>「自动选择」卡的副标题被截断。</b>930×680 下显示成「自动 → 🇭🇰 香港 03 IP…」。量下来，原因是悬停才出现的单节点测试按钮平时看不见，却一直占着 20 px。改法：按钮平时不占位置，悬停或键盘聚焦时才出现；圆点和副标题的间距从 8 px 改成 6 px。</li>
+<li><b>侧栏选中项像一个浮起的盒子。</b>选中底色带着很重的投影和描边，看上去像图标外面又套了一层。改法：换成系统侧栏那样的平铺浅底色，只留一圈很淡的描边。</li>
+<li><b>深色模式下侧栏没选中的项偏暗。</b>改法：文字和图标从 60% 白提亮到 74% 白。改完再看：读起来清楚了，选中项也足够醒目、不刺眼。</li>
+</ul>
+<div class="shots">
+<figure><img src="@lk-hero-before" alt="流量卡改动前"><figcaption><b>流量卡 · 改动前</b>：折线穿过大数字</figcaption></figure>
+<figure><img src="@lk-hero-after" alt="流量卡改动后"><figcaption><b>改动后</b>：线只出现在数字下方，左端淡入</figcaption></figure>
+<figure><img src="@lk-cards-before" alt="节点卡改动前"><figcaption><b>节点卡 · 改动前</b>：「自动选择」的副标题被截断</figcaption></figure>
+<figure><img src="@lk-cards-after" alt="节点卡改动后"><figcaption><b>改动后</b></figcaption></figure>
+<figure><img src="@lk-side-before" alt="侧栏浅色改动前"><figcaption><b>侧栏 · 改动前</b>：选中项带重投影</figcaption></figure>
+<figure><img src="@lk-side-after" alt="侧栏浅色改动后"><figcaption><b>改动后</b>：平铺浅底色</figcaption></figure>
+<figure><img src="@lk-side-dark-before" alt="深色侧栏改动前"><figcaption><b>深色侧栏 · 改动前</b>：没选中的项偏暗</figcaption></figure>
+<figure><img src="@lk-side-dark-after" alt="深色侧栏改动后"><figcaption><b>改动后</b></figcaption></figure>
+</div>
+<div class="shots" style="grid-template-columns:minmax(0,1fr)">
+<figure><img src="@lk-alts-big-before" alt="宽窗口节点条改动前"><figcaption><b>1440×900 节点条 · 改动前</b>：右边空一块</figcaption></figure>
+<figure><img src="@lk-alts-big-after" alt="宽窗口节点条改动后"><figcaption><b>改动后</b>：胶囊排满整行</figcaption></figure>
+</div>
+<p class="note-line">上面两条侧栏的修改都保留在现在的<a href="#side">侧栏</a>里。流量图那条也在<a href="#sizes">窗口尺寸</a>一节里重新定过：图表从大数字下方开始，不再靠淡出避开数字。</p>
+<p class="why"><b>看到了但这次没改的：</b>最后一轮看图还提到侧栏选中底色的圆角偏大、顶部开关条左右留白不均、配置下拉比下面的数字更显眼。这几条只在一次描述里出现，我没有量出对应的问题，所以没改。流量图最右端那一下陡升是原型的模拟数据，不是布局问题。「首尔 01」的国旗在截图里是灰色方块，是截图这台机器的表情字体缺这个国旗，原型里写的就是 🇰🇷。浅色侧栏选中项改完后，看图时说还带一点很轻的投影，读起来清楚、不抢眼，保留。</p>
+
+<h2 id="home">简洁首页：开关条、流量卡、当前节点条</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/673">#673</a></p>
+<p class="why"><b>首页只回答两件事：现在通没通，走的是哪个节点。</b>开关在最上面，流量卡占中间，当前节点放在最下面，像音乐 App 的「正在播放」。</p>
+<ul>
+<li><b>流量卡只剩一个重点。</b>下载、上传两个大数字加流量图；总流量变成下面一行小字；底部统计行删掉。</li>
+<li><b>「12 个连接 >」放在卡片右上角。</b>双击流量图是隐藏手势，没人会发现，换成看得见的链接。</li>
+<li><b>「延迟较低」的节点跟当前节点放在一起。</b>它本来就是换节点的捷径，点一下直接切换；窗口多宽放几个，名字不截断。</li>
+</ul>
+<div class="shots">
+<figure><img src="@f-home-before" alt="简洁首页改动前"><figcaption><b>改动前</b>：开关压在图表和统计下面</figcaption></figure>
+<figure><img src="@f-home" alt="简洁首页定稿"><figcaption><b>定稿</b>，930×680</figcaption></figure>
+<figure><img src="@f-home-ip" alt="简洁首页打开显示 IP 地址"><figcaption><b>打开「显示 IP 地址」</b>：节点名下面一行，布局不变</figcaption></figure>
+<figure><img src="@f-home-dark" alt="简洁首页深色"><figcaption><b>深色</b></figcaption></figure>
+<figure><img src="@f-home-min" alt="简洁首页最小窗口"><figcaption><b>最小窗口 720×540</b>：放 1 个延迟较低的节点，不用滚动</figcaption></figure>
+<figure><img src="@f-home-min-dark" alt="简洁首页最小窗口深色"><figcaption><b>720×540 · 深色</b></figcaption></figure>
+</div>
+<div class="shots" style="grid-template-columns:minmax(0,1fr)">
+<figure><img src="@f-home-big" alt="简洁首页 1440×900"><figcaption><b>1440×900</b>：内容居中、限宽，流量卡有最大高度，<a href="#sizes">规则见窗口尺寸一节</a></figcaption></figure>
+</div>
+
+<h2 id="con">控制台首页：沿用改过的方案 B，去掉重复</h2>
+<p class="why"><b>「节点延迟」指标卡和「当前节点」卡说的是同一件事，删掉。</b>剩下 4 张：宽窗口一行 4 张，窄窗口两行各 2 张，1082 宽时「总流量」脚注被截断的问题也一起没了。</p>
+<ul>
+<li><b>「当前节点」卡底部加 3 个延迟较低的节点。</b>和简洁首页同一个逻辑。</li>
+<li><b>「活动连接」整张卡可以点，右上角带箭头。</b>进连接页的入口要看得见。</li>
+<li><b>开关条副标题改成「已打开 / 已关闭」。</b>原来写端口号，是实现细节。</li>
+</ul>
+<div class="shots">
+<figure><img src="@f-con-before" alt="控制台首页改动前"><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@f-con" alt="控制台首页定稿"><figcaption><b>定稿</b>，930×680</figcaption></figure>
+<figure><img src="@f-con-ip" alt="控制台首页打开显示 IP 地址"><figcaption><b>打开「显示 IP 地址」</b>：在「当前节点」卡的节点名下面</figcaption></figure>
+<figure><img src="@f-con-dark" alt="控制台首页深色"><figcaption><b>深色</b></figcaption></figure>
+<figure><img src="@f-con-min" alt="控制台首页最小窗口"><figcaption><b>720×540</b>：指标卡两行各 2 张</figcaption></figure>
+<figure><img src="@f-con-big" alt="控制台首页 1440×900"><figcaption><b>1440×900</b>：4 列网格，三行边线对齐，<a href="#sizes">规则见窗口尺寸一节</a></figcaption></figure>
+</div>
+
+<h2 id="ip">显示 IP 地址：设置里的开关</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/321">#321</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/673">#673</a></p>
+<p class="why"><b>默认关闭，打开后自动查询，切换节点时自动刷新，没有「查询」按钮。</b>IP 是当前节点的属性，所以放在节点名下面，不加新胶囊，开和关的布局完全一样。</p>
+<div class="shots">
+<figure><img src="@f-ipset-before" alt="设置改动前"><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@f-ipset" alt="设置里新增显示 IP 地址"><figcaption><b>定稿</b>：新增「显示 IP 地址」</figcaption></figure>
+</div>
+
+<h2 id="coredown">内核停止：横幅加节点条状态</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/182">#182</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/217">#217</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/318">#318</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/609">#609</a></p>
+<p class="why"><b>横幅在页面最上面，只说影响，给两个按钮：「关闭系统代理」「重新启动」。</b>节点条同时显示「已停止」，「延迟较低」变灰不能点，免得点了没反应。不自动重启，也不去关别的客户端。</p>
+<div class="shots">
+<figure><img src="@f-coredown-before" alt="内核停止改动前"><figcaption><b>简洁 · 改动前</b></figcaption></figure>
+<figure><img src="@f-coredown" alt="内核停止定稿"><figcaption><b>简洁 · 定稿</b></figcaption></figure>
+<figure><img src="@f-coredown-dark" alt="内核停止深色"><figcaption><b>简洁 · 深色</b></figcaption></figure>
+<figure><img src="@f-coredown-min" alt="内核停止最小窗口"><figcaption><b>简洁 · 720×540</b></figcaption></figure>
+<figure><img src="@f-con-coredown-before" alt="控制台内核停止改动前"><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+<figure><img src="@f-con-coredown" alt="控制台内核停止定稿"><figcaption><b>控制台 · 定稿</b>：横幅在开关条上方，占布局位置</figcaption></figure>
+</div>
+
+<h2 id="speed">测试下载速度</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a> 原话：「能搞个像v2rayN那样的节点一键测真实下载速度的功能吗」</p>
+<p class="why"><b>做法和 v2rayN 一致，只补一处：测全部之前确认一次，写明最多用多少流量。</b>一次可能用掉半个 GB 以上，v2rayN 没有提示。</p>
+<ul>
+<li><b>两个入口。</b>节点页顶部「测试下载速度」（在「测试延迟」右边）测当前分组全部节点；节点卡悬停时的下载按钮测单个节点。节点卡没有多选，所以不做多选。</li>
+<li><b>一次测一个，每个最多 10 秒。</b>先测延迟，超时的显示「已跳过」；并发会分掉带宽，结果没法比。</li>
+<li><b>结果直接写在卡片上。</b>MB/s，一位小数，取每秒速度的最高值，写在原来协议名的位置；上一版的结果弹窗删掉，测多个节点时能直接对比。</li>
+</ul>
+<div class="shots">
+<figure><img src="@f-speed-before" alt="节点页改动前"><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@f-speed-menu" alt="测试下载速度入口"><figcaption><b>入口</b>：顶部按钮，悬停卡片时的下载按钮</figcaption></figure>
+<figure><img src="@f-speed-confirm" alt="测试前确认"><figcaption><b>测全部前确认</b>：写明节点数和最多用的流量</figcaption></figure>
+<figure><img src="@f-speed-run" alt="正在测试"><figcaption><b>测试中</b>：按钮变成「停止测试 3/12」，Esc 也能停；正在测的卡片描边加进度条，没轮到的显示「等待中」</figcaption></figure>
+<figure><img src="@f-speed-done" alt="测试完成"><figcaption><b>完成</b>：速度写在每张卡片底部，超时的显示「已跳过」</figcaption></figure>
+<figure><img src="@f-speed-sort" alt="排序菜单"><figcaption><b>排序</b>：新增「按下载速度」；「按延迟」的说明改成「延迟最低的排在前面」，两项分得清</figcaption></figure>
+<figure><img src="@f-speed-run-dark" alt="测试中深色"><figcaption><b>测试中 · 深色</b></figcaption></figure>
+<figure><img src="@f-speed-done-dark" alt="测试完成深色"><figcaption><b>完成 · 深色</b></figcaption></figure>
+<figure><img src="@f-speed-run-min" alt="测试中最小窗口"><figcaption><b>测试中 · 720×540</b></figcaption></figure>
+<figure><img src="@f-speed-setting" alt="设置里的下载测速"><figcaption><b>设置</b>：新增「下载测速」，原来的「测速地址」改叫「延迟测试地址」</figcaption></figure>
+<figure><img src="@f-speed-dialog" alt="下载测速弹窗"><figcaption><b>下载测速弹窗</b>：测速文件 4 个选项用选择卡片，最多测试 10 / 20 / 30 秒用分段控件</figcaption></figure>
+<figure><img src="@f-speed-dialog-dark" alt="下载测速弹窗深色"><figcaption><b>弹窗 · 深色</b></figcaption></figure>
+<figure><img src="@f-speed-dialog-min" alt="下载测速弹窗最小窗口"><figcaption><b>弹窗 · 720×540</b></figcaption></figure>
+</div>
+
+<h2 id="v2rayn">v2rayN 的做法与 Zephyr 的对应设计</h2>
+<p class="note-line">对照的是 <a href="https://github.com/2dust/v2rayN">2dust/v2rayN</a> master 分支的源码，需求来自 <a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a>。</p>
+<div class="tablewrap"><table class="copy">
+<thead><tr><th>环节</th><th>v2rayN</th><th>Zephyr</th></tr></thead>
+<tbody>
+<tr><td>并发</td><td>「测速」以并发数 1 调用测试，一个一个测；混合测试才按 MixedConcurrencyCount 并发。<a class="src" href="https://github.com/2dust/v2rayN/blob/master/v2rayN/ServiceLib/Services/SpeedtestService.cs">SpeedtestService.cs</a></td><td>一次测一个节点，不并发</td></tr>
+<tr><td>跳过</td><td>测不了的节点标为「跳过」（ResUI.SpeedtestingSkip）。<a class="src" href="https://github.com/2dust/v2rayN/blob/master/v2rayN/ServiceLib/Services/SpeedtestService.cs">SpeedtestService.cs</a></td><td>先测延迟，超时的显示「已跳过」</td></tr>
+<tr><td>结果</td><td>记录过程中每秒速度的最大值，除以 1000×1000，保留一位小数。<a class="src" href="https://github.com/2dust/v2rayN/blob/master/v2rayN/ServiceLib/Helper/DownloaderHelper.cs">DownloaderHelper.cs</a></td><td>同样取最高值，MB/s，一位小数</td></tr>
+<tr><td>排序</td><td>结果存进节点信息，测失败的不留上次速度，免得排序出错。<a class="src" href="https://github.com/2dust/v2rayN/blob/master/v2rayN/ServiceLib/Services/SpeedtestService.cs">SpeedtestService.cs</a></td><td>结果写在卡片上，排序菜单加「按下载速度」</td></tr>
+<tr><td>停止</td><td>测试开始时提示按 Esc 退出（ResUI.SpeedtestingPressEscToExit）。<a class="src" href="https://github.com/2dust/v2rayN/blob/master/v2rayN/ServiceLib/Services/SpeedtestService.cs">SpeedtestService.cs</a></td><td>按钮变成「停止测试 3/12」，Esc 也能停</td></tr>
+<tr><td>超时</td><td>每个节点的时长由设置项 SpeedTestTimeout 决定。<a class="src" href="https://github.com/2dust/v2rayN/blob/master/v2rayN/ServiceLib/Models/Configs/ConfigItems.cs">ConfigItems.cs</a></td><td>每个节点最多测试 10 / 20 / 30 秒，默认 10</td></tr>
+<tr><td>测速文件</td><td>内置列表第一项是 CacheFly 50 MB，另有 CacheFly 100 / 1 / 10 MB 和 Cloudflare 10 / 50 MB 等。<a class="src" href="https://github.com/2dust/v2rayN/blob/master/v2rayN/ServiceLib/Global.cs">Global.cs</a></td><td>CacheFly 50 MB（默认）、CacheFly 10 MB、Cloudflare 10 MB、自定义</td></tr>
+<tr><td>入口</td><td>节点列表右键菜单和快捷键触发测速。<a class="src" href="https://github.com/2dust/v2rayN/blob/master/v2rayN/v2rayN.Desktop/Views/ProfilesView.axaml">ProfilesView.axaml</a></td><td>节点页顶部按钮测当前分组，卡片上的按钮测单个节点</td></tr>
+<tr><td>流量提示</td><td>没有</td><td>测全部前确认一次，写明最多用多少流量</td></tr>
+</tbody></table></div>
+
+<h2 id="testurl">延迟测试地址</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a></p>
+<p class="why"><b>原来的「测速地址」改叫「延迟测试地址」，点开是弹窗，4 个预设用选择卡片。</b>和新加的「下载测速」放在一起时，原来的名字分不清测的是哪一种；4 个及以上的单选才用选择卡片。</p>
+<div class="shots">
+<figure><img src="@f-testurl-before" alt="设置改动前"><figcaption><b>改动前</b>：地址写死</figcaption></figure>
+<figure><img src="@f-testurl" alt="设置里新增延迟测试地址"><figcaption><b>定稿</b>：新增「延迟测试地址」</figcaption></figure>
+<figure><img src="@f-testurl-dialog" alt="延迟测试地址弹窗"><figcaption><b>弹窗</b>：每张卡一个名字加一行域名</figcaption></figure>
+<figure><img src="@f-testurl-dialog-dark" alt="延迟测试地址弹窗深色"><figcaption><b>弹窗 · 深色</b></figcaption></figure>
+</div>
+<p class="why"><b>选择卡片是新的通用组件，写进 styles.css。</b>选中时描边加辉光环，另有悬停、键盘焦点、禁用和深色模式。</p>
+<div class="shots">
+<figure><img src="@f-choice-states" alt="选择卡片的状态"><figcaption><b>组件状态</b>：常态、悬停、键盘焦点、选中</figcaption></figure>
+</div>
+
+<h2 id="cards">节点卡片最小宽度：200 px</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a></p>
+<p class="why"><b>180 px 时一行太挤，节点名被截断。</b>200 px 在 1440×900 下是 5 列、每列约 242 px；默认窗口下 180 和 200 都是 4 列，所以只放大窗口的对比。</p>
+<div class="shots">
+<figure><img src="@f-cards-before" alt="卡片 180 px"><figcaption><b>改动前 180 px</b>：6 列，每列约 199 px</figcaption></figure>
+<figure><img src="@f-cards" alt="卡片 200 px"><figcaption><b>定稿 200 px</b>：5 列，名字不截断</figcaption></figure>
+</div>
+
+<h2 id="bypass">忽略的主机与域</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/1477">#1477</a></p>
+<p class="why"><b>后端早就支持传入绕过列表，前端一直传空值，这里只补一个设置项。</b>名字照 macOS 代理设置的「忽略这些主机与域的代理设置」。</p>
+<div class="shots">
+<figure><img src="@f-bypass-before" alt="设置改动前"><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@f-bypass" alt="设置里新增忽略的主机与域"><figcaption><b>定稿</b>：新增「忽略的主机与域」</figcaption></figure>
+<figure><img src="@f-bypass-dialog" alt="编辑弹窗"><figcaption><b>编辑弹窗</b>：每行一个主机或域</figcaption></figure>
+<figure><img src="@f-bypass-dialog-dark" alt="编辑弹窗深色"><figcaption><b>编辑弹窗 · 深色</b></figcaption></figure>
+</div>
+
+<h2 id="corners">窗口四个角都能拖动缩放</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a></p>
+<p class="why"><b>四角各加一个 12×12 的透明热区。</b>截图里用半透明色块标出来，实际看不见。</p>
+<div class="shots">
+<figure><img src="@f-corners-before" alt="窗口四角改动前"><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@f-corners" alt="窗口四角定稿"><figcaption><b>定稿</b>：色块是热区位置</figcaption></figure>
+</div>
+
+<h2 id="connrule">在连接页直接改规则</h2>
+<p class="note-line">取代「代理组旁边显示命中的规则」（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/555">#555</a>，已否决）</p>
+<p class="why"><b>点开一个连接，看到它命中的规则，就地改。</b>只有规则库里自己写的规则能编辑；命中订阅里的规则、规则集或 MATCH 时只能添加一条新规则盖过它。</p>
+<ul>
+<li><b>新规则写进规则库的「我的规则」，默认放最前面。</b>切换或更新订阅后还在。</li>
+</ul>
+<div class="shots">
+<figure><img src="@f-connrule-before" alt="连接详情改动前"><figcaption><b>改动前</b>：只有一行规则类型和内容</figcaption></figure>
+<figure><img src="@f-connrule" alt="命中我的规则"><figcaption><b>命中「我的规则」</b>：能编辑，也能添加</figcaption></figure>
+<figure><img src="@f-connrule-set" alt="命中规则集"><figcaption><b>命中规则集</b>：只能添加</figcaption></figure>
+<figure><img src="@f-connrule-match" alt="没有命中规则"><figcaption><b>没命中规则（MATCH）</b>：只能添加</figcaption></figure>
+<figure><img src="@f-connrule-add" alt="添加规则"><figcaption><b>添加规则</b>：匹配方式按连接预填，默认放最前面</figcaption></figure>
+<figure><img src="@f-connrule-edit" alt="编辑规则"><figcaption><b>编辑规则</b></figcaption></figure>
+<figure><img src="@f-connrule-add-dark" alt="添加规则深色"><figcaption><b>添加规则 · 深色</b></figcaption></figure>
+<figure><img src="@f-connrule-add-min" alt="添加规则最小窗口"><figcaption><b>添加规则 · 720×540</b></figcaption></figure>
+</div>
+
+<h2 id="privnet">允许本地网络地址</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/284">#284</a></p>
+<p class="why"><b>在订阅编辑弹窗里按订阅单独打开，不加全局总开关。</b>只有个别订阅需要它，全局打开会让所有订阅都放宽。</p>
+<div class="shots">
+<figure><img src="@f-privnet-before" alt="订阅编辑改动前"><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@f-privnet" alt="订阅编辑定稿"><figcaption><b>定稿</b></figcaption></figure>
+<figure><img src="@f-privnet-dark" alt="订阅编辑深色"><figcaption><b>深色</b></figcaption></figure>
+<figure><img src="@f-privnet-min" alt="订阅编辑最小窗口"><figcaption><b>720×540</b></figcaption></figure>
+</div>
+
+<h2 id="autoupd">订阅自动更新：选择卡片</h2>
+<p class="why"><b>4 个选项，用选择卡片；2–3 个选项的单选继续用分段控件。</b>「导出内容」和「主页模式」所以保持分段控件。</p>
+<div class="shots">
+<figure><img src="@f-autoupd-before" alt="自动更新改动前"><figcaption><b>改动前</b>：分段控件</figcaption></figure>
+<figure><img src="@f-autoupd" alt="自动更新定稿"><figcaption><b>定稿</b>：四张选择卡片</figcaption></figure>
+</div>
+
+<h2 id="flatpak">Flatpak 版不再自己检查更新</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/1449">#1449</a></p>
+<p class="why"><b>检测到 FLATPAK_ID 时关掉自更新，只提示「可以在软件中心检查更新。」</b>这是 #1449 里答应过 Flathub 打包者的事。</p>
+<div class="shots">
+<figure><img src="@f-flatpak-before" alt="Flatpak 改动前"><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@f-flatpak" alt="Flatpak 定稿"><figcaption><b>定稿</b></figcaption></figure>
+</div>
+
+<h2 id="a11y">对比度：浅色和深色都达到 WCAG AA</h2>
+<p class="why"><b>实测时浅色模式下不少小字不到 4.5:1，全部改了。</b>品牌蓝 #007AFF 保留给图标、开关和选中描边。修完后浅色、深色两套截图逐屏扫过，都达标。</p>
+<ul>
+<li><b>主按钮蓝底 #007AFF 换成 #0062D6。</b>白字从 4.0:1 升到 5.6:1；浅底上的蓝字用 #0058C2。</li>
+<li><b>辅助文字加深。</b>二级文字 #71717a 换成 #5b5b65，三级文字透明度 0.4 提到 0.64；延迟数字和徽标换深一级色阶。</li>
+<li><b>深色模式提亮一级。</b>蓝字 #4DA3FF，红字 #F87171。</li>
+</ul>
+
+<h2 id="copy">新旧文案对照</h2>
+<p class="note-line">规则：不讲实现细节，不用黑话，不写界面已经说明的东西；要加说明就一句，用「如果……，可以……」「打开后，……」；按钮用动词。依据 <a href="https://developer.apple.com/design/human-interface-guidelines/writing">Apple HIG · Writing</a> 和 <a href="https://m2.material.io/design/communication/writing.html">Material Design · Writing</a>，每行附参照的系统文案。</p>
+<div class="tablewrap"><table class="copy">
+<thead><tr><th>位置</th><th>旧文案</th><th>新文案</th><th>参照的系统文案</th></tr></thead>
+<tbody>
+<tr><td>首页 · 开关条副标题</td><td>端口号</td><td><b>已打开 / 已关闭</b></td><td><a href="https://support.apple.com/zh-cn/102433">iOS 设置里开关的状态说法</a></td></tr>
+<tr><td>首页 · 连接入口</td><td>双击查看连接</td><td><b>12 个连接</b></td><td>—（看得见的链接取代隐藏手势）</td></tr>
+<tr><td>首页 · 节点条</td><td>（新）</td><td><b>21 ms · 节点选择；延迟较低</b></td><td>—</td></tr>
+<tr><td>设置 · 开关</td><td>显示出口 IP</td><td><b>显示 IP 地址</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mh27606/mac">macOS 网络设置里的「IP 地址」</a></td></tr>
+<tr><td>设置 · 说明</td><td>在首页显示当前出口 IP 和地区，切换节点后自动刷新</td><td><b>打开后，首页会显示当前节点的 IP 地址和地区。</b></td><td><a href="https://support.apple.com/zh-cn/102433">iOS「你可以打开低数据模式以限制后台使用网络……」</a></td></tr>
+<tr><td>首页 · IP</td><td>出口 103.151.172.45 · 香港 HKT</td><td><b>21 ms · IP 203.0.113.48 · 香港</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mh27606/mac">macOS「IP 地址」</a></td></tr>
+<tr><td>内核停止 · 正文</td><td>可能已被其他代理应用关闭。重新启动之前，你将无法连接网络。</td><td><b>重新启动前将无法连接互联网。</b></td><td><a href="https://support.apple.com/zh-cn/102509">iOS「……无法访问网络资源或互联网……」</a></td></tr>
+<tr><td>内核停止 · 状态</td><td>内核未运行</td><td><b>已停止</b></td><td><a href="https://support.google.com/android/answer/9089766?hl=zh-Hans">Android「如果始终开启的 VPN 连接停止工作……」</a></td></tr>
+<tr><td>设置 · 标题</td><td>测速地址</td><td><b>延迟测试地址</b></td><td>—（和「下载测速」区分开）</td></tr>
+<tr><td>延迟测试地址 · 说明</td><td>节点延迟测试会请求这个地址。机场屏蔽 Google 时可以换一个。</td><td><b>如果延迟总是显示超时，可以换一个地址。</b></td><td><a href="https://support.apple.com/zh-cn/102229">iOS「如果你不想让 App 访问本地网络……，可以轻点“不允许”。」</a></td></tr>
+<tr><td>延迟测试地址 · 输入框</td><td>留空则用默认地址 https://www.gstatic.com/generate_204</td><td><b>留空则使用 Google。</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">macOS「输入要忽略的主机和域。」</a></td></tr>
+<tr><td>节点页 · 按钮</td><td>测下载速度</td><td><b>测试下载速度；测试中为「停止测试 3/12」</b></td><td><a href="https://support.google.com/android/answer/9089766?hl=zh-Hans">Android「点按“保存”」（按钮用动词）</a></td></tr>
+<tr><td>下载测速 · 确认</td><td>（新）</td><td><b>测试 12 个节点的下载速度？将逐个测试「🚀 节点选择」中的节点，每个最多 10 秒，最多使用约 0.6 GB 流量。</b></td><td><a href="https://support.apple.com/zh-cn/102433">iOS「节省网络用量」「数据用量」</a></td></tr>
+<tr><td>下载测速 · 卡片状态</td><td>（新）</td><td><b>等待中 / 已跳过</b></td><td>—（短状态词，不加标点）</td></tr>
+<tr><td>排序 · 说明</td><td>最快的排在前面</td><td><b>延迟最低的排在前面；新增「按下载速度」：下载最快的排在前面</b></td><td>—（两项排序要分得清）</td></tr>
+<tr><td>下载测速 · 测速文件说明</td><td>（新）</td><td><b>测试下载速度时使用的文件。</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">macOS「输入要忽略的主机和域。」（短句）</a></td></tr>
+<tr><td>下载测速 · 时长</td><td>（新）</td><td><b>每个节点最多测试</b></td><td>—</td></tr>
+<tr><td>设置 · 标题</td><td>系统代理绕过</td><td><b>忽略的主机与域</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">macOS「忽略这些主机与域的代理设置」</a></td></tr>
+<tr><td>忽略的主机与域 · 说明</td><td>这些域名和网段不走系统代理，直接连接</td><td><b>访问这些地址时不使用代理。</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">macOS「忽略这些主机与域的代理设置」</a></td></tr>
+<tr><td>忽略的主机与域 · 当前值</td><td>默认 + 2 项</td><td><b>2 项</b></td><td>—（只留数量）</td></tr>
+<tr><td>编辑弹窗 · 说明</td><td>列表里的地址不走代理。每行一项，支持通配符和 CIDR。</td><td><b>每行输入一个主机或域。</b></td><td><a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">macOS「输入要忽略的主机和域。使用逗号分隔多个项目。」</a></td></tr>
+<tr><td>编辑弹窗 · 选项</td><td>同时绕过本地和局域网地址</td><td><b>忽略本地网络地址</b></td><td><a href="https://support.apple.com/zh-cn/102229">iOS「本地网络」</a></td></tr>
+<tr><td>边栏 · 右键菜单</td><td>（新）</td><td><b>收起边栏 / 展开边栏</b>（右边写快捷键 ⌃⌘S 或 Ctrl+B）</td><td>—（收起后图标还在，所以用「收起」而不是「隐藏」）</td></tr>
+<tr><td>连接详情 · 规则卡</td><td>（新）</td><td><b>规则 · 来自「我的规则」/ 来自订阅；「编辑规则」「添加规则」</b></td><td><a href="https://support.google.com/android/answer/9089766?hl=zh-Hans">Android「点按“保存”」（按钮用动词）</a></td></tr>
+<tr><td>连接详情 · 规则集</td><td>（新）</td><td><b>规则集中的规则无法单独编辑。如果要更改此连接使用的策略组，可以添加规则。</b></td><td><a href="https://support.apple.com/zh-cn/102229">iOS「如果你……，可以轻点“不允许”。」</a></td></tr>
+<tr><td>连接详情 · MATCH</td><td>（新）</td><td><b>此连接未命中任何规则。如果要更改它使用的策略组，可以添加规则。</b></td><td><a href="https://support.apple.com/zh-cn/102229">同上</a></td></tr>
+<tr><td>添加规则 · 弹窗</td><td>（新）</td><td><b>匹配方式 / 策略组 / 位置；规则会添加到「我的规则」。；「添加」</b></td><td><a href="https://support.google.com/android/answer/9089766?hl=zh-Hans">Android「将 VPN 设为仅适用于……」</a></td></tr>
+<tr><td>订阅编辑 · 开关</td><td>允许解析到内网地址</td><td><b>允许本地网络地址</b></td><td><a href="https://support.apple.com/zh-cn/102229">iOS 设置里的「本地网络」</a></td></tr>
+<tr><td>订阅编辑 · 说明</td><td>只对这条订阅生效。机场域名被判成私有 IP、更新一直失败时再打开。</td><td><b>如果此订阅总是更新失败，可以尝试打开。</b></td><td><a href="https://support.apple.com/zh-cn/102229">iOS「如果你不想让 App 访问本地网络……，可以轻点“不允许”。」</a></td></tr>
+<tr><td>Flatpak · 说明</td><td>Flatpak 版由软件中心或 flatpak update 更新</td><td><b>可以在软件中心检查更新。</b></td><td><a href="https://support.apple.com/zh-cn/102229">iOS「……可以轻点“不允许”。」</a></td></tr>
+</tbody></table></div>
+
+<div class="sources"><b>来源</b><ul><li><a href="https://github.com/Juwan-Hwang/Zephyr/issues">Juwan-Hwang/Zephyr 的 issue</a>，编号列在各节标题下</li><li>v2rayN 源码：<a href="https://github.com/2dust/v2rayN/blob/master/v2rayN/ServiceLib/Services/SpeedtestService.cs">SpeedtestService.cs</a>、<a href="https://github.com/2dust/v2rayN/blob/master/v2rayN/ServiceLib/Helper/DownloaderHelper.cs">DownloaderHelper.cs</a>、<a href="https://github.com/2dust/v2rayN/blob/master/v2rayN/ServiceLib/Global.cs">Global.cs</a>、<a href="https://github.com/2dust/v2rayN/blob/master/v2rayN/ServiceLib/Models/Configs/ConfigItems.cs">ConfigItems.cs</a>、<a href="https://github.com/2dust/v2rayN/blob/master/v2rayN/v2rayN.Desktop/Views/ProfilesView.axaml">ProfilesView.axaml</a></li><li>系统文案：<a href="https://support.apple.com/zh-cn/102229">Apple：本地网络</a>、<a href="https://support.apple.com/zh-cn/guide/mac-help/mchlp2591/mac">Apple：在 Mac 上更改代理设置</a>、<a href="https://support.apple.com/zh-cn/102509">Apple：私有无线局域网地址</a>、<a href="https://support.apple.com/zh-cn/102433">Apple：低数据模式</a>、<a href="https://support.apple.com/zh-cn/guide/mac-help/mh27606/mac">Apple：IP 地址冲突</a>、<a href="https://support.google.com/android/answer/9089766?hl=zh-Hans">Android：连接至 VPN</a>、<a href="https://support.apple.com/zh-cn/guide/mac-help/mchl83c9e8b8/mac">Apple：访达边栏</a></li><li>截图来自本地原型分支 wt-ui-proto（入口 ?proto=final，未推送），尺寸 930×680、720×540、1440×900</li></ul></div>
+</div></body></html>

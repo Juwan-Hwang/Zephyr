@@ -1,0 +1,2 @@
+(() => { const r = (s) => { const e = document.querySelector(s); if (!e) return s+':none'; const b = e.getBoundingClientRect(); return `${s} x${Math.round(b.x)}-${Math.round(b.right)} y${Math.round(b.y)}-${Math.round(b.bottom)}`; };
+return [r('#sidebar-nav'), r('aside'), r('main'), r('[data-page=home]'), r('.fh-page'), r('.fh-strip'), r('.fh-hero'), r('.fh-node'), 'gap ' + getComputedStyle(document.querySelector('.fh-page')).rowGap].join('\n'); })()

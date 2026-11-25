@@ -1,0 +1,9 @@
+RC coderabbit 2026-11-19T14:29:37Z sidebar.js:199:    **    Minor** · **Functional Correctness** · **Quick win**  **Keep narrow-window drags from reflowing page content.**  At a narrow width, `onMove` sets `sidebar-expanded` but does not set `sidebar-overlay`. The collapsed offset rule in `styles.css` applies only with `sidebar-overlay`. No other rule preserves that offset while `sidebar-dragging` is active. So the nav width follows the drag position in flow, and the
+REVIEW mergestorm-vortex[bot] COMMENTED: **Vortex: approved, nothing to fix** at `794f6ce` · 10/10 files reviewed  ✅ All clear — nothing to fix.            ---          
+ 🐞 Bugs (0)    📘 Rule violations (0)    📎 Requirement gaps (0)    🎨 UX issues (0)    🔗 Cross-repo conflicts (0)    📜 Skill insights (0) 
+Patch coverage is `85.18519%` with `20 lines` in your changes missing coverage
+2026-11-19T15:23:41Z ##    &nbsp; CodeAnt Review Status  **✅&nbsp; Review completed**  | Status | Commit | Started (UTC) | Finished (UTC) | | --- | --- | --- | --- | | ✅&nbsp; `#4b8dc` Incremental review completed | `794f
+2026-11-19T14:20:49Z ---  ### Thanks for using CodeAnt! 🎉  We're free for open-source projects. if you're enjoying it, help us grow by sharing.  [Share on X](https://twitter.com/intent/tweet?text=Just%20tried%20%40CodeAnt
+2026-11-19T14:29:03Z ##    &nbsp; CodeAnt Nitpicks        4 code suggestions    #### 1. In windows narrower than 860 px, dragging the newly enabled sidebar edge temporarily shrinks the content before overlay mode is appli
+2026-11-19T15:24:17Z ##    &nbsp; CodeAnt PR Risk  **🟡&nbsp; Medium Risk**  - The PR needs attention before merging. - On macOS, the sidebar shortcut may still trigger the fullscreen plugin editor’s save handler if that e
+15:38

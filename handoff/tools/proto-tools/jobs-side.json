@@ -1,0 +1,86 @@
+[
+ {
+  "out": "out/side-fold-expanded.png",
+  "home": "console",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='expanded'",
+  "overlap": true
+ },
+ {
+  "out": "out/side-fold-collapsed.png",
+  "home": "console",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='collapsed'"
+ },
+ {
+  "out": "out/side-fold-tip.png",
+  "home": "console",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='collapsed'",
+  "actions": [
+   {
+    "hover": "[data-nav=\"connections\"]"
+   },
+   {
+    "wait": 700
+   }
+  ],
+  "wait": 300
+ },
+ {
+  "out": "out/side-fold-focus.png",
+  "home": "console",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='collapsed'",
+  "actions": [
+   {
+    "press": "Tab"
+   },
+   {
+    "eval": "document.querySelector('#proto-side-toggle').focus()"
+   },
+   {
+    "wait": 400
+   }
+  ],
+  "wait": 300
+ },
+ {
+  "out": "out/side-fold-dark.png",
+  "home": "console",
+  "theme": "dark",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='expanded'"
+ },
+ {
+  "out": "out/side-fold-dark-collapsed.png",
+  "home": "console",
+  "theme": "dark",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='collapsed'"
+ },
+ {
+  "out": "out/side-fold-930.png",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='expanded'",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "out/size-min-side-fold.png",
+  "home": "console",
+  "width": 720,
+  "height": 540,
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='expanded'"
+ },
+ {
+  "out": "out/size-min-side-fold-open.png",
+  "home": "console",
+  "width": 720,
+  "height": 540,
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='expanded';window.__PROTO_SIDE_OPEN__=true"
+ }
+]

@@ -1,0 +1,5 @@
+[
+ {"out": "out/home-b-top.png", "proto": "homeb-top"},
+ {"out": "out/home-b-top-bottom.png", "proto": "homeb-top-bottom"},
+ {"out": "out/home-b-top-dark.png", "proto": "homeb-top", "theme": "dark"}
+]

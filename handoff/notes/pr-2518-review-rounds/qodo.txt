@@ -1,0 +1,930 @@
+ 
+
+**ⓘ Qodo reviews are paused because your trial has ended.** Ask your workspace admin to add credits to resume reviews. [Manage billing](https://app.qodo.ai/account/billing/manage-subscription?traffic_source=pr_comment)
+ PR Summary by Qodo 
+
+Add a collapsible desktop sidebar and improve UI contrast
+
+
+ ✨ Enhancement   🧪 Tests   🕐 20-40 Minutes 
+
+ 
+
+ 
+ AI Description 
+
+ 
+ 
+ 
+
+> 
+>• Add localized sidebar labels and persistent collapse controls without a toggle button.
+>• Improve text contrast and introduce choice cards for subscription auto-update presets.
+>• Give proxy cards more room and test sidebar interactions.
+> 
+
+ 
+ 
+
+ 
+
+  
+ 
+
+ 
+ Merge Risk  🟢 Low  
+
+ 
+ 
+
+ 
+
+ 
+ Blast radius  🔴 High   💥 4 capabilities  
+
+ 
+ 
+
+ 
+
+- 4 affected capabilities span independent functional scopes: desktop&#95;navigation&#95;shell, desktop&#95;visual&#95;theme&#95;system, proxy&#95;management, subscription&#95;management.
+- The changed path starts at the shared sidebar DOM, is initialized from main.js, and affects navigation labels, page selection affordances, width, overlay, and tooltip presentation as one bounded desktop navigation-shell behavior.
+- The navigation module remains the consumer of data-nav buttons; no separate backend or persistent business capability is reached.
+- This path is a distinct user operation: choosing and saving the refresh interval for a subscription.
+- It is not merely a navigation or styling hop; the selected data-value is consumed by the subscription edit save handler.
+- The changed selector applies specifically to the proxy-list grid and changes only how proxy records are laid out for scanning; it does not alter proxy selection, core configuration, or network traffic.
+- The changed token definitions and global selectors are a bounded cross-page visual-theme integration.
+- They reach many existing page consumers through shared CSS variables, but the affected end-to-end behavior is presentation/readability rather than independent proxy, connection, subscription, or settings business operations.
+
+
+ 
+ 
+
+ 
+ 
+ Behavioral complexity  🟡 Medium   🧩 Interacting branches  
+
+ 
+ 
+
+ 
+
+- Before: the sidebar was a fixed icon-only navigation surface with existing page-navigation and tooltip behavior.
+- After: the new module coordinates saved preference, wide versus narrow window mode, temporary overlay state, drag width/snap state, keyboard/context-menu toggles, resize transitions, and tooltip visibility.
+- New correctness condition: these state transitions must agree so a temporary narrow-window overlay does not overwrite the wide-window preference, and a drag/resize cannot leave width, expanded class, overlay class, or tooltip behavior inconsistent.
+- The CSS and i18n additions are supporting presentation changes, while the state interaction is newly introduced by sidebar.js.
+
+
+ 
+ 
+
+ 
+ 
+ Potential damage  🟢 Low   🩹 Reversible  
+
+ 
+ 
+
+ 
+
+- The plausible fault is an incorrect visual/navigation state rather than corrupted application data.
+- Restoring code or toggling the sidebar can recover the layout; a saved preference may need to be changed or localStorage cleared if the state is repeatedly restored incorrectly.
+- The app&#x27;s page navigation handlers remain in place, so this does not establish capability loss beyond the shell&#x27;s usability.
+- Revert restores the prior icon-only layout.
+- During activation, keyboard/context-menu toggling, resize, or clearing the zephyr.sidebar localStorage entry can recover the state.
+- No persistent business state or external effect is changed.
+
+
+ 
+ 
+
+ 
+ Assessed commit  8300edc  
+
+
+ 
+ 
+ 
+ 
+ 
+
+ 
+ Diagram 
+
+ 
+ 
+
+ 
+
+```mermaid
+stateDiagram-v2
+    direction TD
+    state "Wide expanded" as WideExpanded
+    state "Wide collapsed" as WideCollapsed
+    state "Narrow collapsed" as NarrowCollapsed
+    state "Narrow overlay" as NarrowOverlay
+    WideExpanded --> WideCollapsed: toggle or drag
+    WideCollapsed --> WideExpanded: toggle or drag
+    WideExpanded --> NarrowCollapsed: window narrows
+    WideCollapsed --> NarrowCollapsed: window narrows
+    NarrowCollapsed --> NarrowOverlay: toggle or drag
+    NarrowOverlay --> NarrowCollapsed: dismiss or toggle
+    NarrowCollapsed --> WideExpanded: widen; saved expanded
+    NarrowCollapsed --> WideCollapsed: widen; saved collapsed
+    NarrowOverlay --> WideExpanded: widen; saved expanded
+    NarrowOverlay --> WideCollapsed: widen; saved collapsed
+```
+
+ 
+ 
+
+ 
+
+
+
+
+ 
+ High-Level Assessment 
+
+ 
+ 
+
+ 
+
+>Keep sidebar interaction state in a small frontend controller while retaining the existing navigation and shared context-menu utility. CSS-only responsive collapse would not cover saved preferences, drag snapping, or temporary narrow-window expansion; a native or Rust implementation is unnecessary for these UI behaviors.
+
+ 
+ 
+
+ 
+
+ 
+  Files changed (10)   +667 / -13    
+
+ 
+ 
+
+ 
+
+ 
+ Enhancement (9)   +556 / -13   
+
+ 
+ 
+
+ 
+ i18n.js Localize short navigation labels and sidebar actions   +84/-0  
+
+ 
+
+>Localize short navigation labels and sidebar actions
+>
+> 
+>• Adds four short navigation names and expand/collapse menu text across all 14 supported languages. Existing longer page titles remain available.
+> 
+>
+> apps/desktop/src/i18n.js 
+
+ 
+
+ 
+ index.html Show text beside each sidebar icon   +7/-0  
+
+ 
+
+>Show text beside each sidebar icon
+>
+> 
+>• Adds visible, localized labels to all seven navigation buttons while retaining their icons and screen-reader labels.
+> 
+>
+> apps/desktop/src/index.html 
+
+ 
+
+ 
+ main.js Initialize the collapsible sidebar   +2/-0  
+
+ 
+
+>Initialize the collapsible sidebar
+>
+> 
+>• Starts the sidebar controller during app initialization and registers its cleanup function.
+> 
+>
+> apps/desktop/src/main.js 
+
+ 
+
+ 
+ styles.css Style sidebar states, choice cards, contrast, and proxy cards   +206/-2  
+
+ 
+
+>Style sidebar states, choice cards, contrast, and proxy cards
+>
+> 
+>• Adds animated sidebar widths, fixed icon alignment, an edge handle, and narrow-window overlay styling. Defines reusable choice cards, adjusts button and text colors for contrast, widens proxy grid cards, and removes hidden retest buttons from layout on hover-capable devices.
+> 
+>
+> apps/desktop/src/styles.css 
+
+ 
+
+ 
+ nav-tooltip.js Limit tooltips for visible sidebar labels   +6/-0  
+
+ 
+
+>Limit tooltips for visible sidebar labels
+>
+> 
+>• Suppresses navigation tooltips in the expanded sidebar unless the visible label is truncated. Collapsed-sidebar tooltip behavior remains unchanged.
+> 
+>
+> apps/desktop/src/ui/nav-tooltip.js 
+
+ 
+
+ 
+ subscriptions.js Use choice cards for auto-update presets   +7/-6  
+
+ 
+
+>Use choice cards for auto-update presets
+>
+> 
+>• Replaces the subscription editor’s segmented auto-update selector with choice cards. Retains the radio-group attributes and the existing selected-value update path.
+> 
+>
+> apps/desktop/src/ui/settings/subscriptions.js 
+
+ 
+
+ 
+ sidebar.js Manage sidebar expansion and responsive overlays   +238/-0  
+
+ 
+
+>Manage sidebar expansion and responsive overlays
+>
+> 
+>• Adds keyboard, edge-drag, double-click, and context-menu controls for expanding or collapsing the sidebar. Persists wide-window choices and treats narrow-window expansion as a dismissible overlay without changing that preference.
+> 
+>
+> apps/desktop/src/ui/sidebar.js 
+
+ 
+
+ 
+ variables.css Regenerate higher-contrast text variables   +4/-3  
+
+ 
+
+>Regenerate higher-contrast text variables
+>
+> 
+>• Updates generated light and dark CSS values for tertiary and muted text to match the semantic token changes.
+> 
+>
+> packages/tokens/build/css/variables.css 
+
+ 
+
+ 
+ semantic.json Raise tertiary and muted text contrast   +2/-2  
+
+ 
+
+>Raise tertiary and muted text contrast
+>
+> 
+>• Increases tertiary text opacity in both themes and supplies separate muted-text colors for light and dark modes.
+> 
+>
+> packages/tokens/src/semantic.json 
+
+ 
+
+ 
+ 
+
+ 
+
+ 
+ Tests (1)   +111 / -0   
+
+ 
+ 
+
+ 
+ sidebar.test.js Test sidebar shortcuts and state transitions   +111/-0  
+
+ 
+
+>Test sidebar shortcuts and state transitions
+>
+> 
+>• Adds tests for platform-specific shortcuts, width snapping, saved preferences, responsive collapse, temporary overlays, edge double-click, and the context menu.
+> 
+>
+> apps/desktop/src/ui/sidebar.test.js 
+
+ 
+
+ 
+ 
+
+ 
+
+ 
+ 
+
+ 
+
+ 
+ Code Review by Qodo 
+
+ 🐞 Bugs (8)    📘 Rule violations (0)    🔗 Cross-repo conflicts (0)    📜 Skill insights (0) 
+
+ 
+
+ 
+
+ 
+
+ 
+   1.  Scaled users cannot reliably drag closed  🐞 Bug   ≡ Correctness  
+
+ 
+
+>  
+> Description 
+> 
+>
+> 
+>  onDown   reads the sidebar’s transformed bounding-box width, then   onMove   combines it with pointer
+>pixels and writes the result as an untransformed CSS width. At the supported 150% UI scale, dragging
+>an expanded English sidebar 100 screen pixels toward collapse still computes a width above the snap
+>threshold, so it remains expanded.
+> 
+> 
+
+>  
+> Code 
+> 
+>
+> [apps/desktop/src/ui/sidebar.js[R145-148]](https://github.com/Juwan-Hwang/Zephyr/pull/2518/files#diff-14bde3d42354bc0571227eb9b6a41535087b36073dde12664ef7ca0a4410266fR145-R148) 
+>
+>```diff
+>+        drag = {
+>+            startX: e.clientX,
+>+            startW: nav.getBoundingClientRect().width,
+>+            rtl,
+>```
+> 
+
+>  
+> Evidence 
+> 
+>
+> 
+>The app scales the body but defines sidebar widths in layout pixels; the drag path instead reads a
+>transformed rectangle and raw screen-coordinate delta.
+> 
+>
+>  [apps/desktop/src/styles.css\[639-645\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/styles.css/#L639-L645) 
+>  [apps/desktop/src/styles.css\[2315-2333\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/styles.css/#L2315-L2333) 
+>  [apps/desktop/src/ui/sidebar.js\[145-175\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/sidebar.js/#L145-L175) 
+>  [apps/desktop/src/ui/settings.js\[2231-2241\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/settings.js/#L2231-L2241) 
+> 
+
+>  
+> Agent prompt 
+> 
+>
+>```
+>The issue below was found during a code review. Follow the provided context and guidance below and implement a solution
+>
+>## Issue description
+>Sidebar dragging combines screen-pixel measurements with CSS-pixel widths when UI scaling is enabled.
+>## Fix Focus Areas
+>- apps/desktop/src/ui/sidebar.js[145-164]
+>## Recommended Fix
+>Convert the initial bounding-box width and pointer delta to layout CSS pixels using the active UI scale before clamping, setting the drag width, and snapping; test at 110%, 125%, and 150%.
+>```
+>  ⓘ Copy this prompt and use it to remediate the issue with your preferred AI generation tools 
+> 
+
+ 
+ 
+
+
+ 
+
+ 
+
+ 
+   2.  Scaled windows collapse too late  🐞 Bug   ≡ Correctness  
+
+ 
+
+>  
+> Description 
+> 
+>
+> 
+>  isNarrow   compares the unscaled   window.innerWidth   with 860 even though the body’s usable layout
+>width is divided by   --ui-scale  . At 150% scale, a 900-pixel window has roughly 600 CSS pixels of
+>layout width but is treated as wide, so the expanded sidebar still takes space from the content
+>instead of using the narrow-window behavior.
+> 
+> 
+
+>  
+> Code 
+> 
+>
+> [apps/desktop/src/ui/sidebar.js[102]](https://github.com/Juwan-Hwang/Zephyr/pull/2518/files#diff-14bde3d42354bc0571227eb9b6a41535087b36073dde12664ef7ca0a4410266fR102-R102) 
+>
+>```diff
+>+    const isNarrow = () => window.innerWidth < NARROW_PX;
+>```
+> 
+
+>  
+> Evidence 
+> 
+>
+> 
+>The supported 150% setting reduces layout width, but the new narrow check and overlay state are
+>based only on raw viewport width.
+> 
+>
+>  [apps/desktop/src/styles.css\[639-645\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/styles.css/#L639-L645) 
+>  [apps/desktop/src/ui/sidebar.js\[102-129\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/sidebar.js/#L102-L129) 
+>  [apps/desktop/src/styles.css\[2400-2405\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/styles.css/#L2400-L2405) 
+>  [apps/desktop/src/ui/settings.js\[2231-2241\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/settings.js/#L2231-L2241) 
+> 
+
+>  
+> Agent prompt 
+> 
+>
+>```
+>The issue below was found during a code review. Follow the provided context and guidance below and implement a solution
+>
+>## Issue description
+>The narrow-window check uses viewport pixels while the scaled app lays out in a smaller CSS-pixel width.
+>## Fix Focus Areas
+>- apps/desktop/src/ui/sidebar.js[102-129]
+>- apps/desktop/src/ui/sidebar.js[221-229]
+>## Recommended Fix
+>Compare the sidebar breakpoint against the body's usable layout width, and reevaluate it when the UI scale changes as well as when the window resizes.
+>```
+>  ⓘ Copy this prompt and use it to remediate the issue with your preferred AI generation tools 
+> 
+
+ 
+ 
+
+
+ 
+   3.  Narrow-window drags shift the page  🐞 Bug   ≡ Correctness  
+
+ 
+
+>  
+> Description 
+> 
+>
+> 
+>  onMove   toggles   sidebar-expanded   without updating   sidebar-overlay   or   overlayOpen  . While
+>dragging the sidebar open in a narrow window, its increased width participates in the flex layout
+>and pushes the page until pointer release calls   apply  .
+> 
+> 
+
+>  
+> Code 
+> 
+>
+> [apps/desktop/src/ui/sidebar.js[R163-165]](https://github.com/Juwan-Hwang/Zephyr/pull/2518/files#diff-14bde3d42354bc0571227eb9b6a41535087b36073dde12664ef7ca0a4410266fR163-R165) 
+>
+>```diff
+>+        nav.style.setProperty('--sidebar-drag-w', `${w}px`);
+>+        root.classList.toggle('sidebar-expanded', snapExpanded(w, drag.min, drag.max));
+>+    };
+>```
+> 
+
+>  
+> Evidence 
+> 
+>
+> 
+>Only apply updates the overlay class; the drag-move handler bypasses it, and the negative margin
+>that prevents flex reflow requires that class.
+> 
+>
+>  [apps/desktop/src/ui/sidebar.js\[110-123\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/sidebar.js/#L110-L123) 
+>  [apps/desktop/src/ui/sidebar.js\[157-175\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/sidebar.js/#L157-L175) 
+>  [apps/desktop/src/styles.css\[2400-2405\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/styles.css/#L2400-L2405) 
+>  [apps/desktop/src/index.html\[19-32\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/index.html/#L19-L32) 
+> 
+
+>  
+> Agent prompt 
+> 
+>
+>```
+>The issue below was found during a code review. Follow the provided context and guidance below and implement a solution
+>
+>## Issue description
+>Dragging changes the expanded class without changing the narrow-window overlay state until release.
+>## Fix Focus Areas
+>- apps/desktop/src/ui/sidebar.js[157-175]
+>## Recommended Fix
+>Keep overlay state and its layout class synchronized with the provisional expanded state throughout dragging, including when dragging back toward collapse.
+>```
+>  ⓘ Copy this prompt and use it to remediate the issue with your preferred AI generation tools 
+> 
+
+ 
+ 
+
+
+ 
+   4.  Editor shortcuts toggle the sidebar  🐞 Bug   ≡ Correctness  
+
+ 
+
+>  
+> Description 
+> 
+>
+> 
+>  onKey   handles the sidebar chord at document level without checking whether the event originated in
+>an editable control. Pressing Ctrl+B in the app’s text editor reaches this handler and calls
+>  preventDefault()   and   toggle()  , intercepting the editor’s shortcut while changing navigation.
+> 
+> 
+
+>  
+> Code 
+> 
+>
+> [apps/desktop/src/ui/sidebar.js[R186-189]](https://github.com/Juwan-Hwang/Zephyr/pull/2518/files#diff-14bde3d42354bc0571227eb9b6a41535087b36073dde12664ef7ca0a4410266fR186-R189) 
+>
+>```diff
+>+    const onKey = (e) => {
+>+        if (isToggleShortcut(e, mac)) {
+>+            e.preventDefault();
+>+            toggle();
+>```
+> 
+
+>  
+> Evidence 
+> 
+>
+> 
+>The handler indiscriminately prevents the chord at document level, while the app contains a
+>contenteditable CodeMirror editor.
+> 
+>
+>  [apps/desktop/src/ui/sidebar.js\[184-194\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/sidebar.js/#L184-L194) 
+>  [apps/desktop/src/ui/global-shortcut.js\[406-418\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/global-shortcut.js/#L406-L418) 
+>  [apps/desktop/src/cm6.bundle.js\[10-10\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/cm6.bundle.js/#L10-L10) 
+> 
+
+>  
+> Agent prompt 
+> 
+>
+>```
+>The issue below was found during a code review. Follow the provided context and guidance below and implement a solution
+>
+>## Issue description
+>The document-level sidebar shortcut intercepts keys pressed inside editable controls.
+>## Fix Focus Areas
+>- apps/desktop/src/ui/sidebar.js[184-194]
+>## Recommended Fix
+>Ignore the toggle chord when its target is an input, textarea, or contenteditable editor; retain the shortcut when focus is elsewhere.
+>```
+>  ⓘ Copy this prompt and use it to remediate the issue with your preferred AI generation tools 
+> 
+
+ 
+ 
+
+
+    View medium (4)    
+ 
+   5.  Visible sidebar labels keep old tooltips  🐞 Bug   ≡ Correctness  
+
+ 
+
+>  
+> Description 
+> 
+>
+> 
+>  show   checks whether an expanded label is truncated only when it is called, without reconsidering a
+>tooltip already on screen when the sidebar changes state. If a collapsed button’s tooltip is visible
+>and the user expands the sidebar using the shortcut, that tooltip remains alongside the now-visible
+>label until another tooltip event hides it.
+> 
+> 
+
+>  
+> Code 
+> 
+>
+> [apps/desktop/src/ui/nav-tooltip.js[R104-106]](https://github.com/Juwan-Hwang/Zephyr/pull/2518/files#diff-d61f06802e8f74245a570913684070a7ef403c3ff1f4fbc1eb7169c5413cad76R104-R106) 
+>
+>```diff
+>+        if (document.documentElement.classList.contains('sidebar-expanded')) {
+>+            const text = btn.querySelector('.nav-label');
+>+            if (!(text instanceof HTMLElement) || text.scrollWidth <= text.clientWidth) return;
+>```
+> 
+
+>  
+> Evidence 
+> 
+>
+> 
+>The new guard runs only in show(), whereas sidebar toggling changes a root class without triggering
+>the tooltip&#x27;s hide or reevaluation handlers.
+> 
+>
+>  [apps/desktop/src/ui/nav-tooltip.js\[95-115\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/nav-tooltip.js/#L95-L115) 
+>  [apps/desktop/src/ui/nav-tooltip.js\[159-178\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/nav-tooltip.js/#L159-L178) 
+>  [apps/desktop/src/ui/nav-tooltip.js\[228-261\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/nav-tooltip.js/#L228-L261) 
+>  [apps/desktop/src/ui/sidebar.js\[110-126\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/sidebar.js/#L110-L126) 
+> 
+
+>  
+> Agent prompt 
+> 
+>
+>```
+>The issue below was found during a code review. Follow the provided context and guidance below and implement a solution
+>
+>## Issue description
+>The expanded-label guard does not update an already displayed tooltip when the sidebar toggles.
+>## Fix Focus Areas
+>- apps/desktop/src/ui/nav-tooltip.js[99-113]
+>- apps/desktop/src/ui/sidebar.js[110-123]
+>## Recommended Fix
+>Notify the tooltip controller of sidebar state changes so it hides a tooltip for a fully visible label and reevaluates the hovered or focused button after a toggle.
+>```
+>  ⓘ Copy this prompt and use it to remediate the issue with your preferred AI generation tools 
+> 
+
+ 
+ 
+
+
+ 
+   6.  Selected cards lose a visible focus ring  🐞 Bug   ≡ Correctness  
+
+ 
+
+>  
+> Description 
+> 
+>
+> 
+>The selected choice card’s   :focus-visible   rule replaces the normal focus ring with a 28%-opacity
+>accent halo. When a keyboard user focuses a selected auto-update option, that faint halo is
+>difficult to distinguish from the already-tinted selected state, particularly on the light card
+>surface.
+> 
+> 
+
+>  
+> Code 
+> 
+>
+> [apps/desktop/src/styles.css[2676]](https://github.com/Juwan-Hwang/Zephyr/pull/2518/files#diff-da9bb6850aee48a2ec192f16cd64a7b9480f910a7d81f40081382bca04dca3b1R2676-R2676) 
+>
+>```diff
+>+.choice-card:is([aria-checked="true"], .is-selected):focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 28%, transparent); }
+>```
+> 
+
+>  
+> Evidence 
+> 
+>
+> 
+>The selected-specific rule overrides the full-strength focus ring with 28% accent opacity on cards
+>that already have a tinted selected border and background.
+> 
+>
+>  [apps/desktop/src/styles.css\[481-493\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/styles.css/#L481-L493) 
+>  [apps/desktop/src/styles.css\[2665-2676\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/styles.css/#L2665-L2676) 
+>  [apps/desktop/src/ui/settings/subscriptions.js\[536-537\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/settings/subscriptions.js/#L536-L537) 
+> 
+
+>  
+> Agent prompt 
+> 
+>
+>```
+>The issue below was found during a code review. Follow the provided context and guidance below and implement a solution
+>
+>## Issue description
+>The selected-card focus rule overrides the stronger keyboard focus indicator with a translucent halo.
+>## Fix Focus Areas
+>- apps/desktop/src/styles.css[2671-2676]
+>## Recommended Fix
+>Use the established high-contrast focus-ring token for selected cards too, or add a separately distinguishable high-contrast focus outline; verify both light and dark themes.
+>```
+>  ⓘ Copy this prompt and use it to remediate the issue with your preferred AI generation tools 
+> 
+
+ 
+ 
+
+
+ 
+   7.  Sidebar jumps open after the core finishes starting  🐞 Bug   ≡ Correctness  
+
+ 
+
+>  
+> Description 
+> 
+>
+> 
+>  initSidebar()   is the only code that adds   sidebar-expanded   and restores the saved state, and it
+>runs in   initApp   only after   await startCoreAndConfigure()   (which loops on retry). The window is
+>shown 50 ms after launch, so until the core is up the sidebar renders at the CSS default (80 px,
+>labels hidden). With the default &#x27;expanded&#x27; preference in a wide window it then widens to 160/192 px
+>and shoves the whole content area sideways on every launch. Its shortcut, right-click menu and edge
+>drag also do nothing while startup is waiting on the core or showing the core-error card.
+> 
+> 
+
+>  
+> Code 
+> 
+>
+> [apps/desktop/src/main.js[553]](https://github.com/Juwan-Hwang/Zephyr/pull/2518/files#diff-bc52fd94b113e7937ca66af764b822f6d3a6f7d4fc987045775f9826c8f82a2cR553-R553) 
+>
+>```diff
+>+  registerCleanup(initSidebar());
+>```
+> 
+
+>  
+> Evidence 
+> 
+>
+> 
+>The window is shown on a 50 ms timer, and the core-start loop is awaited before   initSidebar   runs.
+>Before that,   #sidebar-nav   falls back to   --sidebar-w-collapsed   because   .sidebar-expanded   has
+>not been set yet.
+> 
+>
+>  [apps/desktop/src/main.js\[504-553\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/main.js/#L504-L553) 
+>  [apps/desktop/src/styles.css\[2321-2334\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/styles.css/#L2321-L2334) 
+>  [apps/desktop/src/ui/sidebar.js\[125-129\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/sidebar.js/#L125-L129) 
+> 
+
+>  
+> Agent prompt 
+> 
+>
+>```
+>The issue below was found during a code review. Follow the provided context and guidance below and implement a solution
+>
+>## Issue description
+>The sidebar's expanded/collapsed state is only applied when `initSidebar()` runs, which happens after the awaited core startup. The window shows the collapsed default first and then jumps open.
+>
+>## Fix Focus Areas
+>- apps/desktop/src/main.js[497-553]
+>- apps/desktop/src/ui/sidebar.js[95-129]
+>
+>## Recommended Fix
+>Split out a synchronous `applyInitialSidebarState()` that reads localStorage and the window width and sets `sidebar-expanded` plus `sidebar-instant` on ` `. Call it early in `initApp` (for example right after `applyTranslations()`), or from an inline script in index.html, so it runs before the window is shown. You can also move `registerCleanup(initSidebar())` above the `startCoreAndConfigure` loop, since it does not depend on the core.
+>```
+>  ⓘ Copy this prompt and use it to remediate the issue with your preferred AI generation tools 
+> 
+
+ 
+ 
+
+
+ 
+   8.  Light mode shows the red Delete plugin button in blue  🐞 Bug   ≡ Correctness  
+
+ 
+
+>  
+> Description 
+> 
+>
+> 
+>The new rule   :root:not(.dark) .btn-ghost[class] { color: #0058c2 }   has specificity (0,4,0), so it
+>beats every single-class colour utility on a ghost button. Only   .text-[var(--text-secondary)]   is
+>exempted. In light mode the plugin &#x27;Delete&#x27; action (  btn-ghost text-red-400  ) now shows in accent
+>blue, and every other ghost button changes from primary text to blue, including their hover state.
+> 
+> 
+
+>  
+> Code 
+> 
+>
+> [apps/desktop/src/styles.css[R3516-3518]](https://github.com/Juwan-Hwang/Zephyr/pull/2518/files#diff-da9bb6850aee48a2ec192f16cd64a7b9480f910a7d81f40081382bca04dca3b1R3516-R3518) 
+>
+>```diff
+>+:root:not(.dark) .btn-ghost[class], :root:not(.dark) .btn-accent span, :root:not(.dark) .sub-in-use,
+>+:root:not(.dark) .choice-card[aria-checked='true'] .choice-card-title { color: #0058c2; }
+>+:root:not(.dark) .btn-ghost.text-\[var\(--text-secondary\)\] { color: var(--text-secondary); }
+>```
+> 
+
+>  
+> Evidence 
+> 
+>
+> 
+>Until now   .btn-ghost   used   --zephyr-text-primary   for its text, so a utility class like
+>  text-red-400   could set the colour. The new override uses an attribute selector to raise
+>specificity, which beats   text-red-400   on the destructive Delete button.
+> 
+>
+>  [apps/desktop/src/styles.css\[240-248\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/styles.css/#L240-L248) 
+>  [apps/desktop/src/styles.css\[3514-3519\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/styles.css/#L3514-L3519) 
+>  [apps/desktop/src/ui/plugins-smart.js\[140-140\]](https://github.com/Juwan-Hwang/Zephyr/blob/8300edca17f8c5cbcf3e86cee7c522a4684108cb/apps/desktop/src/ui/plugins-smart.js/#L140-L140) 
+> 
+
+>  
+> Agent prompt 
+> 
+>
+>```
+>The issue below was found during a code review. Follow the provided context and guidance below and implement a solution
+>
+>## Issue description
+>`:root:not(.dark) .btn-ghost[class]` forces every light-mode ghost button to #0058c2. This overrides colour utilities such as `text-red-400` on the plugin Delete button, and changes the default ghost text from primary to blue.
+>
+>## Fix Focus Areas
+>- apps/desktop/src/styles.css[3516-3518]
+>- apps/desktop/src/ui/plugins-smart.js[140-140]
+>
+>## Recommended Fix
+>Apply #0058c2 only to ghost buttons that already render accent text, e.g. `:root:not(.dark) .btn-ghost.active` and `#edit-url-change`, instead of `.btn-ghost[class]`. If the intent really is to make all ghost buttons blue, exclude buttons that carry an explicit `text-*` utility class (for example with `:not([class*="text-red"])`), or give the Delete button a danger rule with higher specificity.
+>```
+>  ⓘ Copy this prompt and use it to remediate the issue with your preferred AI generation tools 
+> 
+
+ 
+ 
+
+
+ 
+
+ 
+
+ 
+
+
+ 
+   Context sources  
+
+ &#x2705; Cross-repo context —  repo relationships  
+ Review mode:  Auto: 🧠 Deep : 多路径交互、响应式覆盖、无障碍和国际化带来多处独立缺陷风险 
+ 
+ 
+
+ 
+
+
+
+ 
+
+ 
+  Tip of the day  
+
+ 
+
+ 💡 Did you know, you can describe a rule in plain language on the Rules page and Qodo drafts it for you 
+
+ More tips ↗  |  Customize Qodo ↗  |  Qodo docs ↗ 
+
+ 
+
+ 
+ 
+
+
+ 
+
+   

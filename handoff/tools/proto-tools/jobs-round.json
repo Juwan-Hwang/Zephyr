@@ -1,0 +1,16 @@
+[
+ {"out":"out/home-b-top.png","proto":"homeb-top","overlap":true},
+ {"out":"out/home-b-top-bottom.png","proto":"homeb-top-bottom","overlap":true},
+ {"out":"out/home-b-top-dark.png","proto":"homeb-top","theme":"dark"},
+ {"out":"out/size-min-home-b-top.png","proto":"homeb-top","width":720,"height":540},
+ {"out":"out/size-min-home-b-top-bottom.png","proto":"homeb-top-bottom","width":720,"height":540},
+ {"out":"out/choice-subauto-before.png","page":"subscriptions","proto":"choice-subauto-before","overlap":true},
+ {"out":"out/choice-subauto-after.png","page":"subscriptions","proto":"choice-subauto-after","overlap":true},
+ {"out":"out/connrule-before.png","page":"connections","proto":"connrule-before","overlap":true},
+ {"out":"out/connrule-mine.png","page":"connections","proto":"connrule","overlap":true},
+ {"out":"out/connrule-set.png","page":"connections","proto":"connrule-set","overlap":true},
+ {"out":"out/connrule-match.png","page":"connections","proto":"connrule-match","overlap":true},
+ {"out":"out/connrule-add.png","page":"connections","proto":"connrule-add","overlap":true},
+ {"out":"out/connrule-edit.png","page":"connections","proto":"connrule-edit","overlap":true},
+ {"out":"out/connrule-add-dark.png","page":"connections","proto":"connrule-add","theme":"dark"}
+]

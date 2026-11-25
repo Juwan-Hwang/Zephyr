@@ -1,0 +1,87 @@
+[
+ {
+  "out": "out/size-min-home-before.png",
+  "width": 720,
+  "height": 540
+ },
+ {
+  "out": "out/size-min-home-a.png",
+  "width": 720,
+  "height": 540,
+  "proto": "homea"
+ },
+ {
+  "out": "out/size-min-home-b.png",
+  "width": 720,
+  "height": 540,
+  "proto": "homeb"
+ },
+ {
+  "out": "out/size-min-side-before.png",
+  "home": "console",
+  "width": 720,
+  "height": 540
+ },
+ {
+  "out": "out/size-big-cards-before.png",
+  "page": "proxies",
+  "proto": "cards-xx",
+  "width": 1440,
+  "height": 900
+ },
+ {
+  "out": "out/size-big-cards-200.png",
+  "page": "proxies",
+  "proto": "cards-200",
+  "width": 1440,
+  "height": 900
+ },
+ {
+  "out": "out/size-min-con-home-before.png",
+  "home": "console",
+  "width": 720,
+  "height": 540
+ },
+ {
+  "out": "out/size-min-con-home-a.png",
+  "home": "console",
+  "proto": "homea",
+  "width": 720,
+  "height": 540
+ },
+ {
+  "out": "out/size-min-con-home-b.png",
+  "home": "console",
+  "proto": "homeb",
+  "width": 720,
+  "height": 540
+ },
+ {
+  "out": "out/size-min-home-b-top.png",
+  "proto": "homeb-top",
+  "width": 720,
+  "height": 540
+ },
+ {
+  "out": "out/size-min-home-b-top-bottom.png",
+  "proto": "homeb-top-bottom",
+  "width": 720,
+  "height": 540
+ },
+ {
+  "out": "out/size-min-side-fold.png",
+  "home": "console",
+  "width": 720,
+  "height": 540,
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='expanded'"
+ },
+ {
+  "out": "out/size-min-side-fold-open.png",
+  "home": "console",
+  "width": 720,
+  "height": 540,
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='expanded';window.__PROTO_SIDE_OPEN__=true"
+ }
+]

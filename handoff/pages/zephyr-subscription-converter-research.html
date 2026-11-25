@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>订阅转换调研</title>
+</head>
+<body><div class="wrap">
+<h1>社区订阅转换方案调研：Zephyr 该怎么支持 sing-box 和更多目标</h1>
+<p class="kicker">调研，Zephyr 多内核与订阅转换，9 个工具、9 个在线站点</p>
+<p class="updated">Researched Nov 19, 2026, 11:35pm</p>
+<p class="lede">推荐用 Rust 自建转换模块：统一中间表示、多目标输出，只照公开格式自己写，不嵌入现成转换器；sing-box 最小可用约 4 到 6 周。</p>
+<ul>
+<li>同一份 17 个节点的样例实测：没有一个现成工具能输出既完整、又能被 sing-box 1.12 以后版本直接加载的配置。</li>
+<li>Zephyr 是 <a href="https://github.com/Juwan-Hwang/Zephyr/blob/main/LICENSE">MIT 许可证</a>，做得最好的几家（subconverter、Sub-Store）是 GPL 或 AGPL，不能移植它们的代码。</li>
+</ul>
+
+<ol class="takeaways">
+<li><div><b>站点几乎都是同一套。</b>清单里的在线站点，能查到的都是 sub-web 前端加 subconverter 后端，或者是 Sublink Worker、SubBoost、Script Hub 的部署。真正的源码只有几家。<a class="src" href="https://github.com/tindy2013/subconverter">subconverter</a></div></li>
+<li><div><b>节点转换 Sub-Store 最准。</b>17 个节点全保留，sing-box 1.12.12 和 1.14.4 都能加载，WebSocket 的 ed=2048 正确转成 early data。但它只出节点，不出策略组、规则和 DNS。<a class="src" href="https://github.com/sub-store-org/Sub-Store">Sub-Store</a></div></li>
+<li><div><b>完整配置没人转对。</b>subconverter 用自己的模板替换掉订阅里的策略组和规则，输出在 1.12 和 1.14 都加载失败；Sublink Worker 把 Clash 的 DNS 键原样塞进 sing-box，整份配置无法加载。<a class="src" href="https://github.com/7Sageer/sublink-worker">Sublink Worker</a></div></li>
+<li><div><b>Zephyr 能明显领先的地方很清楚。</b>保留用户自己的策略组和规则、跟上 sing-box 新版字段、逐节点报清楚丢了什么、完全本地转换、和客户端设置打通。这几项现有工具都做得不好。</div></li>
+<li><div><b>推荐自建，目标数量分阶段追平。</b>第一版做 mihomo、sing-box、链接订阅；第二版加 Surge、Stash、Loon、Quantumult X、Shadowrocket、原版 Clash；第三版补 Surfboard、Egern、V2Ray。ClashR、SSD 这类已经没人用的目标不做。</div></li>
+</ol>
+
+<h2>项目和站点一览</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>项目</th><th>源码和语言</th><th>许可证</th><th>维护</th><th>转 sing-box</th></tr></thead>
+<tbody>
+<tr><td><a href="#p-substore">Sub-Store</a></td><td><a href="https://github.com/sub-store-org/Sub-Store">有</a>，JavaScript</td><td>AGPL-3.0</td><td>10.9k★，11 月 19 日有提交</td><td>只出节点，质量最好</td></tr>
+<tr><td><a href="#p-sublink">Sublink Worker</a></td><td><a href="https://github.com/7Sageer/sublink-worker">有</a>，JavaScript</td><td>MIT</td><td>5.6k★，11 月 18 日，57 个开放 issue</td><td>完整配置，但实测加载失败</td></tr>
+<tr><td><a href="#p-subconverter">subconverter（原版）</a></td><td><a href="https://github.com/tindy2013/subconverter">有</a>，C++</td><td>GPL-3.0</td><td>17.1k★，最后提交 7 月 8 日，255 个开放 issue</td><td>发布版 v0.9.0 丢 VLESS、Hy2、TUIC、AnyTLS</td></tr>
+<tr><td><a href="#p-subconverter">subconverter（asdlokj1qpi233 分支）</a></td><td><a href="https://github.com/asdlokj1qpi233/subconverter">有</a>，C++</td><td>GPL-3.0</td><td>1.8k★，10 月 27 日</td><td>完整配置，但用已删除的字段</td></tr>
+<tr><td>subconverter（MetaCubeX 分支）</td><td><a href="https://github.com/MetaCubeX/subconverter">有</a>，C++</td><td>GPL-3.0</td><td>876★，最后提交 2 月 9 日</td><td>没细看，已不活跃</td></tr>
+<tr><td><a href="#p-configflow">ConfigFlow</a></td><td><a href="https://github.com/thsrite/configflow">有</a>，Python 加 Vue</td><td>MIT</td><td>157★，11 月 14 日</td><td>不支持</td></tr>
+<tr><td><a href="#p-subboost">SubBoost</a></td><td><a href="https://github.com/SubBoost/subboost">有</a>，TypeScript</td><td>AGPL-3.0</td><td>1.1k★，11 月 17 日</td><td>不支持，只做 Clash/Mihomo</td></tr>
+<tr><td><a href="#p-scripthub">Script Hub</a></td><td><a href="https://github.com/Script-Hub-Org/Script-Hub">有</a>，JavaScript</td><td>GPL-3.0</td><td>3.9k★，11 月 17 日</td><td>不相关，做模块转换</td></tr>
+<tr><td>SubCase</td><td><a href="https://github.com/sub-store-org/subcase">有</a>，Kotlin</td><td>AGPL-3.0</td><td>394★，10 月 21 日</td><td>同 Sub-Store，是安卓封装</td></tr>
+<tr><td><a href="#p-c2s">clash2sing-box</a></td><td><a href="https://github.com/feiyangprojects/clash2sing-box">有</a>，TypeScript（Deno）</td><td>GPL-3.0</td><td>12★，11 月 8 日</td><td>完整配置，但实测跑不通</td></tr>
+<tr><td><a href="#p-c2s">clash2singbox</a></td><td><a href="https://github.com/douglarek/clash2singbox">有</a>，Go</td><td>GPL-3.0</td><td>5★，2023 年已归档</td><td>停更，没跑</td></tr>
+<tr><td><a href="#p-toperlock">sing-box-subscribe</a></td><td><a href="https://github.com/Toperlock/sing-box-subscribe">有</a>，Python</td><td>没有许可证</td><td>2.6k★，9 月 29 日</td><td>链接转 sing-box，模板用 rule_set</td></tr>
+<tr><td><a href="#sites">sub-web.wcc.best</a></td><td>sub-web 前端，后端自报 subconverter v0.9.0</td><td>前端 MIT，后端 GPL</td><td>可访问</td><td>有 singbox 选项</td></tr>
+<tr><td><a href="#sites">sub.v1.mk</a></td><td>sub-web-modify 前端，后端 subapi.v1.mk</td><td>前端 MIT，后端 GPL</td><td>可访问</td><td>有 singbox 选项</td></tr>
+<tr><td><a href="#sites">amyconvert.com</a></td><td>sub-web 前端，后端 amyconvert.com/sub</td><td>前端 MIT</td><td>可访问，后端版本被拦</td><td>有 singbox 选项</td></tr>
+<tr><td><a href="#sites">sublink.dev</a></td><td>sub-web 类前端，后端 api.sublink.dev，文档指向 subconverter</td><td>后端多半 GPL</td><td>可访问</td><td>和 Sublink Worker 无关</td></tr>
+<tr><td><a href="#sites">sub.haitunt.org</a></td><td>Sublink Worker 的部署</td><td>MIT</td><td>可访问</td><td>同 Sublink Worker</td></tr>
+<tr><td><a href="#sites">subboost.org</a></td><td>SubBoost 的部署</td><td>AGPL-3.0</td><td>可访问</td><td>不支持</td></tr>
+<tr><td><a href="#sites">scripthub.vercel.app</a></td><td>Script Hub 的部署</td><td>GPL-3.0</td><td>可访问</td><td>不相关</td></tr>
+<tr><td><a href="#sites">sub.dler.io、nexconvert.com</a></td><td>没查到：前者拒绝连接，后者对这边的网络返回 403</td><td>未知</td><td>—</td><td>未核实</td></tr>
+</tbody>
+</table></div>
+
+<h2>实测：同一份样例</h2>
+<p>样例是一份 Clash 配置，用的全是假凭证：17 个节点（SS2022、SS 加 obfs 和 v2ray-plugin、VMess 的 WS/gRPC/H2/HTTP、VLESS Reality Vision 和 WS、Trojan gRPC、带端口跳跃的 Hysteria2、TUIC、AnyTLS、WireGuard、SSH、SOCKS5、HTTP），select、url-test、fallback、load-balance 和带 filter 的组，16 条规则（含 GEOSITE、RULE-SET、AND、PROCESS-NAME），fake-ip DNS 和 TUN。mihomo 1.19.34 能直接加载这份样例。所有转换都在本机跑，没有发到任何在线站点。</p>
+<div class="tablewrap"><table>
+<thead><tr><th>工具</th><th>节点保留</th><th>sing-box 能否加载</th><th>策略组和规则</th><th>字段问题</th></tr></thead>
+<tbody>
+<tr><td>Sub-Store</td><td>17/17</td><td>节点在 1.12.12 和 1.14.4 都通过</td><td>不输出</td><td>没发现</td></tr>
+<tr><td>subconverter 分支 v0.9.9</td><td>16/17，丢 SSH</td><td>整份配置在 1.12 报 geoip 已删除，在 1.14 报旧 DNS 格式已删除；只看节点能通过</td><td>换成自带模板的 14 个组和 20 条规则，原有的组和规则都没了</td><td>Hy2 端口跳跃丢失；H2 传输丢失，变成裸 TCP；ws 的 ed 留在 path 里</td></tr>
+<tr><td>subconverter 原版 v0.9.0</td><td>11/17</td><td>没细测</td><td>同上，模板替换</td><td>丢 VLESS、Hy2、TUIC、AnyTLS、SSH 和一个 VLESS WS</td></tr>
+<tr><td>Sublink Worker</td><td>13/17，丢 WireGuard、SSH、SOCKS5、HTTP</td><td>整份不能加载：dns 里混进 Clash 键；单看节点还有 5 个加载失败</td><td>保留原组名，但 fallback 和 load-balance 变成 select；原有规则换成它自己的 12 个 rule_set</td><td>plugin_opts 写成对象；H2 写成不存在的 h2 传输；Hy2 带宽写成 "50 Mbps" 字符串</td></tr>
+<tr><td>clash2sing-box</td><td>0</td><td>没有输出</td><td>—</td><td>不认 hysteria2、wireguard、ssh，写了 network: tcp 也会报错，一个节点不认就整份失败</td></tr>
+</tbody>
+</table></div>
+<p>转 mihomo（Clash Meta）时：subconverter 分支和 Sublink Worker 的输出 mihomo 都能加载，但前者照样换成模板（输出 10231 条规则），后者丢掉同样 4 个节点。Sub-Store 的 ClashMeta 和 Stash 输出 17 个节点全保留。</p>
+
+<h2>输出目标：数量和质量</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>工具</th><th>输出目标</th><th>转其他客户端时的表现（17 个节点）</th></tr></thead>
+<tbody>
+<tr><td>subconverter 分支</td><td>Clash、ClashR、sing-box、Surge、Surfboard、Quantumult、Quantumult X、Loon、Mellow、SS/SSR/SSD 订阅、V2Ray、Trojan、VLESS、Hysteria2、混合订阅</td><td>Surge 8 个、Quantumult X 12 个、Loon 9 个、Surfboard 7 个，丢掉的节点不给任何提示</td></tr>
+<tr><td>Sub-Store</td><td>Clash、ClashMeta、sing-box、Surge、Surge Mac、Stash、Loon、Quantumult X、Shadowrocket、Egern、Surfboard、URI、V2Ray，共 13 个</td><td>Surge、Loon、Quantumult X 各转出 11 个，Surfboard 8 个，转不了的逐个节点报原因；原版 Clash 11 个</td></tr>
+<tr><td>Sublink Worker</td><td>sing-box、Clash、Surge、Xray 链接订阅</td><td>sing-box 实测问题见上</td></tr>
+</tbody>
+</table></div>
+<p>转不出的节点多半是客户端本身不支持这种协议或传输，丢掉不算错；差别在于有没有告诉用户丢了什么。</p>
+
+<h2>每个项目</h2>
+<details class="more" id="p-substore"><summary><b>Sub-Store</b><span>节点解析和输出最全最准，只做节点。</span></summary><ul>
+<li>核心在 backend/src/core/proxy-utils：parsers/index.js（3242 行）有 50 个解析器，覆盖 URI、Clash、Surge、Loon、QX 写法，Surge、Loon、QX 用 peggy 语法文件解析；producers/sing-box.js 1713 行。</li>
+<li>预处理器会先认 HTML 错误页、Base64、SSD、完整 Clash 配置，再逐行解析。测试有 812 个用例。</li>
+<li>值得借鉴：多写法解析、ws 的 ed 转 early data、H2 转 sing-box 的 http 传输、转不了就逐节点报错。要避开：没有策略组、规则和 DNS 转换；需要 Node 运行时；AGPL。</li>
+</ul></details>
+<details class="more" id="p-sublink"><summary><b>Sublink Worker</b><span>唯一按 sing-box 版本（1.11、1.12、1.14）分别输出的，但实测输出加载不了。</span></summary><ul>
+<li>核心：src/builders/SingboxConfigBuilder.js（639 行）、ClashConfigBuilder、SurgeConfigBuilder，解析器只有 7 种分享链接加 Clash YAML。规则用 rule_set 远程拉 .srs。测试 39 个文件、239 个用例。</li>
+<li>值得借鉴：按版本切换输出、用 rule_set 而不是 geosite、MIT 可以直接参考甚至拷代码（保留版权声明）。</li>
+<li>要避开：把源格式的字段原样塞进目标格式（dns 键、plugin_opts 对象、h2 传输名）；fallback 和 load-balance 降成 select 却不提示。</li>
+</ul></details>
+<details class="more" id="p-subconverter"><summary><b>subconverter 及分支</b><span>目标最多、用户最多，sing-box 输出落后两个大版本。</span></summary><ul>
+<li>核心：src/parser/subparser.cpp（3522 行）解析，src/generator/config/subexport.cpp（3159 行）输出，ruleconvert.cpp 转规则。原版的 sing-box 输出缺新协议，分支补上了 VLESS、Hy2、AnyTLS。</li>
+<li>它的定位是「订阅只提供节点，策略组和规则来自远程模板」，所以订阅里自带的组和规则一律丢掉。sing-box 规则还在写 geoip、geosite 字段，DNS 还是旧格式。</li>
+<li>值得借鉴：目标清单和每个客户端的写法差异。要避开：静默丢节点、模板替换用户配置；GPL，不能移植。</li>
+</ul></details>
+<details class="more" id="p-configflow"><summary><b>ConfigFlow</b><span>Mihomo、Surge、MosDNS 配置生成器，节点靠 Sub-Store。</span></summary><ul>
+<li>后端 Python（backend/converters），前端 Vue，MIT。不出 sing-box。</li>
+<li>值得借鉴：规则交付方式的测试（比如 classical 规则集的生成），配置生成的结构。</li>
+</ul></details>
+<details class="more" id="p-subboost"><summary><b>SubBoost</b><span>可视化 Clash/Mihomo 配置，输入容错做得认真。</span></summary><ul>
+<li>TypeScript monorepo（packages/core、server-core、ui），只做 Clash/Mihomo，代码里没有 sing-box。测试有 1434 个用例。</li>
+<li>值得借鉴：parser 里专门的 limits.ts 和 yaml-syntax-budget.ts，给输入大小和 YAML 复杂度设上限。AGPL，只能参考思路。</li>
+</ul></details>
+<details class="more" id="p-scripthub"><summary><b>Script Hub、SubCase、Sub-Store 前端</b><span>不在订阅转换的范围里。</span></summary><ul>
+<li>Script Hub（GPL-3.0）做 QX、Surge、Loon、Stash 之间的模块和覆写转换；SubCase（AGPL-3.0）是 Sub-Store 的安卓封装；Sub-Store 前端是 GPL-3.0 的 Vue 界面。按你的范围，这些都不作为目标。</li>
+</ul></details>
+<details class="more" id="p-c2s"><summary><b>clash2sing-box 和 clash2singbox</b><span>专门的 Clash 转 sing-box 工具，都不能直接用。</span></summary><ul>
+<li>clash2sing-box：Deno，约 1144 行，用 zod 校验输入，会转组和规则，但只认 9 种协议，任何一个节点不认就整份报错，样例和裁剪过的样例都没转出来。</li>
+<li>clash2singbox：Go，一个 561 行的 main.go，2023 年归档，跟不上 1.12 以后的格式，没跑。</li>
+<li>值得借鉴：用 schema 严格校验输入。要避开：严格校验变成整份失败。</li>
+</ul></details>
+<details class="more" id="p-toperlock"><summary><b>sing-box-subscribe</b><span>分享链接转 sing-box，模板跟得比较新。</span></summary><ul>
+<li>Python，parsers 下每种协议一个文件（含 anytls、hysteria2、tuic、wg），另有 clash2base64。模板有 sb-config-1.12.json 和 1.14.json，全部用 rule_set，没有 geosite 字段。</li>
+<li>仓库没有许可证，默认保留所有权利，代码一行都不能用，只能看模板结构。</li>
+</ul></details>
+<details class="more" id="sites"><summary><b>在线站点怎么判断的</b><span>看页面标题、前端打包里的仓库名和后端地址，再请求后端的 /version。</span></summary><ul>
+<li>sub-web.wcc.best 和 amyconvert.com 的打包里写着 CareyWang/sub-web；api.wcc.best/version 返回「subconverter v0.9.0 backend」。sub.v1.mk 的打包里写着 youshandefeiyang/sub-web-modify，后端是 subapi.v1.mk/sub.php。</li>
+<li>sublink.dev 页面的参考文档链到 tindy2013/subconverter，后端 api.sublink.dev 有 Cloudflare 拦截，查不到版本。sub.haitunt.org、subboost.org、scripthub.vercel.app 页面直接链着各自的仓库。</li>
+<li>闭源后端改了什么无法从外部确认，只能说是 subconverter 一系。sub.dler.io 拒绝连接、nexconvert.com 返回 403，这两家没查到。</li>
+</ul></details>
+
+<h2>推荐方案</h2>
+<p><b>用 Rust 自建，不嵌入现成转换器，也不只支持 sing-box 原生订阅。</b></p>
+<ul>
+<li><b>不打包 subconverter：</b>GPL 程序作为独立二进制随附是允许的，Zephyr 现在就这样带着 mihomo。但它的 sing-box 输出在 1.12 以后加载不了，还会丢掉用户的组和规则，修它等于重写。</li>
+<li><b>不跑 Sub-Store：</b>要额外带一个 Node 运行时，AGPL，而且只解决节点这一层。</li>
+<li><b>不只支持 sing-box 原生订阅：</b>机场主要发 Clash 订阅和分享链接，只认 sing-box 订阅等于大部分用户切不了内核。</li>
+<li><b>自建的底子已经有了：</b>crates/core/src/config/subscription.rs 里已有 Base64 判断、JSON Clash 解析、short-id 加引号（#2485、#2517），sanitizer.rs 有 YAML 和 JSON 两套危险键清理。</li>
+</ul>
+
+<h2>新的工作量估计</h2>
+<p>原来估的是「能跑起来 2 到 4 周、功能对齐 1.5 到 3 个月」，没有单独算转换。按一个人全职估：</p>
+<div class="tablewrap"><table>
+<thead><tr><th>阶段</th><th>内容</th><th>时间</th></tr></thead>
+<tbody>
+<tr><td>sing-box 最小可用</td><td>中间表示、Clash YAML/JSON 和分享链接输入、节点全转、组和常见规则转换、按 Zephyr 设置生成端口/DNS/TUN/模式、内核进程和 clash_api 接入</td><td>4 到 6 周</td></tr>
+<tr><td>和 mihomo 功能对齐</td><td>全部规则类型和 rule-provider、逐节点诊断进界面、基准进 CI、切换内核时自动重转</td><td>再 6 到 8 周，合计约 2.5 到 3.5 个月</td></tr>
+<tr><td>多目标第二版</td><td>Surge、Stash、Loon、Quantumult X、Shadowrocket、原版 Clash，以及这些格式的节点输入</td><td>再 4 到 6 周</td></tr>
+<tr><td>多目标第三版</td><td>Surfboard、Egern、V2Ray/Xray</td><td>再 3 到 4 周</td></tr>
+</tbody>
+</table></div>
+<p>这些是根据读过的代码量估的，不是测出来的：Sub-Store 光 sing-box 输出就 1713 行，subconverter 的解析和输出加起来约 6700 行。</p>
+
+<h2 id="own">自建订阅转换模块</h2>
+<p>范围只是订阅转换：读进各种订阅，转成各个客户端和内核的配置。不做脚本、覆写、模块转换、私人订阅库。</p>
+
+<h3>借鉴什么，避开什么</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>项目</th><th>值得借鉴</th><th>要避开</th></tr></thead>
+<tbody>
+<tr><td>Sub-Store</td><td>覆盖最多写法的解析；每个目标逐节点判断能不能转；ws early data、H2 这些细节映射</td><td>只有节点层；AGPL，只能看思路</td></tr>
+<tr><td>subconverter</td><td>目标清单；各客户端节点写法的差异</td><td>静默丢节点；用模板替换用户的组和规则；跟不上 sing-box 版本</td></tr>
+<tr><td>Sublink Worker</td><td>按 sing-box 版本切换输出；规则用 rule_set；MIT 可直接参考</td><td>源格式字段原样透传；降级不提示</td></tr>
+<tr><td>SubBoost</td><td>输入大小和 YAML 复杂度上限</td><td>只做 Clash</td></tr>
+<tr><td>clash2sing-box</td><td>用 schema 严格描述每种协议</td><td>一个节点不认就整份失败</td></tr>
+<tr><td>sing-box-subscribe</td><td>1.12、1.14 模板的结构</td><td>没有许可证，代码不能用</td></tr>
+<tr><td>Zephyr 自己</td><td>#2485、#2517 的输入容错和边界测试</td><td>—</td></tr>
+</tbody>
+</table></div>
+
+<h3>架构</h3>
+<ul>
+<li><b>新 crate zephyr-convert：</b>纯函数，不做网络和文件读写，桌面端和以后的移动端、命令行都能用。</li>
+<li><b>输入层：</b>识别格式（Clash/Mihomo YAML 和 JSON、分享链接、Base64 订阅、sing-box JSON，第二版加 Surge/Loon/QX 节点行），各自解析成中间表示。</li>
+<li><b>中间表示：</b>节点（协议枚举、传输枚举、TLS/Reality、拨号选项）、策略组、规则（匹配条件和目标分开）、规则集、DNS。每个对象带一个「未识别字段」表，同格式往返时一个字段都不丢。</li>
+<li><b>输出层：</b>每个目标一个模块，先查能力表（这个目标、这个版本支持哪些协议、传输、组类型、规则类型），再输出。sing-box 按 1.12、1.13、1.14 分版本。</li>
+<li><b>诊断：</b>每次转换都返回一组诊断：哪个节点、哪个字段、是丢弃、近似还是不支持，界面直接显示。fallback 转成 sing-box 的 urltest 就是一条「近似」诊断。</li>
+<li><b>规则：</b>GEOSITE、GEOIP 转成 rule_set，指向 MetaCubeX meta-rules-dat 的 sing 分支；Clash 的 yaml/text 规则集转成内联规则或本地编译 .srs；mrs 格式没有反向转换工具，报诊断。</li>
+</ul>
+
+<h3>和现有订阅导入怎么衔接</h3>
+<ul>
+<li>现在桌面端的 normalize_subscription_content 依次做 Base64、JSON Clash、sing-box JSON 拒绝、分享链接列表原样保存、short-id 加引号后按 YAML 解析。</li>
+<li>把这几步挪进 zephyr-convert 的输入层，#2485、#2517 的测试原样跟过去，行为不变。</li>
+<li>用 mihomo 内核、订阅本来就是 Clash 时，照旧直接保存原文，不经过中间表示，避免引入回归。其他情况（sing-box 内核、分享链接、sing-box JSON 订阅）才走「解析、中间表示、输出」。</li>
+<li>Zephyr 自己的设置（端口、DNS、TUN、模式、控制端口）在输出之后按内核分别叠加：mihomo 继续用 merge.rs，sing-box 新写一个叠加层，危险键清理复用 sanitizer.rs 的 JSON 版本。</li>
+</ul>
+
+<h3>「超越」怎么量化</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>维度</th><th>现在最好的</th><th>Zephyr 要做到</th></tr></thead>
+<tbody>
+<tr><td>正确率和无损</td><td>Sub-Store：17 个节点全保留，sing-box 两个版本都能加载</td><td>基准里所有样例都能被目标内核加载；没有静默丢字段，每处丢弃都有诊断；Clash 往返语义一致</td></tr>
+<tr><td>完整配置（组、规则、DNS）</td><td>没有人做对：subconverter 换模板，Sublink Worker 加载失败，Sub-Store 不做</td><td>保留用户的组和全部规则类型，DNS 转成 1.12 以后的新格式</td></tr>
+<tr><td>协议和传输覆盖</td><td>Sub-Store：50 个解析器，含 SSH、WireGuard、AnyTLS、Hy2 端口跳跃</td><td>mihomo 和 sing-box 都支持的协议全覆盖，至少等于 Sub-Store</td></tr>
+<tr><td>跟进内核版本</td><td>Sublink Worker 分 1.11、1.12、1.14 输出，但实测加载失败</td><td>分版本输出，CI 对最新稳定版和测试版都跑加载检查</td></tr>
+<tr><td>输入容错</td><td>Zephyr 自己的 #2485、#2517，加上 Sub-Store 的预处理、SubBoost 的上限</td><td>收集各种不规范订阅做样例；加模糊测试，保证不崩溃</td></tr>
+<tr><td>报错和提示</td><td>Sub-Store 逐节点报不支持；subconverter 静默丢；clash2sing-box 整份失败</td><td>逐节点、逐字段的结构化诊断，显示在界面里</td></tr>
+<tr><td>输出目标数量和质量</td><td>数量：subconverter 分支十几种；质量：Sub-Store 的 13 种</td><td>三个阶段覆盖 Sub-Store 的全部 13 种（Surge Mac 和 Surge、URI 和 V2Ray 各共用一个输出模块），每个目标在基准上的得分都高于这两家</td></tr>
+<tr><td>速度和内存</td><td>这次没测</td><td>基准里记录耗时和峰值内存，和各家放在一起比</td></tr>
+<tr><td>隐私</td><td>在线站点要把订阅链接交给别人的服务器；自建的 Sub-Store、subconverter 不用</td><td>完全在本机转换，除了拉订阅和规则集不联网</td></tr>
+<tr><td>和客户端集成</td><td>都不知道客户端的设置</td><td>按 Zephyr 设置生成端口、DNS、TUN，切内核自动重转</td></tr>
+<tr><td>测试</td><td>Sub-Store 812 个、Sublink Worker 239 个用例，都不拿真内核加载输出</td><td>每个样例的输出都用 mihomo 和 sing-box 实际加载</td></tr>
+</tbody>
+</table></div>
+
+<h3>对比基准怎么搭</h3>
+<ul>
+<li><b>样例：</b>放在 crates/convert/tests/corpus，每份样例配一份「期望事实」（每个节点该有的字段值、组类型、规则数），全部假凭证。这次用的样例和打分脚本已经在本机 converters/bench 里，可以直接搬进去当起点。</li>
+<li><b>对手：</b>bench/converters 下用固定版本跑 subconverter 分支（二进制）、Sub-Store（只调它的解析和输出函数）、Sublink Worker（只调它的 builder），都在本机跑，不用在线站点。</li>
+<li><b>打分：</b>每份输出过 sing-box check（1.12 和最新版）和 mihomo -t，再和期望事实逐字段比，按上面的维度计分，生成一张对比表。</li>
+<li><b>进 CI：</b>每个 PR 只跑 Zephyr 自己的样例加真内核加载，几分钟内完成；完整的多家对比每周定时跑一次，加上发版前跑一次；另有一个任务跟 sing-box 和 mihomo 的测试版，提前发现字段废弃。</li>
+</ul>
+
+<h3>实话：哪里能领先，哪里不值得</h3>
+<ul>
+<li><b>能明显领先：</b>完整配置转换、sing-box 版本正确、诊断、隐私、客户端集成、用真内核验证的测试。这些现有工具要么没做，要么做错。</li>
+<li><b>能追平：</b>协议覆盖和主流目标的数量，工作量在上面的三个阶段里。</li>
+<li><b>代价大、不建议追：</b>subconverter 的 ClashR、SSD、Mellow、旧版 Quantumult 等目标，对应的客户端基本没人用了；它的远程模板生态（ini 格式的组和规则模板）可以第三版之后再看要不要兼容。在线 URL 服务也不在客户端的范围内，需要的话可以出一个命令行工具。</li>
+</ul>
+
+<h3>长期维护</h3>
+<ul>
+<li>字段一直在变：这次实测里 sing-box 1.12 删除了 geoip/geosite 数据库，1.14 删除了旧的 DNS 格式，subconverter 的输出就是这样失效的。</li>
+<li>控制办法：能力表按内核版本写；每加一个协议或字段先加样例；CI 跟测试版提前报错。估计平时每月 1 到 2 天，sing-box 发大版本时集中几天。</li>
+</ul>
+
+<h3>许可证</h3>
+<ul>
+<li><b>可以：</b>照 sing-box、mihomo 的官方文档和公开格式自己实现；读 GPL/AGPL 代码了解「有哪些字段、有哪些坑」，再自己写；自己写样例；在 CI 里跑 GPL 工具做对比（不分发）；MIT 项目（Sublink Worker、ConfigFlow、sub-web）可以拷代码，保留版权声明。</li>
+<li><b>不行：</b>把 subconverter、Sub-Store、SubBoost、clash2sing-box 的代码逐段翻译成 Rust，这算衍生作品，会让 Zephyr 受 GPL/AGPL 约束，和 MIT 冲突；直接拷它们的测试样例文件也别做。sing-box-subscribe 没有许可证，同样不能拷。</li>
+<li><b>规则数据：</b>meta-rules-dat 是 GPL-3.0，运行时按链接下载没问题；如果要把 .srs 打包进安装包，要按 GPL 附上许可和来源。</li>
+</ul>
+
+<div class="sources"><b>Sources and where to verify</b><ul>
+<li><a href="https://github.com/sub-store-org/Sub-Store">Sub-Store</a>，<a href="https://github.com/7Sageer/sublink-worker">Sublink Worker</a>，<a href="https://github.com/tindy2013/subconverter">subconverter</a>，<a href="https://github.com/asdlokj1qpi233/subconverter">subconverter 分支</a>，<a href="https://github.com/MetaCubeX/subconverter">MetaCubeX/subconverter</a></li>
+<li><a href="https://github.com/thsrite/configflow">ConfigFlow</a>，<a href="https://github.com/SubBoost/subboost">SubBoost</a>，<a href="https://github.com/Script-Hub-Org/Script-Hub">Script Hub</a>，<a href="https://github.com/sub-store-org/subcase">SubCase</a>，<a href="https://github.com/sub-store-org/Sub-Store-Front-End">Sub-Store 前端</a></li>
+<li><a href="https://github.com/feiyangprojects/clash2sing-box">clash2sing-box</a>，<a href="https://github.com/douglarek/clash2singbox">clash2singbox</a>，<a href="https://github.com/Toperlock/sing-box-subscribe">sing-box-subscribe</a>，<a href="https://github.com/MetaCubeX/meta-rules-dat">meta-rules-dat</a></li>
+<li><a href="https://github.com/CareyWang/sub-web">sub-web</a>，<a href="https://github.com/youshandefeiyang/sub-web-modify">sub-web-modify</a></li>
+<li>站点：<a href="https://sub-web.wcc.best">sub-web.wcc.best</a>，<a href="https://sub.v1.mk">sub.v1.mk</a>，<a href="https://amyconvert.com">amyconvert.com</a>，<a href="https://sublink.dev">sublink.dev</a>，<a href="https://sub.haitunt.org">sub.haitunt.org</a>，<a href="https://subboost.org">subboost.org</a>，<a href="https://scripthub.vercel.app">scripthub.vercel.app</a>，<a href="https://sub.dler.io">sub.dler.io</a>，<a href="https://nexconvert.com">nexconvert.com</a></li>
+<li>验证用的内核：<a href="https://github.com/SagerNet/sing-box/releases">sing-box 1.11.15、1.12.12、1.14.4</a>，<a href="https://github.com/MetaCubeX/mihomo/releases">mihomo 1.19.34</a>；Zephyr 代码基于 main 的 5f90f3f</li>
+</ul></div>
+</div></body></html>

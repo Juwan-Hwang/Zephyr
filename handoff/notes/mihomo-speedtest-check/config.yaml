@@ -1,0 +1,36 @@
+mixed-port: 17890
+external-controller: 127.0.0.1:19090
+secret: s
+mode: rule
+proxies:
+- name: n1
+  type: direct
+- name: n2
+  type: http
+  server: 127.0.0.1
+  port: 1
+proxy-groups:
+- name: PROXY
+  type: select
+  proxies:
+  - n1
+  - n2
+- name: Auto
+  type: url-test
+  proxies:
+  - n1
+  url: https://www.gstatic.com/generate_204
+  interval: 300
+- name: ZEPHYR-SPEED-TEST
+  type: select
+  include-all: true
+  hidden: true
+rules:
+- MATCH,PROXY
+listeners:
+- name: zephyr-speed-test
+  type: mixed
+  listen: 127.0.0.1
+  port: 17999
+  proxy: ZEPHYR-SPEED-TEST
+  udp: false

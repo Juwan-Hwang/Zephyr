@@ -1,0 +1,5 @@
+[{"out":"out/home-before.png","layout":true},
+ {"out":"out/home-a.png","proto":"homea","layout":true},
+ {"out":"out/home-a-open.png","proto":"homea","pre":"window.__PROTO_OPEN__=true"},
+ {"out":"out/home-b.png","proto":"homeb","layout":true},
+ {"out":"out/home-b-open.png","proto":"homeb","pre":"window.__PROTO_OPEN__=true"}]

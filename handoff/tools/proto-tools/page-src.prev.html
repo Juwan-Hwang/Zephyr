@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zephyr 界面原型</title>
+<style>
+.shots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:8px 0 20px}
+.shots.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.shots.one{grid-template-columns:minmax(0,1fr)}
+.shots figure{margin:0}
+.shots img{display:block;width:100%;height:auto;border:1px solid var(--rule);border-radius:8px;background:var(--card)}
+.shots figcaption{margin-top:5px;font:12px/1.45 var(--sans);color:var(--muted)}
+.shots figcaption b{color:var(--ink);font-weight:600}
+.tag{display:inline-block;margin:0 0 3px;padding:1px 6px;border:1px solid var(--ink);border-radius:4px;font:11px/1.5 var(--mono);color:var(--ink)}
+.note-line{font:13px/1.55 var(--sans);color:var(--muted);margin:4px 0 8px}
+@media (max-width:700px){.shots,.shots.three{grid-template-columns:minmax(0,1fr)}}
+</style>
+</head>
+<body><div class="wrap">
+<h1>Zephyr 界面建议：原型截图对比</h1>
+<p class="kicker">原型对比，按建议分组，简洁首页和控制台首页并排</p>
+<p class="updated">整理于 2026 年 11 月 18 日 18:35</p>
+<p class="lede">控制台首页全部按你倾向的方案 B 重截，出口 IP 改成设置开关加三种摆放，辉光选择卡片做成了通用组件。</p>
+<ul>
+<li>待你定：<a href="#exitip">出口 IP</a> 的三种摆放选一种。</li>
+<li>待讨论：<a href="#home">简洁首页方案 B</a> 顶栏好，下方偏大。</li>
+</ul>
+
+<nav class="jump"><a href="#home">首页布局</a><a href="#exitip">出口 IP</a><a href="#coredown">内核停止</a><a href="#topnodes">最快节点</a><a href="#chartlink">图表跳转</a><a href="#testurl">测速地址</a><a href="#choice">新组件：选择卡片</a><a href="#cards">卡片宽度</a><a href="#bypass">绕过列表</a><a href="#corners">窗口四角</a><a href="#sidelabel">侧栏文字</a><a href="#speedtest">下载测速</a><a href="#rulemap">规则对应</a><a href="#privnet">内网订阅</a><a href="#flatpak">Flatpak</a><a href="#others">其他</a></nav>
+
+<h2 id="home">首页：核心开关上移，加订阅切换</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/673">#673</a>。两个方案都把系统代理、模式、TUN 挪到上面，并加订阅下拉。左边简洁首页，右边控制台首页。</p>
+<div class="shots">
+<figure><img src="@home-before" alt="简洁首页改动前"><figcaption><b>简洁 · 改动前</b>：开关卡在图表和统计下面</figcaption></figure>
+<figure><img src="@con-home-before" alt="控制台首页改动前"><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+<figure><img src="@home-a" alt="简洁首页方案 A"><figcaption><b>简洁 · 方案 A</b>：开关卡整体移到最上面，订阅下拉放进系统代理卡</figcaption></figure>
+<figure><img src="@con-home-a" alt="控制台首页方案 A"><figcaption><b>控制台 · 方案 A</b>：快捷控制卡挪到右栏最上面，加订阅下拉</figcaption></figure>
+<figure><img src="@home-a-open" alt="简洁首页方案 A 订阅下拉展开"><figcaption><b>简洁 · 方案 A</b>，订阅下拉展开</figcaption></figure>
+<figure><img src="@con-home-a-open" alt="控制台首页方案 A 订阅下拉展开"><figcaption><b>控制台 · 方案 A</b>，订阅下拉展开</figcaption></figure>
+<figure><img src="@home-b" alt="简洁首页方案 B"><figcaption><span class="tag">待讨论：顶栏好，下方偏大</span><br><b>简洁 · 方案 B</b>：三个开关压成顶部一条，订阅切换在流量卡左上角</figcaption></figure>
+<figure><img src="@con-home-b" alt="控制台首页方案 B"><figcaption><span class="tag">用户倾向的方案</span><br><b>控制台 · 方案 B</b>：去掉「控制台」标题，开关条放在原来标题的位置；订阅卡移到右栏，订阅名换成下拉</figcaption></figure>
+<figure><img src="@home-b-open" alt="简洁首页方案 B 订阅下拉展开"><figcaption><b>简洁 · 方案 B</b>，订阅下拉展开</figcaption></figure>
+<figure><img src="@con-home-b-open" alt="控制台首页方案 B 订阅下拉展开"><figcaption><b>控制台 · 方案 B</b>，订阅下拉展开（往上开，免得被窗口底边截掉）</figcaption></figure>
+</div>
+<p class="group">最小窗口 720×540</p>
+<div class="shots">
+<figure><img src="@size-min-home-before" alt=""><figcaption><b>简洁 · 改动前</b></figcaption></figure>
+<figure><img src="@size-min-con-home-before" alt=""><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+<figure><img src="@size-min-home-a" alt=""><figcaption><b>简洁 · 方案 A</b></figcaption></figure>
+<figure><img src="@size-min-con-home-a" alt=""><figcaption><b>控制台 · 方案 A</b></figcaption></figure>
+<figure><img src="@size-min-home-b" alt=""><figcaption><span class="tag">待讨论：顶栏好，下方偏大</span><br><b>简洁 · 方案 B</b></figcaption></figure>
+<figure><img src="@size-min-con-home-b" alt=""><figcaption><span class="tag">用户倾向的方案</span><br><b>控制台 · 方案 B</b></figcaption></figure>
+</div>
+
+<h2 id="exitip">显示出口 IP</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/321">#321</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/673">#673</a>。设置里加「显示出口 IP」开关，默认关。打开后自动查，切换节点时自动刷新，没有「查询」按钮。首页不再加胶囊，三种方案都并进现有的一行。</p>
+<p class="group">设置里的开关</p>
+<div class="shots">
+<figure><img src="@exitip-setting-before" alt=""><figcaption><b>改动前</b>：外观里的主页模式</figcaption></figure>
+<figure><img src="@exitip-setting" alt=""><figcaption><b>改动后</b>：主页模式下面加「显示出口 IP」，默认关</figcaption></figure>
+</div>
+<p class="group">改动前</p>
+<div class="shots">
+<figure><img src="@exitip-before" alt=""><figcaption><b>简洁 · 改动前</b></figcaption></figure>
+<figure><img src="@con-exitip-before" alt=""><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+</div>
+<p class="group">方案一：节点名下面的副标题</p>
+<div class="shots">
+<figure><img src="@exitip-sub" alt=""><figcaption><b>简洁</b>：节点胶囊下面一行小字，网速读数稍往下挪</figcaption></figure>
+<figure><img src="@con-exitip-sub" alt=""><figcaption><b>控制台（方案 B）</b>：「当前节点」卡里，节点地址下面多一行</figcaption></figure>
+</div>
+<p class="group">方案二：系统代理那一行</p>
+<div class="shots">
+<figure><img src="@exitip-status" alt=""><figcaption><b>简洁</b>：系统代理卡的状态句「已准备好保护您的流量」换成出口</figcaption></figure>
+<figure><img src="@con-exitip-status" alt=""><figcaption><b>控制台（方案 B）</b>：开关条里「127.0.0.1:7890」换成出口；930 宽时这格只有约 100 px，只放国旗和 IP</figcaption></figure>
+</div>
+<p class="group">方案三：统计行</p>
+<div class="shots">
+<figure><img src="@exitip-stats" alt=""><figcaption><b>简洁</b>：底部统计从三项变四项</figcaption></figure>
+<figure><img src="@con-exitip-stats" alt=""><figcaption><b>控制台（方案 B）</b>：「节点延迟」卡的脚注换成出口。流量卡底部的统计行在默认窗口里要往下滚才看得到，没放那里</figcaption></figure>
+</div>
+
+<h2 id="coredown">内核停止横幅</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/182">#182</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/217">#217</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/318">#318</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/609">#609</a>。标题「内核已停止运行」，正文只说影响，按钮「关闭系统代理」和「重新启动」。</p>
+<div class="shots">
+<figure><img src="@coredown-before" alt=""><figcaption><b>简洁 · 改动前</b></figcaption></figure>
+<figure><img src="@coredown-after" alt=""><figcaption><b>简洁 · 改动后</b></figcaption></figure>
+<figure><img src="@con-coredown-before" alt=""><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+<figure><img src="@con-coredown-after" alt=""><figcaption><b>控制台（方案 B）· 改动后</b>：横幅在最上面、开关条上方，在布局里占位</figcaption></figure>
+</div>
+
+<h2 id="topnodes">首页显示延迟最低的几个节点</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>。</p>
+<div class="shots">
+<figure><img src="@topnodes-before" alt=""><figcaption><b>简洁 · 改动前</b></figcaption></figure>
+<figure><img src="@topnodes-after" alt=""><figcaption><b>简洁 · 改动后</b></figcaption></figure>
+<figure><img src="@con-topnodes-before" alt=""><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+<figure><img src="@con-topnodes-after" alt=""><figcaption><b>控制台（方案 B）· 改动后</b></figcaption></figure>
+</div>
+
+<h2 id="chartlink">从流量图进入连接页</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>。双击是隐藏手势，所以做了看得见的「查看连接」链接版，和双击加悬停提示版。</p>
+<div class="shots three">
+<figure><img src="@chartlink-before" alt=""><figcaption><b>简洁 · 改动前</b></figcaption></figure>
+<figure><img src="@chartlink-link" alt=""><figcaption><b>简洁 · 链接版</b></figcaption></figure>
+<figure><img src="@chartlink-hover" alt=""><figcaption><b>简洁 · 双击版</b>，悬停提示</figcaption></figure>
+<figure><img src="@con-chartlink-before" alt=""><figcaption><b>控制台 · 改动前</b></figcaption></figure>
+<figure><img src="@con-chartlink-link" alt=""><figcaption><b>控制台（方案 B）· 链接版</b></figcaption></figure>
+<figure><img src="@con-chartlink-hover" alt=""><figcaption><b>控制台（方案 B）· 双击版</b>，悬停提示</figcaption></figure>
+</div>
+
+<h2 id="testurl">自定义测速地址</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a>。设置里加一项，点开是弹窗；弹窗里的常用地址改回辉光选择卡片。</p>
+<div class="shots">
+<figure><img src="@testurl-before" alt=""><figcaption><b>设置 · 改动前</b></figcaption></figure>
+<figure><img src="@testurl-after" alt=""><figcaption><b>设置 · 改动后</b>：新增「测速地址」</figcaption></figure>
+<figure><img src="@testurl-dialog-before" alt=""><figcaption><b>弹窗 · 上一版</b>：分段控件</figcaption></figure>
+<figure><img src="@testurl-dialog" alt=""><figcaption><b>弹窗 · 现在</b>：选择卡片，每项一个名字加一行域名</figcaption></figure>
+</div>
+
+<h2 id="choice">新组件：选择卡片</h2>
+<p class="note-line">写进了 styles.css，类名 <code>.choice-grid</code>（容器，<code>--choice-cols</code> 调列数）和 <code>.choice-card</code>（每项一个标题加一行说明）。选中时 accent 描边、浅色底加 3px 辉光环；另有悬停、键盘焦点、禁用和深色模式，只用现有设计变量。</p>
+<ul>
+<li><b>为什么适合</b>：几个选项互斥，而且光看名字不知道该选哪个，每项都要一行说明。标签自己就说明白的（比如订阅的自动更新间隔）继续用分段控件。</li>
+<li><b>测速地址弹窗</b>：4 个常用地址，每项一行域名，选之前就知道会请求哪里。</li>
+<li><b>导出日志的「导出内容」</b>：应用 / 核心 / 全部，每项一行说明什么问题该选它，用户不用先懂两种日志的区别。</li>
+<li><b>外观里的「主页模式」</b>：极简 / 控制台，每项一行说明首页会显示什么。</li>
+</ul>
+<div class="shots">
+<figure><img src="@choice-states" alt=""><figcaption><b>状态</b>：Google 键盘焦点、Cloudflare 选中、Apple 悬停、小米常态</figcaption></figure>
+<figure><img src="@testurl-dialog-dark" alt=""><figcaption><b>深色模式</b>，测速地址弹窗</figcaption></figure>
+<figure><img src="@choice-logexport-before" alt=""><figcaption><b>导出日志 · 改动前</b>：分段控件</figcaption></figure>
+<figure><img src="@choice-logexport-after" alt=""><figcaption><b>导出日志 · 改动后</b>：三列选择卡片</figcaption></figure>
+<figure><img src="@choice-homemode-before" alt=""><figcaption><b>主页模式 · 改动前</b>：右侧分段控件</figcaption></figure>
+<figure><img src="@choice-homemode-after" alt=""><figcaption><b>主页模式 · 改动后</b>：标题下面两张卡片</figcaption></figure>
+<figure><img src="@choice-homemode-after-dark" alt=""><figcaption><b>主页模式 · 改动后</b>，深色模式</figcaption></figure>
+</div>
+
+<h2 id="cards">节点卡片最小宽度：200</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a>。默认窗口下 180 和 200 截出来一样（都是 4 列），所以只放 1440×900 的对比。</p>
+<div class="shots">
+<figure><img src="@size-big-cards-before" alt=""><figcaption><b>现在 180</b>：6 列，每列约 199 px</figcaption></figure>
+<figure><img src="@size-big-cards-200" alt=""><figcaption><b>200</b>：5 列，每列约 242 px，名字不再被截断</figcaption></figure>
+</div>
+
+<h2 id="bypass">系统代理绕过列表可编辑</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/1477">#1477</a>。</p>
+<div class="shots three">
+<figure><img src="@bypass-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@bypass-after" alt=""><figcaption><b>改动后</b>：新增「系统代理绕过」</figcaption></figure>
+<figure><img src="@bypass-dialog" alt=""><figcaption><b>编辑弹窗</b></figcaption></figure>
+</div>
+
+<h2 id="corners">窗口四个角都能拖动缩放</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>。四角各放一个 12×12 的透明热区，截图里用半透明色块标出来。</p>
+<div class="shots">
+<figure><img src="@corners-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@corners-after" alt=""><figcaption><b>改动后</b></figcaption></figure>
+</div>
+
+<h2 id="sidelabel">侧边栏图标配文字</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>。两种做法：图标下方小字，或展开侧边栏。</p>
+<div class="shots three">
+<figure><img src="@sidelabel-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@sidelabel-under" alt=""><figcaption><b>图标下方小字</b></figcaption></figure>
+<figure><img src="@sidelabel-wide" alt=""><figcaption><b>展开侧边栏</b></figcaption></figure>
+<figure><img src="@size-min-side-before" alt=""><figcaption><b>720×540 · 改动前</b></figcaption></figure>
+<figure><img src="@size-min-side-under" alt=""><figcaption><b>720×540 · 图标下方小字</b></figcaption></figure>
+<figure><img src="@size-min-side-wide" alt=""><figcaption><b>720×540 · 展开侧边栏</b></figcaption></figure>
+</div>
+
+<h2 id="speedtest">真实下载测速</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a>。只对单个节点手动测一次。</p>
+<div class="shots three">
+<figure><img src="@speedtest-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@speedtest-menu" alt=""><figcaption><b>节点菜单里的入口</b></figcaption></figure>
+<figure><img src="@speedtest-result" alt=""><figcaption><b>测速结果</b></figcaption></figure>
+</div>
+
+<h2 id="rulemap">更直观地看规则和代理组的对应</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/555">#555</a>。代理组旁边显示命中的规则。</p>
+<div class="shots three">
+<figure><img src="@rulemap-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@rulemap-pill" alt=""><figcaption><b>代理组旁的规则标签</b></figcaption></figure>
+<figure><img src="@rulemap-open" alt=""><figcaption><b>展开的规则列表</b></figcaption></figure>
+</div>
+
+<h2 id="privnet">允许订阅地址解析到内网</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/284">#284</a>。按订阅单独开，不加全局总开关。</p>
+<div class="shots">
+<figure><img src="@privnet-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@privnet-after" alt=""><figcaption><b>改动后</b></figcaption></figure>
+</div>
+
+<h2 id="flatpak">Flatpak 版关闭自更新</h2>
+<p class="note-line"><a href="https://github.com/Juwan-Hwang/Zephyr/issues/1449">#1449</a>。检测到 FLATPAK_ID 时，更新交给软件中心或 flatpak update。</p>
+<div class="shots">
+<figure><img src="@flatpak-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@flatpak-after" alt=""><figcaption><b>改动后</b></figcaption></figure>
+</div>
+
+<h2 id="others">其他建议</h2>
+<p class="note-line">之前 issue 整理里的取舍是不做，原型只供对比。</p>
+<p class="group">当前节点也参与延迟排序 · <a href="https://github.com/Juwan-Hwang/Zephyr/issues/69">#69</a></p>
+<div class="shots">
+<figure><img src="@sortcur-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@sortcur-after" alt=""><figcaption><b>改动后</b></figcaption></figure>
+</div>
+<p class="group">标题栏加最小化、最大化 · <a href="https://github.com/Juwan-Hwang/Zephyr/issues/178">#178</a></p>
+<div class="shots">
+<figure><img src="@titlebar-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@titlebar-after" alt=""><figcaption><b>改动后</b>：和关闭圆点同一风格</figcaption></figure>
+</div>
+<p class="group">关闭按钮做得更大 · <a href="https://github.com/Juwan-Hwang/Zephyr/issues/69">#69</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/282">#282</a></p>
+<div class="shots three">
+<figure><img src="@closebig-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@closebig-dot" alt=""><figcaption><b>放大圆点</b></figcaption></figure>
+<figure><img src="@closebig-x" alt=""><figcaption><b>常规 × 按钮</b></figcaption></figure>
+</div>
+<p class="group">内核可选 · <a href="https://github.com/Juwan-Hwang/Zephyr/issues/490">#490</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/1127">#1127</a></p>
+<div class="shots">
+<figure><img src="@kernel-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@kernel-after" alt=""><figcaption><b>改动后</b>：mihomo / mihomo Smart / sing-box</figcaption></figure>
+</div>
+<p class="group">在应用里直接编辑订阅 YAML · <a href="https://github.com/Juwan-Hwang/Zephyr/issues/490">#490</a></p>
+<div class="shots">
+<figure><img src="@yamledit-before" alt=""><figcaption><b>改动前</b></figcaption></figure>
+<figure><img src="@yamledit-after" alt=""><figcaption><b>改动后</b></figcaption></figure>
+</div>
+
+<div class="sources"><b>来源</b><ul><li><a href="https://github.com/Juwan-Hwang/Zephyr/issues">Juwan-Hwang/Zephyr 的 issue</a>，各节标题下列出了编号</li><li>截图来自本地原型分支（基于 c1a0ded，未推送），简洁首页 930×680，控制台首页和其他页面 1082×691，重叠检查在 930×680 下做</li></ul></div>
+</div></body></html>

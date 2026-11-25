@@ -1,0 +1,214 @@
+[
+ {
+  "out": "out/bypass-after.png",
+  "page": "settings",
+  "proto": "bypass"
+ },
+ {
+  "out": "out/bypass-dialog.png",
+  "page": "settings",
+  "proto": "bypass-dialog"
+ },
+ {
+  "out": "out/testurl-after.png",
+  "page": "settings",
+  "proto": "testurl"
+ },
+ {
+  "out": "out/testurl-dialog.png",
+  "page": "settings",
+  "proto": "testurl-dialog"
+ },
+ {
+  "out": "out/testurl-dialog-before.png",
+  "page": "settings",
+  "proto": "testurl-dialog-seg"
+ },
+ {
+  "out": "out/testurl-dialog-dark.png",
+  "page": "settings",
+  "proto": "testurl-dialog",
+  "theme": "dark"
+ },
+ {
+  "out": "out/choice-states.png",
+  "page": "settings",
+  "proto": "testurl-dialog",
+  "actions": [
+   {
+    "wait": 600
+   },
+   {
+    "eval": "document.querySelector('.choice-card').focus()"
+   },
+   {
+    "hover": ".choice-card:nth-child(3)",
+    "force": true
+   },
+   {
+    "wait": 300
+   }
+  ]
+ },
+ {
+  "out": "out/coredown-after.png",
+  "proto": "coredown-after"
+ },
+ {
+  "out": "out/exitip-setting.png",
+  "page": "settings",
+  "proto": "exitip-setting"
+ },
+ {
+  "out": "out/exitip-sub.png",
+  "proto": "exitip-sub"
+ },
+ {
+  "out": "out/exitip-status.png",
+  "proto": "exitip-status"
+ },
+ {
+  "out": "out/exitip-stats.png",
+  "proto": "exitip-stats"
+ },
+ {
+  "out": "out/topnodes-after.png",
+  "proto": "topnodes"
+ },
+ {
+  "out": "out/speedtest-menu.png",
+  "page": "proxies",
+  "proto": "speedtest-menu"
+ },
+ {
+  "out": "out/speedtest-result.png",
+  "page": "proxies",
+  "proto": "speedtest-result"
+ },
+ {
+  "out": "out/privnet-after.png",
+  "page": "subscriptions",
+  "proto": "privnet-after"
+ },
+ {
+  "out": "out/flatpak-after.png",
+  "page": "settings",
+  "proto": "flatpak-after"
+ },
+ {
+  "out": "out/yamledit-after.png",
+  "page": "subscriptions",
+  "proto": "yamledit"
+ },
+ {
+  "out": "out/kernel-after.png",
+  "page": "settings",
+  "proto": "kernel"
+ },
+ {
+  "out": "out/con-exitip-sub.png",
+  "home": "console",
+  "proto": "exitip-sub"
+ },
+ {
+  "out": "out/con-exitip-status.png",
+  "home": "console",
+  "proto": "exitip-status"
+ },
+ {
+  "out": "out/con-exitip-stats.png",
+  "home": "console",
+  "proto": "exitip-stats"
+ },
+ {
+  "out": "out/con-coredown-after.png",
+  "home": "console",
+  "proto": "coredown-after"
+ },
+ {
+  "out": "out/con-topnodes-after.png",
+  "home": "console",
+  "proto": "topnodes"
+ },
+ {
+  "out": "out/home-b-top.png",
+  "proto": "homeb-top",
+  "overlap": true
+ },
+ {
+  "out": "out/home-b-top-bottom.png",
+  "proto": "homeb-top-bottom",
+  "overlap": true
+ },
+ {
+  "out": "out/home-b-top-dark.png",
+  "proto": "homeb-top",
+  "theme": "dark"
+ },
+ {
+  "out": "out/choice-subauto-before.png",
+  "page": "subscriptions",
+  "proto": "choice-subauto-before",
+  "overlap": true
+ },
+ {
+  "out": "out/choice-subauto-after.png",
+  "page": "subscriptions",
+  "proto": "choice-subauto-after",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-before.png",
+  "page": "connections",
+  "proto": "connrule-before",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-mine.png",
+  "page": "connections",
+  "proto": "connrule",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-set.png",
+  "page": "connections",
+  "proto": "connrule-set",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-match.png",
+  "page": "connections",
+  "proto": "connrule-match",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-add.png",
+  "page": "connections",
+  "proto": "connrule-add",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-edit.png",
+  "page": "connections",
+  "proto": "connrule-edit",
+  "overlap": true
+ },
+ {
+  "out": "out/connrule-add-dark.png",
+  "page": "connections",
+  "proto": "connrule-add",
+  "theme": "dark"
+ },
+ {
+  "out": "out/size-min-home-b-top.png",
+  "proto": "homeb-top",
+  "width": 720,
+  "height": 540
+ },
+ {
+  "out": "out/size-min-home-b-top-bottom.png",
+  "proto": "homeb-top-bottom",
+  "width": 720,
+  "height": 540
+ }
+]

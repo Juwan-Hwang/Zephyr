@@ -1,0 +1,300 @@
+[
+ {
+  "out": "/tmp/ov/bypass-after.png",
+  "page": "settings",
+  "proto": "bypass",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/bypass-dialog.png",
+  "page": "settings",
+  "proto": "bypass-dialog",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/testurl-after.png",
+  "page": "settings",
+  "proto": "testurl",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/testurl-dialog.png",
+  "page": "settings",
+  "proto": "testurl-dialog",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/testurl-dialog-before.png",
+  "page": "settings",
+  "proto": "testurl-dialog-seg",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/choice-states.png",
+  "page": "settings",
+  "proto": "testurl-dialog",
+  "actions": [
+   {
+    "wait": 600
+   },
+   {
+    "eval": "document.querySelector('.choice-card').focus()"
+   },
+   {
+    "hover": ".choice-card:nth-child(3)",
+    "force": true
+   },
+   {
+    "wait": 300
+   }
+  ],
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/coredown-after.png",
+  "proto": "coredown-after",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/exitip-setting.png",
+  "page": "settings",
+  "proto": "exitip-setting",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/exitip-sub.png",
+  "proto": "exitip-sub",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/exitip-status.png",
+  "proto": "exitip-status",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/exitip-stats.png",
+  "proto": "exitip-stats",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/topnodes-after.png",
+  "proto": "topnodes",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/speedtest-menu.png",
+  "page": "proxies",
+  "proto": "speedtest-menu",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/speedtest-result.png",
+  "page": "proxies",
+  "proto": "speedtest-result",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/privnet-after.png",
+  "page": "subscriptions",
+  "proto": "privnet-after",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/flatpak-after.png",
+  "page": "settings",
+  "proto": "flatpak-after",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/yamledit-after.png",
+  "page": "subscriptions",
+  "proto": "yamledit",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/kernel-after.png",
+  "page": "settings",
+  "proto": "kernel",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/home-b-top.png",
+  "proto": "homeb-top",
+  "overlap": true,
+  "width": 930,
+  "height": 680
+ },
+ {
+  "out": "/tmp/ov/home-b-top-bottom.png",
+  "proto": "homeb-top-bottom",
+  "overlap": true,
+  "width": 930,
+  "height": 680
+ },
+ {
+  "out": "/tmp/ov/choice-subauto-before.png",
+  "page": "subscriptions",
+  "proto": "choice-subauto-before",
+  "overlap": true,
+  "width": 930,
+  "height": 680
+ },
+ {
+  "out": "/tmp/ov/choice-subauto-after.png",
+  "page": "subscriptions",
+  "proto": "choice-subauto-after",
+  "overlap": true,
+  "width": 930,
+  "height": 680
+ },
+ {
+  "out": "/tmp/ov/connrule-before.png",
+  "page": "connections",
+  "proto": "connrule-before",
+  "overlap": true,
+  "width": 930,
+  "height": 680
+ },
+ {
+  "out": "/tmp/ov/connrule-mine.png",
+  "page": "connections",
+  "proto": "connrule",
+  "overlap": true,
+  "width": 930,
+  "height": 680
+ },
+ {
+  "out": "/tmp/ov/connrule-set.png",
+  "page": "connections",
+  "proto": "connrule-set",
+  "overlap": true,
+  "width": 930,
+  "height": 680
+ },
+ {
+  "out": "/tmp/ov/connrule-match.png",
+  "page": "connections",
+  "proto": "connrule-match",
+  "overlap": true,
+  "width": 930,
+  "height": 680
+ },
+ {
+  "out": "/tmp/ov/connrule-add.png",
+  "page": "connections",
+  "proto": "connrule-add",
+  "overlap": true,
+  "width": 930,
+  "height": 680
+ },
+ {
+  "out": "/tmp/ov/connrule-edit.png",
+  "page": "connections",
+  "proto": "connrule-edit",
+  "overlap": true,
+  "width": 930,
+  "height": 680
+ },
+ {
+  "out": "/tmp/ov/side-fold-expanded.png",
+  "home": "console",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='expanded'",
+  "overlap": true,
+  "width": 930,
+  "height": 680
+ },
+ {
+  "out": "/tmp/ov/side-fold-collapsed.png",
+  "home": "console",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='collapsed'",
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/side-fold-tip.png",
+  "home": "console",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='collapsed'",
+  "actions": [
+   {
+    "hover": "[data-nav=\"connections\"]"
+   },
+   {
+    "wait": 700
+   }
+  ],
+  "wait": 300,
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/side-fold-focus.png",
+  "home": "console",
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='collapsed'",
+  "actions": [
+   {
+    "press": "Tab"
+   },
+   {
+    "eval": "document.querySelector('#proto-side-toggle').focus()"
+   },
+   {
+    "wait": 400
+   }
+  ],
+  "wait": 300,
+  "width": 930,
+  "height": 680,
+  "overlap": true
+ },
+ {
+  "out": "/tmp/ov/size-min-side-fold-open.png",
+  "home": "console",
+  "width": 930,
+  "height": 680,
+  "proto": "sidelabel-fold",
+  "pre": "window.__PROTO_SIDE__='expanded';window.__PROTO_SIDE_OPEN__=true",
+  "overlap": true
+ }
+]

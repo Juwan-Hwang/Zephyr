@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zephyr 全部 issue 建议整理与取舍</title>
+<style>
+:root{--bg:#fafaf8;--fg:#1d1d1f;--muted:#6b6b70;--line:#e4e4e0;--card:#fff;--accent:#2f5bd3;--do:#1f7a3f;--later:#9a6a00;--no:#a33;--done:#5a5a62;}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#ececee;--muted:#9a9aa2;--line:#2c2c31;--card:#1c1c20;--accent:#8aa8ff;--do:#5fcf86;--later:#e3b341;--no:#ff7b72;--done:#a0a0a8;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;}
+main{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+h1{font-size:1.6rem;line-height:1.35;margin:0 0 6px}
+.meta{color:var(--muted);font-size:.85rem;margin-bottom:20px}
+.lede{font-size:1.05rem;margin:0 0 20px}
+h2{font-size:1.2rem;margin:40px 0 4px;padding-top:8px;border-top:1px solid var(--line)}
+.sub{color:var(--muted);font-size:.9rem;margin:0 0 14px}
+ol.top{padding-left:1.3em;margin:0}
+ol.top li{margin:0 0 12px}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em;background:color-mix(in srgb,var(--fg) 7%,transparent);padding:1px 5px;border-radius:4px;word-break:break-all}
+details{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:0 0 10px;padding:0 14px}
+summary{cursor:pointer;padding:12px 0;list-style:none;display:flex;gap:10px;align-items:baseline}
+summary::-webkit-details-marker{display:none}
+summary .t{flex:1;font-weight:600}
+.tag{flex:none;font-size:.75rem;font-weight:600;padding:1px 8px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.do{color:var(--do)}.later{color:var(--later)}.no{color:var(--no)}.done{color:var(--done)}
+details .body{padding:0 0 12px;border-top:1px dashed var(--line)}
+details .body p{margin:10px 0 0}
+.k{color:var(--muted);font-size:.85rem;margin-right:4px}
+.cnt{color:var(--muted);font-size:.85rem;font-weight:400;margin-left:4px}
+ul.plain{padding-left:1.2em;margin:6px 0}
+ul.plain li{margin:4px 0}
+.cover{font-size:.9rem;color:var(--muted)}
+.cover li{margin:3px 0}
+footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<h1>Zephyr issue 里的建议：整理和取舍</h1>
+<div class="meta">整理于 2026 年 11 月 18 日 16:00 · 覆盖全部 47 个 issue（open 和 closed，不含 PR）、128 条回复、30 张图片 · 代码对照 main 的 <code>59c2851</code></div>
+<p class="lede">大部分建议你已经做了：25 条左右已上线或已修掉。剩下的里面，最值得先做的是下面五条。前三条都只是改几行代码，其中两条的后端或排查结论早就有了，只差最后一步。</p>
+
+<ol class="top">
+<li><strong>系统代理的「绕过列表」开放给用户编辑。</strong>后端 <code>enable_sysproxy</code> 已经支持 <code>bypass</code> 参数，前端却写死传 <code>bypass: null</code>（<code>ui/sysproxy.js</code> 第 122 行），所以只需要在设置里加一个输入框，工作量很小。提的人是 <a href="https://github.com/Juwan-Hwang/Zephyr/issues/1477">#1477</a> 的 rozfah。</li>
+<li><strong>把 <code>.glass-card</code> 过渡里的 <code>backdrop-filter</code> 删掉。</strong>你自己在 <a href="https://github.com/Juwan-Hwang/Zephyr/issues/1486">#1486</a> 里查出它是长时间运行变卡的主因，但 issue 关了，<code>styles.css</code> 第 534 行和第 1645 行的 transition 里它还在。<a href="https://github.com/Juwan-Hwang/Zephyr/issues/2124">#2124</a>（白色光带，还开着）怀疑的也是它。改两行就能同时处理两个问题。</li>
+<li><strong>测速地址改成可以自定义。</strong><code>api.js</code> 第 1186 行写死了 gstatic 的 generate_204。加一个设置项，默认值照旧填好就行。<a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a> 提的，跟现有的「超时时间」设置正好配套。</li>
+<li><strong>首页把核心开关往上挪，并加一个订阅切换。</strong>现在极简首页最上面是图表，系统代理、模式、TUN 三个开关排在最底下。<a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a> 和 <a href="https://github.com/Juwan-Hwang/Zephyr/issues/673">#673</a> 两个人都嫌首页用不上。只调顺序、加一个订阅下拉，不用重做首页。</li>
+<li><strong>内核意外掉线时直接给出「重启内核」提示。</strong><a href="https://github.com/Juwan-Hwang/Zephyr/issues/182">#182</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/217">#217</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/318">#318</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/609">#609</a> 一共 4 个 issue、3 个人，都是和别的客户端打架之后内核没了。现在得靠「右键刷新、等两三秒再重启」这种绕路的办法。检测到连不上控制接口就弹一条带按钮的横幅，比加自动看门狗安全，也不用去抢别的客户端的进程。</li>
+</ol>
+
+<h2>做：体验和界面</h2>
+<p class="sub">值得做、成本可控的改进，上面五条也在这里，附完整理由。</p>
+
+<details><summary><span class="t">系统代理绕过列表可编辑</span><span class="tag do">做</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/1477">#1477</a> · rozfah · 1 人</p>
+<p><span class="k">建议</span>想自己加不走代理的域名或网段，比如内网地址、公司系统。</p>
+<p><span class="k">现状</span>没做。Rust 侧 <code>sys_proxy.rs</code> 第 546 行的 <code>enable_sysproxy(server, bypass: Option&lt;String&gt;)</code> 早就接这个参数了，Windows、macOS、GNOME 三条路径都会用到，前端却固定传 <code>null</code>。</p>
+<p><span class="k">取舍</span>做。几乎只是前端的事：加一个输入框，存进设置，开代理时传进去。默认值保留现在的行为。要注意 Windows 用分号分隔，GNOME 用列表，可以统一按换行或逗号输入，再在后端转换。</p>
+</div></details>
+
+<details><summary><span class="t">去掉毛玻璃卡片 transition 里的 backdrop-filter</span><span class="tag do">做</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/1486">#1486</a>（已关闭）、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/2124">#2124</a>（未关闭）· 都是 Juwan-Hwang 自己提的</p>
+<p><span class="k">建议</span>#1486 的排查结论是两件事：Canvas 每帧重设尺寸，以及 <code>transition</code> 里带了 <code>backdrop-filter</code>，导致合成层一直重算。#2124 是界面上偶尔出现白色光带。</p>
+<p><span class="k">现状</span>Canvas 那一半已经改了：<code>console-home.js</code> 现在只在尺寸变化时才重设 canvas。样式那一半没改，<code>styles.css</code> 第 534 行和第 1645 行的 transition 里仍然有 <code>backdrop-filter</code>。</p>
+<p><span class="k">取舍</span>做。改两行，风险很低，只是悬停时模糊程度不再有渐变。改完再看 #2124 还会不会出现，不出现就一起关掉。</p>
+</div></details>
+
+<details><summary><span class="t">自定义测速地址</span><span class="tag do">做</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a> · 1 人</p>
+<p><span class="k">建议</span>测延迟时能改用的地址。</p>
+<p><span class="k">现状</span>没做。<code>api.js</code> 第 1186 行写死了 <code>https://www.gstatic.com/generate_204</code>。超时时间已经可以设置了。</p>
+<p><span class="k">取舍</span>做。一个文本框加一项设置，默认值不变。有些机场屏蔽 Google，有些人想用 cp.cloudflare.com，这个需求很常见，各家主流客户端也都有这一项。</p>
+</div></details>
+
+<details><summary><span class="t">首页：核心开关上移，加订阅切换</span><span class="tag do">做（只改布局）</span><span class="cnt">2 人</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a> FRANKASEE（截图里把系统代理、TUN 圈出来，说「放在最下面不显眼」，还希望首页能切换订阅），<a href="https://github.com/Juwan-Hwang/Zephyr/issues/673">#673</a>（觉得首页信息没用，想换一种界面）· 2 人</p>
+<p><span class="k">现状</span>首页已经有「极简」和「控制台」两种模式，也有节点轮盘。不过极简模式里，系统代理、模式、TUN 那张卡还排在图表和统计下面，首页也没有订阅切换。</p>
+<p><span class="k">取舍</span>做。只做两件事：把开关卡挪到最上面，加一个订阅下拉框。#2439 里另外几个想法（按延迟显示前四个节点、整页重新排版）先不跟，见下面「以后再说」。</p>
+</div></details>
+
+<details><summary><span class="t">内核掉线后提示一键重启</span><span class="tag do">做（轻量版）</span><span class="cnt">3 人，4 个 issue</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/182">#182</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/217">#217</a>（同一个人）、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/318">#318</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/609">#609</a></p>
+<p><span class="k">建议</span>和 Clash Party、Verge 之类同时装，或者先后切换着用，Zephyr 的内核会被杀掉或者起不来，然后只能手动折腾。</p>
+<p><span class="k">现状</span>启动冲突那部分已经修了：内核改名成 <code>zephyr-mihomo</code>（#316），os error 183 就是这样解决的。但运行中内核被别人杀掉以后，前端没有专门的提示，只能「右键刷新、等一会儿再重启」。</p>
+<p><span class="k">取舍</span>做轻量版：控制接口连续几次连不上，就弹一条横幅，写明「内核已停止」，附一个「重启内核」按钮。不做自动重启的看门狗，因为两个客户端会互相拉起、互相抢端口。也不去杀别家的进程，那是越界。</p>
+</div></details>
+
+<details><summary><span class="t">窗口四个角都能拖动调整大小</span><span class="tag do">做（先复现）</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a> FRANKASEE 的回复（附截图）· 1 人</p>
+<p><span class="k">建议</span>现在只能按单个方向拉伸，希望拖四个角时能同时改宽和高。</p>
+<p><span class="k">现状</span><code>tauri.conf.json</code> 里窗口是 <code>decorations: false</code>、<code>transparent: true</code>、<code>shadow: false</code>，靠 Tauri 自带的无边框缩放，角上能拖的区域很窄。</p>
+<p><span class="k">取舍</span>做。先在 Windows 上复现，如果确实是角上的区域太小，就在四个角各放一个透明小块，调用 <code>startResizeDragging</code> 指定对角方向，代码量很小。</p>
+</div></details>
+
+<details><summary><span class="t">全局快捷键支持单键（只限功能键）</span><span class="tag do">做（受限版）</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/672">#672</a> · 1 人</p>
+<p><span class="k">建议</span>用一个键切换代理，不想按组合键。</p>
+<p><span class="k">现状</span><code>ui/global-shortcut.js</code> 要求快捷键至少包含一个修饰键，单键会被拒绝。</p>
+<p><span class="k">取舍</span>只放开 F1 到 F24、Pause、ScrollLock 这类平时用不到的键。字母、数字和空格不放开，全局占用以后，打字时会被吞掉，后果比需求本身严重。</p>
+</div></details>
+
+<details><summary><span class="t">节点卡片别挤，名字能显示全</span><span class="tag do">做（调一个参数）</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a> · 1 人</p>
+<p><span class="k">建议</span>一行显示的节点太多，名字被截断，希望每行少一点。</p>
+<p><span class="k">现状</span><code>styles.css</code> 第 1696 行是 <code>repeat(auto-fill, minmax(180px, 1fr))</code>，窗口一宽就会排很多列。</p>
+<p><span class="k">取舍</span>把最小宽度调到 220 到 240px 左右，看一下效果再定。不做「每行几个」的设置项，为这个加选项不值得。</p>
+</div></details>
+
+<details><summary><span class="t">把 bind.js 里没用到的 innerHTML 分支删掉</span><span class="tag do">做（顺手清理）</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/1968">#1968</a> · 扫描工具报告的 XSS</p>
+<p><span class="k">现状</span>是误报。整个代码库里没有任何地方以 <code>'innerHTML'</code> 作为属性调用 <code>bind</code>。<code>collapsible.js</code> 里插入的是写死的图标，不是用户输入。</p>
+<p><span class="k">取舍</span>不当成漏洞修，但可以把那个用不到的分支删掉，以后扫描就不会再报。删完关掉这个 issue，写一句是误报。</p>
+</div></details>
+
+<h2>以后再说</h2>
+<p class="sub">有价值，但现在成本或风险偏高，或者要先等反馈。</p>
+
+<details><summary><span class="t">首页显示当前出口 IP 和地区</span><span class="tag later">以后再说</span><span class="cnt">2 人</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/321">#321</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/673">#673</a></p>
+<p><span class="k">现状</span>没做。<code>console-home.js</code> 的注释里写明了 mihomo 不提供出口 IP。</p>
+<p><span class="k">取舍</span>要做就得经代理去请求第三方查 IP 的服务。这会多一个外部依赖，服务挂了首页就显示不出来，还会让人担心隐私。如果做，建议做成默认关闭、点一下才查一次，不要自动轮询。</p>
+</div></details>
+
+<details><summary><span class="t">首页显示延迟最低的前几个节点</span><span class="tag later">以后再说</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a> · 1 人</p>
+<p><span class="k">取舍</span>和现在的节点轮盘、「最佳」按钮功能重复。等上面的首页布局调整做完，看还有没有人要再说。</p>
+</div></details>
+
+<details><summary><span class="t">侧边栏图标配上文字</span><span class="tag later">以后再说</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>（截图里标出侧边栏图标看不懂，提议把汉字融进图标）· 1 人</p>
+<p><span class="k">现状</span>已经有悬停提示（<code>nav-tooltip.js</code>）。</p>
+<p><span class="k">取舍</span>「把汉字融进图标」不做：要改多语言，也难看。可以以后加一个「展开侧边栏显示文字」的开关，但只有一个人提，不急。</p>
+</div></details>
+
+<details><summary><span class="t">双击流量图进入连接页</span><span class="tag later">以后再说</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a> · 1 人</p>
+<p><span class="k">取舍</span>双击是隐藏手势，没人会发现。如果要做，就给流量卡片加一个看得见的「查看连接」链接，跟首页调整一起做。</p>
+</div></details>
+
+<details><summary><span class="t">真实下载测速</span><span class="tag later">以后再说</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a> · 1 人</p>
+<p><span class="k">取舍</span>测一次就要下载一个文件，会实打实地消耗机场流量，结果也受测速服务器影响，工作量明显比延迟测试大。真要做，也只做「对单个节点手动测一次」。</p>
+</div></details>
+
+<details><summary><span class="t">Android 版</span><span class="tag later">以后再说</span><span class="cnt">2 人</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/65">#65</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/303">#303</a></p>
+<p><span class="k">现状</span><code>zephyr-core</code> 已经抽出来并接了 UniFFI，算是铺了路，但还没有能用的移动端。</p>
+<p><span class="k">取舍</span>需求是真的，但 VPNService、界面、上架和维护都是另一个项目的工作量，等桌面端稳定以后再开。</p>
+</div></details>
+
+<details><summary><span class="t">订阅地址解析到内网被拦截</span><span class="tag later">等反馈</span><span class="cnt">2 人</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/284">#284</a>（发帖人和一位跟帖用户）</p>
+<p><span class="k">建议</span>公网订阅地址被判成私有或本地地址，更新失败，希望能关掉这个检查。</p>
+<p><span class="k">现状</span>后来已经改进：fake-ip 网段默认放行，代理侧和本地 DNS 一起判定，手动填写的内网地址本来就允许。</p>
+<p><span class="k">取舍</span>不加「关闭检查」的总开关，那会把 SSRF 防护整个拆掉。先请两位用新版本重试并发日志，确认还会不会出现；不会就关掉。</p>
+</div></details>
+
+<details><summary><span class="t">Flatpak 相关的几项承诺</span><span class="tag later">按承诺排期</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/1449">#1449</a> · omapak（Flathub 打包）</p>
+<p><span class="k">建议</span>Flatpak 里禁用自更新、补 metainfo 截图、去掉多余的 pulseaudio 权限等。你当时都答应了。</p>
+<p><span class="k">现状</span>main 里没有检测 Flatpak 环境的代码，自更新在 Flatpak 下照样会跑。打包清单在对方的仓库里，那边改到哪一步我没法核实。</p>
+<p><span class="k">取舍</span>至少先做「检测到 <code>FLATPAK_ID</code> 就关闭自更新」，这一项改动很小，不做会和 Flathub 的更新机制打架。其余几项在对方提 PR 时配合就行。</p>
+</div></details>
+
+<details><summary><span class="t">更直观地看规则和代理组的对应关系</span><span class="tag later">以后再说</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/555">#555</a> · 1 人</p>
+<p><span class="k">取舍</span>需求比较模糊，连接页已经有「规则」和「链路」两列，能看到每条连接命中了哪条规则、走了哪条代理链。等有更具体的场景再说。</p>
+</div></details>
+
+<h2>不做</h2>
+<p class="sub">误报、过度设计、和定位不合，或者已经有更好的替代。</p>
+
+<details><summary><span class="t">当前节点也参与延迟排序</span><span class="tag no">不做</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/69">#69</a> · 1 人</p>
+<p><span class="k">取舍</span>当前节点固定在第一位是你有意的设计，想换到最快的节点有「最佳」按钮，一键就到。改了以后，当前节点会在列表里跳来跳去，反而难找。</p>
+</div></details>
+
+<details><summary><span class="t">标题栏加最小化、最大化按钮</span><span class="tag no">不做</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/178">#178</a> · 1 人</p>
+<p><span class="k">取舍</span>关闭就是收进托盘，作用等同于最小化；窗口大小和位置也会记住。只有一个人提，界面保持简洁更重要。</p>
+</div></details>
+
+<details><summary><span class="t">关闭按钮做得更大</span><span class="tag no">不做（已有替代）</span><span class="cnt">2 人</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/69">#69</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/282">#282</a></p>
+<p><span class="k">取舍</span>根据你在 issue 里的回复，点击范围已经扩大了，这才是真正的问题。图标本身不用放大。</p>
+</div></details>
+
+<details><summary><span class="t">换 sing-box 内核，或者支持 Smart 内核</span><span class="tag no">不做</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/490">#490</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/1127">#1127</a> · 各 1 人</p>
+<p><span class="k">取舍</span>Zephyr 整套配置、覆写和订阅转换都是围绕 mihomo 写的，换内核等于重写。Smart 内核是第三方分支，跟着它的更新节奏走风险大。</p>
+</div></details>
+
+<details><summary><span class="t">在应用里直接编辑订阅的 YAML</span><span class="tag no">不做</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/490">#490</a> · 1 人</p>
+<p><span class="k">取舍</span>订阅一更新，手改的内容就被覆盖。正确的做法是覆写，应用里已经有覆写编辑器，也能拖文件导入本地配置。</p>
+</div></details>
+
+<details><summary><span class="t">升级 glib 修 CVE</span><span class="tag no">暂不处理</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/1969">#1969</a> · 依赖扫描</p>
+<p><span class="k">现状</span><code>Cargo.lock</code> 里的 glib 还是 0.18.5，是 Tauri 在 Linux 上通过 gtk 0.18 带进来的，单独升级不了。</p>
+<p><span class="k">取舍</span>等 Tauri 迁移到 gtk4-rs 以后跟着升级。可以回复说明原因，把 issue 留着跟踪。</p>
+</div></details>
+
+<details><summary><span class="t">Debuggix 徽章</span><span class="tag no">不做</span></summary><div class="body">
+<p><span class="k">来源</span><a href="https://github.com/Juwan-Hwang/Zephyr/issues/320">#320</a></p>
+<p><span class="k">取舍</span>这是推广帖，不算建议。</p>
+</div></details>
+
+<h2>已经做完或已修掉</h2>
+<p class="sub">都在 main 的代码或已发布的版本里找到了对应实现；还在处理中的单独标出来。</p>
+
+<details open><summary><span class="t">清单</span><span class="tag done">已完成</span></summary><div class="body">
+<ul class="plain">
+<li>Windows 关机或退出时弹 taskkill 报错（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/2314">#2314</a>）：#2489 已合并，提交 <code>59c2851</code>。</li>
+<li>BPB 面板的 JSON 格式 Clash 订阅（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>）：<strong>处理中</strong>，PR #2492 还没合并（#2485 和 #2491 已关闭，改由它接手）。</li>
+<li>隐藏超时或无效节点（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/90">#90</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/2439">#2439</a>，2 人）：已有 <code>hide_timeout_nodes</code> 开关。</li>
+<li>通过代理更新订阅（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/1402">#1402</a>，2 人）：直连失败时会自动改走受管内核的代理重试。</li>
+<li>窗口大小和位置记忆（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/672">#672</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/751">#751</a>）：window-state 插件，记录尺寸、位置和最大化状态。</li>
+<li>字太小，界面缩放（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/52">#52</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/90">#90</a>）：已有整体缩放 <code>--ui-scale</code>。</li>
+<li>便携版（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/50">#50</a>）：v2.5.0 发布里有 Windows 的 <code>Zephyr_x64-portable.zip</code>、arm64 版，还有 Linux 的便携包。</li>
+<li>单实例运行（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/68">#68</a>）：single-instance 插件。</li>
+<li>修改订阅链接（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/69">#69</a>）：编辑订阅时可以「输入新链接以替换」。</li>
+<li>关闭按钮点击范围（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/69">#69</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/282">#282</a>）：按你在 issue 里的回复，已经扩大。</li>
+<li>局域网订阅地址（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/51">#51</a>）：手动填写的内网地址允许使用。</li>
+<li>REALITY short-id 无效导致内核崩溃循环（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/70">#70</a>）：<code>quote_short_id_values</code> 已经处理。</li>
+<li>订阅能添加但更新不了（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/64">#64</a>），测速中途切订阅出问题（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/109">#109</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/140">#140</a>），切订阅卡住（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/554">#554</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/603">#603</a>）：都已修复并关闭。</li>
+<li>脚本覆写（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/169">#169</a>），通过 URL 导入覆写（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/553">#553</a>），覆写只生效一次（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/605">#605</a>），覆写后代理组顺序（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/606">#606</a>）：都已上线。现在代理组按覆写后的运行配置排序。</li>
+<li>Sub-Store 手动分组为空（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/929">#929</a>），以及同一帖回复里的「自定义主题色重启后复原」：都已修复。</li>
+<li>和其他客户端冲突时启动失败，报 os error 183（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/182">#182</a>、<a href="https://github.com/Juwan-Hwang/Zephyr/issues/217">#217</a>）：内核改名成 <code>zephyr-mihomo</code> 后解决。运行中掉线这一半见上面「做」。</li>
+<li>代理组太多时下拉菜单滚不动（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/437">#437</a>）：菜单现在有最大高度，可以滚动。</li>
+<li>Fedora 上 AppImage 起不来（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/1330">#1330</a>）：已经打包 WebKit 辅助进程并修正路径。</li>
+<li>按 Wi-Fi SSID 自动直连（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/1127">#1127</a>）：覆写指南里给了写法。</li>
+<li>换一种首页界面（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/673">#673</a>）：已有极简和控制台两种首页模式（布局问题见上面「做」）。</li>
+<li>长时间运行卡顿的 Canvas 部分（<a href="https://github.com/Juwan-Hwang/Zephyr/issues/1486">#1486</a>）：已改；样式部分还没改，见结论第 2 条。</li>
+</ul>
+</div></details>
+
+<h2>不含建议的 issue</h2>
+<ul class="cover">
+<li><a href="https://github.com/Juwan-Hwang/Zephyr/issues/387">#387</a>：2560×1440、125% 缩放下界面错乱，复现不出来，已关闭，里面没有改进建议。</li>
+<li><a href="https://github.com/Juwan-Hwang/Zephyr/issues/1872">#1872</a>：Renovate 依赖面板，自动生成的。</li>
+</ul>
+
+<footer>来源：Juwan-Hwang/Zephyr 全部 47 个 issue 的正文和回复（GitHub API），issue 里的截图，main 分支 <code>59c2851</code> 的代码，最新 Release 的附件列表，以及 PR #2489、#2492。</footer>
+</main>
+</body>
+</html>

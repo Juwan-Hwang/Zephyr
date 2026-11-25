@@ -1,0 +1,8 @@
+[
+{"out":"out-t/side.png","width":930,"height":680,"proto":"final","pre":"window.__F__={}"},
+{"out":"out-t/side-min.png","width":720,"height":540,"proto":"final","pre":"window.__F__={}"},
+{"out":"out-t/sp-done-min.png","width":720,"height":540,"proto":"final","pre":"window.__F__={feat:'speed-done'}","page":"proxies"},
+{"out":"out-t/sp-run-min.png","width":720,"height":540,"proto":"final","pre":"window.__F__={feat:'speed-run'}","page":"proxies"},
+{"out":"out-t/h1440.png","width":1440,"height":900,"proto":"final","pre":"window.__F__={ip:true}"},
+{"out":"out-t/h1920.png","width":1920,"height":1080,"proto":"final","pre":"window.__F__={ip:true}"}
+]

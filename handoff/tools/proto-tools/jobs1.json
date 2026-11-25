@@ -1,0 +1,3 @@
+[{"out":"out/bypass-before.png","page":"settings","post":"document.querySelector('#port-config-btn').scrollIntoView({block:'center'})","layout":true},
+ {"out":"out/bypass-after.png","page":"settings","proto":"bypass","layout":true},
+ {"out":"out/bypass-after2.png","page":"settings","proto":"bypass-dialog","layout":true}]
