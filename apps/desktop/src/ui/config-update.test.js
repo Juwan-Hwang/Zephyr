@@ -13,6 +13,8 @@ describe('configUpdateOutcome', () => {
         expect(configUpdateOutcome({
             files_saved: true, profile_saved: true, hot_reload_success: false, message: 'Configuration saved.',
         })).toBe('restart');
+        expect(configUpdateOutcome({ files_saved: true, profile_saved: true,
+            hot_reload_success: false, reload_unconfirmed: true })).toBe('unconfirmed');
     });
 
     it('reports a profile that did not take the patch as partial after a hot reload, failed without one', () => {
@@ -26,7 +28,7 @@ describe('configUpdateOutcome', () => {
         expect(configUpdateOutcome({ ...result, hot_reload_success: false })).toBe('failed');
         // A reload the core took without confirming it may still apply: not
         // reported as a definite failure, the change stays to save again.
-        expect(configUpdateOutcome({ ...result, hot_reload_success: false, reload_unconfirmed: true })).toBe('partial');
+        expect(configUpdateOutcome({ ...result, hot_reload_success: false, reload_unconfirmed: true })).toBe('unconfirmed');
     });
 
     it('keeps reading results without the profile fields', () => {

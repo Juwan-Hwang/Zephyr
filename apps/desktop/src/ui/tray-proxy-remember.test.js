@@ -9,6 +9,7 @@ import {
 } from './tray-mocks.js';
 
 const { initTrayEventListeners } = await import('./tray.js');
+const { Bus, Events } = await import('./events.js');
 await initTrayEventListeners();
 
 describe('a node picked in the tray', () => {
@@ -26,8 +27,15 @@ describe('a node picked in the tray', () => {
 
     it('is remembered for the running profile, so a later restart restores it', async () => {
         api.invoke.mockImplementation(async (cmd) => (cmd === 'get_settings' ? { last_config: 'sub.yaml' } : null));
-        await handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Tokyo' } });
-        expect(memory.saveProxySelection).toHaveBeenCalledWith('sub.yaml', { node: 'Tokyo', group: 'Proxy' });
+        const selected = vi.fn();
+        const off = Bus.on(Events.PROXY_SELECTED, selected);
+        try {
+            await handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Tokyo' } });
+            expect(memory.saveProxySelection).toHaveBeenCalledWith('sub.yaml', { node: 'Tokyo', group: 'Proxy' });
+            expect(selected).toHaveBeenCalledWith({ node: 'Tokyo', group: 'Proxy' });
+        } finally {
+            off();
+        }
     });
 
     it('is remembered for the profile running when it was picked, even if a profile switch lands meanwhile', async () => {

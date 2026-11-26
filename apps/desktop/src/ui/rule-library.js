@@ -19,11 +19,12 @@ import * as prism from './prism.js';
 import { escapeHtml, escapeAttr } from '../utils/sanitize.js';
 import { getPolicyColor } from '../utils/rule-utils.js';
 import { rulesLogger } from '../utils/logger.js';
-import { showContextMenu } from '../utils/context-menu.js';
+import { showContextMenu, markContextMenuAnchor } from '../utils/context-menu.js';
 import { SVG_ICONS } from './icons.js';
 import { createVirtualScroll } from '../utils/virtual-scroll.js';
 import { createEditor, getEditorContent } from './editor/prism-editor.js';
-import { parseRulesFromYaml, rebuildYamlWithRules, wrapRulesAsPrismYaml } from './rule-library/yaml-utils.js';
+import { parseRulesFromYaml, rebuildYamlWithRules, wrapRulesAsPrismYaml, mixedRuleOperators, hasStructuredRules, countRulesInYaml, isYamlCollection } from './rule-library/yaml-utils.js';
+import { queueRuleWrite } from './rule-library/write-queue.js';
 import { pasteWithFeedback, renderPasteButtonHtml } from '../utils/clipboard.js';
 import { initCustomDropdown } from './dropdown.js';
 import { fetchProxyGroups } from './proxy-groups.js';
@@ -41,17 +42,18 @@ const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
 /** @type {'rule-sets'|'active-rules'} */
 let activeTab = 'rule-sets';
 
-/** @type {any|null} CodeMirror EditorView for the rule text editor (null when not active). */
-let ruleEditorView = null;
-
-/** @type {{filename: string, rule_count: number, source: string, enabled?: boolean}[]} */
+/** @type {{filename: string, rule_count: number, source: string, enabled?: boolean, read_only?: boolean, read_only_reason?: string}[]} */
 let ruleFiles = [];
+let ownershipWarning = '';
 
 /** @type {{name: string, files: string[]}[]} */
 let groups = [];
 
 /** @type {any[]} 实际为 RuleGroup[]（prism.listRules() 返回值），每个对象包含 group_id, label, enabled, immutable, rules: [{raw, index}] */
 let activeRules = [];
+let refreshGeneration = 0;
+let publishedGeneration = 0;
+let statusRequest = 0;
 
 /** @type {import('../utils/virtual-scroll.js').VirtualScrollHandle | null} */
 let activeRulesVs = null;
@@ -117,6 +119,7 @@ export async function initRuleLibraryPage() {
  * @param {{loadActiveRules?: boolean}} [options]
  */
 async function refreshData(options) {
+    const generation = ++refreshGeneration;
     const { loadActiveRules = activeTab === 'active-rules' } = options || {};
     try {
         const promises = [
@@ -134,18 +137,26 @@ async function refreshData(options) {
             );
         }
         const results = await Promise.all(promises);
+        if (generation < publishedGeneration) return;
+        publishedGeneration = generation;
         ruleFiles = /** @type {typeof ruleFiles} */ (results[0] || []);
+        const warning = [...new Set(ruleFiles.map((file) => file.read_only_reason).filter((reason) => typeof reason === 'string' && reason.length > 0))].join('\n');
+        if (warning && warning !== ownershipWarning) showNotification(warning, 'warning');
+        ownershipWarning = warning;
         groups = /** @type {typeof groups} */ ((results[1]?.groups) || []);
         if (loadActiveRules) {
             activeRules = /** @type {typeof activeRules} */ (results[2] || []);
         }
     } catch (err) {
+        if (generation !== refreshGeneration) return;
         showNotification(String(err), 'error');
     }
-    void updateStatusBar();
+    void updateStatusBar(publishedGeneration);
 }
 
-async function updateStatusBar() {
+/** @param {number} generation */
+async function updateStatusBar(generation) {
+    const request = ++statusRequest;
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     const statusEl = document.getElementById('rl-status');
     const statsEl = document.getElementById('rl-stats');
@@ -155,6 +166,7 @@ async function updateStatusBar() {
             prism.status().catch(() => null),
             prism.stats().catch(() => null),
         ]);
+        if (request !== statusRequest || generation !== publishedGeneration) return;
 
         if (statusEl) {
             const state = engineStatus?.state || engineStatus?.status || 'idle';
@@ -179,6 +191,7 @@ async function updateStatusBar() {
         }
     } catch {
         // Fallback to local computation
+        if (request !== statusRequest || generation !== publishedGeneration) return;
         if (statusEl) {
             const dot = '<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 me-1.5"></span>';
             // eslint-disable-next-line no-unsanitized/property -- values escaped via escapeHtml()
@@ -454,7 +467,9 @@ const ICON_MORE = '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" 
  */
 function openMenuFromButton(btn, open) {
     const r = btn.getBoundingClientRect();
-    open(new MouseEvent('contextmenu', { clientX: r.left, clientY: r.bottom + 4, bubbles: false, cancelable: true }));
+    const event = new MouseEvent('contextmenu', { clientX: r.left, clientY: r.bottom + 4, bubbles: false, cancelable: true });
+    markContextMenuAnchor(event, btn);
+    open(event);
 }
 
 /**
@@ -467,6 +482,7 @@ function openMenuFromButton(btn, open) {
 function buildFileCard(file, _fileMap) {
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang] || {});
     const enabled = file.enabled !== false;
+    const editable = !file.read_only;
     const displayName = file.filename.replace(/\.prism\.ya?ml$/i, '');
     const card = document.createElement('div');
     card.className = `glass-card rl-file-card group ${enabled ? '' : 'is-disabled'}`;
@@ -487,11 +503,11 @@ function buildFileCard(file, _fileMap) {
         </div>
         <div class="rl-file-actions">
             <label class="ios-switch" for="${switchId}" title="${escapeAttr(enabled ? (t.ruleLibraryOn || 'On') : (t.ruleLibraryOff || 'Off'))}">
-                <input type="checkbox" id="${switchId}" class="rl-file-toggle" ${enabled ? 'checked' : ''} aria-label="${escapeAttr((t.ruleLibraryEnableFile || 'Enable “@@name@@”').replace('@@name@@', displayName))}">
+                <input type="checkbox" id="${switchId}" class="rl-file-toggle" ${enabled ? 'checked' : ''} ${editable ? '' : 'disabled'} aria-label="${escapeAttr((t.ruleLibraryEnableFile || 'Enable “@@name@@”').replace('@@name@@', displayName))}">
                 <span class="switch-slider"></span>
             </label>
             <span class="rl-file-sep" aria-hidden="true"></span>
-            <button type="button" class="rl-icon-btn is-round rl-file-edit" ${enabled ? '' : 'disabled'} title="${escapeAttr(t.ruleLibraryEditRule || 'Edit')}" aria-label="${escapeAttr(`${t.ruleLibraryEditRule || 'Edit'} ${displayName}`)}">${ICON_PENCIL}</button>
+            <button type="button" class="rl-icon-btn is-round rl-file-edit" ${enabled && editable ? '' : 'disabled'} title="${escapeAttr(t.ruleLibraryEditRule || 'Edit')}" aria-label="${escapeAttr(`${t.ruleLibraryEditRule || 'Edit'} ${displayName}`)}">${ICON_PENCIL}</button>
             <button type="button" class="rl-icon-btn is-round rl-file-more" title="${escapeAttr(t.moreActions || 'More')}" aria-label="${escapeAttr(`${t.moreActions || 'More'} · ${displayName}`)}" aria-haspopup="menu">${ICON_MORE}</button>
         </div>
     `;
@@ -502,7 +518,7 @@ function buildFileCard(file, _fileMap) {
 
     card.querySelector('.rl-file-edit')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (enabled) void handleEditRule(file.filename);
+        if (enabled && editable) void handleEditRule(file.filename);
     });
     const moreBtn = /** @type {HTMLElement|null} */ (card.querySelector('.rl-file-more'));
     moreBtn?.addEventListener('click', (e) => {
@@ -520,10 +536,30 @@ function buildFileCard(file, _fileMap) {
     // Double-click on the card body still opens the editor
     card.querySelector('.rl-file-main')?.addEventListener('dblclick', (e) => {
         e.stopPropagation();
-        if (enabled) void handleEditRule(file.filename);
+        if (enabled && editable) void handleEditRule(file.filename);
     });
 
     return card;
+}
+
+/**
+ * Whether a rebuild's result says the change is saved but not running.
+ * @param {any} result
+ */
+function notRunning(result) {
+    return (result?.status?.hot_reload_success ?? result?.hot_reload_success) === false;
+}
+
+/** @param {Record<string, string>} t @param {any} result */
+function showSavedReloadFailure(t, result) {
+    if (result?.core_reload_confirmed === true && result?.runtime_restore_success === false) {
+        showNotification(t.rulesLoadedDnsRestoreFailed || 'Rules are running, but DNS restoration failed. Check DNS settings and retry.', 'warning');
+        return;
+    }
+    const error = result?.hot_reload_error ?? result?.status?.hot_reload_error;
+    showNotification(error
+        ? `${t.ruleLibrarySavedApplyFailed || 'Saved, but applying failed'}: ${String(error)}`
+        : (t.requireRestart || 'Changes saved. Restart the core to take effect.'), 'warning');
 }
 
 /**
@@ -539,14 +575,13 @@ async function handleToggleFile(file, enabled, input) {
         const changed = await prism.toggleGroup(file.filename, enabled);
         if (changed === false) throw new Error(`${file.filename}: ${t.ruleLibraryToggleFailed || 'could not change state'}`);
         // Rebuild from the profile so a disabled file's rules are actually removed.
-        try { await prism.rebuild(); } catch (e) {
-            rulesLogger.warn('[prism] rebuild failed, falling back to apply:', e);
-            // Apply only adds patches: a disabled file's rules stay until a rebuild works, so say so.
-            if (!enabled) showNotification(String(e), 'error');
-            try { await prism.apply(); } catch (error_) {
-                rulesLogger.warn('[prism] apply failed:', error_);
-                if (enabled) showNotification(String(error_), 'error');
-            }
+        try {
+            // Saved and rebuilt, but not running (an override failed, the core refused the reload).
+            const rebuilt = await prism.rebuildWithOverrides();
+            if (notRunning(rebuilt)) showSavedReloadFailure(t, rebuilt);
+        } catch (e) {
+            rulesLogger.warn('[prism] rebuild failed after rule toggle:', e);
+            showNotification(`${t.requireRestart || 'Changes saved. Restart the core to take effect.'}\n${String(e)}`, 'warning');
         }
         await refreshData({ loadActiveRules: true });
         render();
@@ -1017,6 +1052,10 @@ function showFileContextMenu(e, file) {
 
     /** @type {{label: string, action: () => void}[]} */
     const items = [];
+    if (file.read_only) {
+        showContextMenu(e, [{ label: t.ruleLibraryViewChanges || 'View Impact on Config', action: () => handleViewChanges(file.filename) }]);
+        return;
+    }
     if (enabled) {
         items.push(
             { label: t.ruleLibraryEditRule || 'Edit Rule', action: () => handleEditRule(file.filename) },
@@ -1177,10 +1216,11 @@ async function handleCreateRuleFile() {
     );
     if (!name || !name.trim()) return;
 
-    const filename = name.trim().endsWith('.prism.yaml') ? name.trim() : `${name.trim()}.prism.yaml`;
+    const normalizedName = name.trim().replace(/\.prism\.ya?ml$/i, '.prism.yaml');
+    const filename = normalizedName.endsWith('.prism.yaml') ? normalizedName : `${normalizedName}.prism.yaml`;
 
     try {
-        await invoke(COMMANDS.RULE_CREATE, { name: filename, content: 'rules:\n  $append:\n' });
+        await invoke(COMMANDS.RULE_CREATE, { name: filename, content: 'rules:\n  $append: []\n' });
         showNotification(`${t.ruleLibraryCreateFile}: ${filename}`, 'success');
         try { await prism.apply(); } catch (e) { rulesLogger.warn("[prism] apply failed:", e); }
         await refreshData({ loadActiveRules: true });
@@ -1241,12 +1281,17 @@ async function handleDeleteRule(filename, enabled = true) {
             if (!enabled) await prism.toggleGroup(filename, false).catch(() => {});
             throw delErr;
         }
-        showNotification(`${t.ruleLibraryDeleteRule}: ${filename}`, 'success');
         // Rebuild so the deleted file's rules leave the running config (apply only adds).
-        try { await prism.rebuild(); } catch (e) {
-            rulesLogger.warn('[prism] rebuild failed, falling back to apply:', e);
-            showNotification(String(e), 'error');
-            try { await prism.apply(); } catch (error_) { rulesLogger.warn('[prism] apply failed:', error_); }
+        try {
+            const rebuilt = await prism.rebuildWithOverrides();
+            if (notRunning(rebuilt)) showSavedReloadFailure(t, rebuilt);
+            else showNotification(`${t.ruleLibraryDeleteRule}: ${filename}`, 'success');
+        } catch (e) {
+            rulesLogger.warn('[prism] rebuild failed after deletion:', e);
+            // The deletion succeeded. Applying on the old runtime config
+            // cannot remove its rules, so retain the rebuild error for repair.
+            const saved = t.requireRestart || 'Changes saved. Restart the core to take effect.';
+            showNotification(`${saved}\n${String(e)}`, 'warning');
         }
         await refreshData({ loadActiveRules: true });
         render();
@@ -1386,6 +1431,11 @@ function bindRuleForm(prefix, draft, onCommit, onCancel) {
  */
 async function handleEditRule(filename) {
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
+    if (ruleFiles.find((file) => file.filename === filename)?.read_only) return;
+    if (typeof jsyaml === 'undefined') {
+        showNotification(t.notifRulesParseFailed || 'The YAML parser is unavailable.', 'error');
+        return;
+    }
 
     let content = '';
     try {
@@ -1397,7 +1447,19 @@ async function handleEditRule(filename) {
 
     // Parse rules from YAML content for visual editor
     let rules = parseRulesFromYaml(content);
+    const persistedContent = content;
+    let operators = mixedRuleOperators(content);
+    const textOnly = hasStructuredRules(content);
+    // Flattened text cannot distinguish equal rows on opposite sides of the
+    // profile rules. Mixed-list files therefore keep their YAML boundaries.
+    const fullYamlText = operators !== null || textOnly;
     const originalText = rules.join('\n');
+    const originalOperators = operators?.slice() ?? null;
+    let sourceRows = rules.slice();
+    let sourceOperators = operators?.slice() ?? null;
+    /** @param {unknown[] | null} a @param {unknown[] | null} b */
+    const sameRows = (a, b) => a === b || !!a && !!b && a.length === b.length && a.every((row, index) => row === b[index]);
+    const visualChanged = () => !sameRows(rules, sourceRows) || !sameRows(operators, sourceOperators);
     const policies = await loadPolicyNames(() => fetchProxyGroups());
 
     /** @type {'visual'|'text'} */
@@ -1408,10 +1470,16 @@ async function handleEditRule(filename) {
     let disposeNewForm = null;
     /** @type {(() => void)|null} */
     let disposeEditForm = null;
+    let reopenAfterConflict = false;
+    /** @type {any|null} This modal's CodeMirror view, never shared with a later editor. */
+    let ruleEditorView = null;
+    let modalOpen = false;
+    let saving = false;
 
     // The inline rule form needs more room than the standard 560px dialog.
     const modalContainer = document.getElementById('modal-container');
     await showModal(filename, '', '', true, buildEditorHtml(t), (contentArea, closeEditor) => {
+        modalOpen = true;
         if (modalContainer) modalContainer.style.width = 'min(720px, 92vw)';
         const visualWrap = /** @type {HTMLElement} */ (contentArea.querySelector('#rl-editor-visual-wrap'));
         const visualContainer = /** @type {HTMLElement} */ (contentArea.querySelector('#rl-editor-visual'));
@@ -1427,6 +1495,12 @@ async function handleEditRule(filename) {
         if (!visualWrap || !visualContainer || !textContainer || !textarea || !cm6Container) return;
 
         textarea.value = content;
+        let textSource = content;
+        let textInitial = textarea.value;
+        const readText = () => {
+            const text = ruleEditorView ? getEditorContent(ruleEditorView) : textarea.value;
+            return text === textInitial ? textSource : text;
+        };
 
         /** Index of the row being edited in place, or null. */
         /** @type {number|null} */
@@ -1440,12 +1514,18 @@ async function handleEditRule(filename) {
         const currentRules = () => {
             if (editorMode === 'text') {
                 const text = ruleEditorView ? getEditorContent(ruleEditorView) : textarea.value;
+                if (fullYamlText) return parseRulesFromYaml(text);
                 return text.split('\n').map((l) => l.trim()).filter(Boolean);
             }
             return rules;
         };
         const updateDirty = () => {
-            const dirty = currentRules().join('\n') !== originalText;
+            let dirty;
+            if (editorMode === 'text') {
+                dirty = readText() !== (fullYamlText ? persistedContent : originalText);
+            } else {
+                dirty = content !== persistedContent || rules.join('\n') !== originalText || !sameRows(operators, originalOperators);
+            }
             dirtyEl?.classList.toggle('hidden', !dirty);
         };
         const updateEmpty = () => {
@@ -1528,7 +1608,16 @@ async function handleEditRule(filename) {
                 else editingIndex = at;
             }
             op(rules);
+            if (operators) op(operators);
             refreshList();
+        }
+
+        /** @param {number} from @param {number} to @param {number} [destination] */
+        function moveRule(from, to, destination = to) {
+            // The moved row takes the destination row's side of the profile
+            // rules. Swapping labels cannot distinguish an up move from down.
+            if (operators) operators[from] = operators[destination];
+            mutateRules((a) => { const [moved] = a.splice(from, 1); a.splice(to, 0, moved); });
         }
 
         /**
@@ -1638,12 +1727,12 @@ async function handleEditRule(filename) {
             item.querySelector('.btn-rl-rule-up')?.addEventListener('click', (ev) => {
                 ev.stopPropagation();
                 if (index === 0) return;
-                mutateRules((a) => { [a[index - 1], a[index]] = [a[index], a[index - 1]]; });
+                moveRule(index, index - 1);
             });
             item.querySelector('.btn-rl-rule-down')?.addEventListener('click', (ev) => {
                 ev.stopPropagation();
                 if (index >= rules.length - 1) return;
-                mutateRules((a) => { [a[index + 1], a[index]] = [a[index], a[index + 1]]; });
+                moveRule(index, index + 1);
             });
             item.querySelector('.btn-rl-rule-del')?.addEventListener('click', (ev) => {
                 ev.stopPropagation();
@@ -1684,7 +1773,8 @@ async function handleEditRule(filename) {
                 if (targetIndex > from) targetIndex--;
                 const to = targetIndex;
                 dragSourceIndex = null;
-                mutateRules((a) => { const [moved] = a.splice(from, 1); a.splice(to, 0, moved); });
+                if (to === from) return;
+                moveRule(from, to, index);
             });
 
             return item;
@@ -1714,6 +1804,7 @@ async function handleEditRule(filename) {
             updateEmpty();
             disposeNewForm = bindRuleForm('rl-new', draft, (line) => {
                 rules.unshift(line);
+                operators?.unshift('$prepend');
                 closeNewForm();
                 visualContainer.scrollTop = 0;
                 refreshList();
@@ -1735,9 +1826,30 @@ async function handleEditRule(filename) {
         // ── Visual / text ──
         /** @param {'visual'|'text'} mode */
         const setMode = (mode) => {
+            if (saving) return;
             if (mode === editorMode) return;
+            if (mode === 'visual' && textOnly) return;
             // Keep what is typed in an open row: commit it, or stay if it is invalid.
             if (mode === 'text' && !commitOpenForms()) return;
+            if (mode === 'visual' && fullYamlText) {
+                const text = readText();
+                try {
+                    const doc = jsyaml.load(text);
+                    if (!isYamlCollection(doc) || Array.isArray(doc) || !isYamlCollection(doc.rules)) throw new Error(t.notifRulesParseFailed);
+                    if (hasStructuredRules(text)) {
+                        showNotification(t.notifRulesParseFailed || 'These rules require the YAML editor.', 'warning');
+                        return;
+                    }
+                    content = text;
+                    rules = parseRulesFromYaml(text);
+                    operators = mixedRuleOperators(text);
+                    sourceRows = rules.slice();
+                    sourceOperators = operators?.slice() ?? null;
+                } catch (error) {
+                    showNotification(String(error), 'error');
+                    return;
+                }
+            }
             contentArea.querySelectorAll('.rl-editor-mode').forEach((b) => {
                 const on = /** @type {HTMLElement} */ (b).dataset.rlMode === mode;
                 b.classList.toggle('active', on);
@@ -1745,8 +1857,11 @@ async function handleEditRule(filename) {
             });
             if (mode === 'text') {
                 closeNewForm();
-                const textContent = rules.join('\n');
+                let textContent = rules.join('\n');
+                if (fullYamlText) textContent = visualChanged() ? rebuildYamlWithRules(content, rules, operators, true) : content;
                 textarea.value = textContent;
+                textSource = textContent;
+                textInitial = textarea.value;
                 editorMode = 'text';
                 visualWrap.classList.add('hidden');
                 textContainer.classList.remove('hidden');
@@ -1760,8 +1875,9 @@ async function handleEditRule(filename) {
                     prismDsl: true,
                     onChange: () => updateDirty(),
                 });
+                textInitial = getEditorContent(ruleEditorView);
             } else {
-                rules = currentRules();
+                if (!fullYamlText) rules = currentRules();
                 editorMode = 'visual';
                 textContainer.classList.add('hidden');
                 visualWrap.classList.remove('hidden');
@@ -1777,6 +1893,11 @@ async function handleEditRule(filename) {
                 setMode(/** @type {'visual'|'text'} */ (/** @type {HTMLElement} */ (b).dataset.rlMode));
             });
         });
+        if (textOnly) {
+            const visualTab = /** @type {HTMLButtonElement | null} */ (contentArea.querySelector('[data-rl-mode="visual"]'));
+            if (visualTab) visualTab.disabled = true;
+            setMode('text');
+        }
 
         contentArea.querySelector('#rl-editor-cancel')?.addEventListener('click', () => closeEditor(null));
 
@@ -1787,34 +1908,88 @@ async function handleEditRule(filename) {
             // An open row's edits are part of the save (or it stays open when invalid).
             if (editorMode !== 'text' && !commitOpenForms()) return;
             saveBtn.disabled = true;
-            const rawContent = editorMode === 'text'
-                ? (ruleEditorView ? getEditorContent(ruleEditorView) : textarea.value)
+            let rawContent = editorMode === 'text'
+                ? readText()
                 : null;
+            if (rawContent === null && fullYamlText && !visualChanged()) rawContent = content;
+            const savingRules = rules.slice();
+            const savingContent = content;
+            const savingOperators = operators?.slice() ?? null;
+            const modeTabs = [...contentArea.querySelectorAll('.rl-editor-mode')].map((element) => {
+                const button = /** @type {HTMLButtonElement} */ (element);
+                const wasDisabled = button.disabled;
+                button.disabled = true;
+                return { button, wasDisabled };
+            });
             // The content is captured above: lock both editors until the write settles,
             // so nothing typed meanwhile is silently left out of the file.
             visualWrap.inert = true;
             if (textContainer instanceof HTMLElement) textContainer.inert = true;
             // A failed write keeps the editor open with the edits, so it can be retried.
-            if (!(await handleSaveRules(t, filename, rawContent, rules, content))) {
+            saving = true;
+            const cancelBtn = /** @type {HTMLButtonElement | null} */ (contentArea.querySelector('#rl-editor-cancel'));
+            if (cancelBtn) cancelBtn.disabled = true;
+            const saved = await queueRuleWrite(() => handleSaveRules(t, filename, rawContent, savingRules, savingContent, savingOperators, fullYamlText, persistedContent))
+                .finally(() => { saving = false; if (cancelBtn) cancelBtn.disabled = false; });
+            if (saved === true) {
+                await refreshData({ loadActiveRules: true });
+                render();
+            }
+            if (!modalOpen) return;
+            if (saved && typeof saved === 'object') {
+                const recovery = document.createElement('div');
+                recovery.className = 'space-y-2 pt-3';
+                const draft = document.createElement('textarea');
+                draft.className = 'form-control w-full font-mono text-xs';
+                draft.readOnly = true;
+                draft.dataset.conflictDraft = 'true';
+                draft.rows = 6;
+                draft.value = saved.conflict;
+                const copy = document.createElement('button');
+                copy.type = 'button';
+                copy.className = 'btn-ghost';
+                copy.textContent = t.copy || 'Copy';
+                copy.addEventListener('click', async () => {
+                    try {
+                        const { copyToClipboard } = await import('./tray.js');
+                        await copyToClipboard(draft.value);
+                    }
+                    catch { draft.focus(); draft.select(); showNotification(t.copyFailed || 'Copy failed', 'error'); }
+                });
+                const reopen = document.createElement('button');
+                reopen.type = 'button';
+                reopen.className = 'btn-ghost';
+                reopen.textContent = t.refresh || 'Refresh';
+                reopen.dataset.conflictReopen = 'true';
+                reopen.addEventListener('click', () => { reopenAfterConflict = true; closeEditor(null); });
+                recovery.append(draft, copy, reopen);
+                contentArea.appendChild(recovery);
+                draft.focus();
+                return;
+            }
+            if (!saved) {
+                modeTabs.forEach(({ button, wasDisabled }) => { button.disabled = wasDisabled; });
                 visualWrap.inert = false;
                 if (textContainer instanceof HTMLElement) textContainer.inert = false;
                 saveBtn.disabled = false;
                 return;
             }
             if (ruleEditorView) { ruleEditorView.destroy(); ruleEditorView = null; }
-            await refreshData({ loadActiveRules: true });
-            render();
             closeEditor(null);
         });
-    });
+    }, () => !saving);
 
     // Modal closed (saved, cancelled, Esc or backdrop): release editor resources.
+    modalOpen = false;
     if (modalContainer) modalContainer.style.width = '';
     // (casts: TS narrows these to `null` because they are only assigned inside the callback)
     /** @type {(() => void)|null} */ (disposeNewForm)?.();
     /** @type {(() => void)|null} */ (disposeEditForm)?.();
     /** @type {import('../utils/virtual-scroll.js').VirtualScrollHandle|null} */ (ruleVs)?.destroy();
     if (ruleEditorView) { ruleEditorView.destroy(); ruleEditorView = null; }
+    // Wait for the old modal to release its slot before opening the version
+    // that won; its contents cannot be overwritten by retrying the stale draft.
+    if (reopenAfterConflict) void handleEditRule(filename);
 }
 
 /**
@@ -1824,13 +1999,8 @@ async function handleEditRule(filename) {
 async function handleViewChanges(filename) {
     const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
     try {
-        // Use cached trace from last apply() — no recompilation needed.
-        // Fallback to apply() on first use (cache is empty).
-        let traces = (await prism.getLastTrace().catch(() => [])) || [];
-        if (traces.length === 0) {
-            const applyResult = await prism.apply();
-            traces = applyResult?.trace || [];
-        }
+        // Viewing impact must never apply configuration just to obtain a trace.
+        const traces = (await prism.getLastTrace().catch(() => [])) || [];
         const match = traces.find(
             (/** @type {any} */ tr) => tr.source_file === filename || tr.source_file === `${filename}.prism.yaml`,
         );
@@ -1895,6 +2065,24 @@ async function handleViewChanges(filename) {
     }
 }
 
+/** Prepare editor content without changing the file or runtime.
+ * @param {Record<string,string>} t @param {string} filename @param {string|null} rawContent
+ * @param {string[]} rules @param {string} originalContent
+ * @param {import('./rule-library/yaml-utils.js').RuleOp[] | null} operators @param {boolean} fullYamlText
+ */
+function prepareRuleContent(t, filename, rawContent, rules, originalContent, operators, fullYamlText) {
+    if (typeof jsyaml === 'undefined') throw new Error(t.notifRulesParseFailed || 'The YAML parser is unavailable.');
+    if (rawContent === null) return rebuildYamlWithRules(originalContent, rules, operators, fullYamlText);
+    if (fullYamlText) {
+        const doc = jsyaml.load(rawContent);
+        if (!isYamlCollection(doc)
+            || (doc.rules !== undefined && !isYamlCollection(doc.rules))) throw new Error(t.notifRulesParseFailed);
+        return rawContent;
+    }
+    return filename.endsWith('.prism.yaml') || filename.endsWith('.prism.yml')
+        ? wrapRulesAsPrismYaml(rawContent, originalContent) : rawContent;
+}
+
 /**
  * Handle saving rules from the editor.
  * @param {Record<string,string>} t
@@ -1902,33 +2090,27 @@ async function handleViewChanges(filename) {
  * @param {string|null} rawContent - If text mode, the raw textarea value; if visual mode, null
  * @param {string[]} rules - Current rules array (from visual editor)
  * @param {string} originalContent - Original file content (for preserving metadata)
- * @returns {Promise<boolean>} false when the file could not be written
+ * @param {import('./rule-library/yaml-utils.js').RuleOp[] | null} [operators]
+ * @param {boolean} [fullYamlText]
+ * @param {string} [expectedContent] file version read before editing
+ * @returns {Promise<boolean | {conflict: string}>} false for a write failure, attempted YAML for a conflict
  */
-async function handleSaveRules(t, filename, rawContent, rules, originalContent) {
+async function handleSaveRules(t, filename, rawContent, rules, originalContent, operators = null, fullYamlText = false, expectedContent = originalContent) {
+    let finalContent = '';
     try {
+        finalContent = prepareRuleContent(t, filename, rawContent, rules, originalContent, operators, fullYamlText);
 
-        let finalContent;
-        if (rawContent !== null) {
-            // Text mode: use raw content as-is
-            // But for .prism.yaml files, ensure the content is valid YAML
-            if (filename.endsWith('.prism.yaml') || filename.endsWith('.prism.yml')) {
-                finalContent = wrapRulesAsPrismYaml(rawContent, originalContent);
-            } else {
-                finalContent = rawContent;
-            }
-        } else {
-            // Visual mode: rebuild YAML with rules, preserving __when__ and other metadata
-            finalContent = rebuildYamlWithRules(originalContent, rules);
-        }
-
-        await invoke(COMMANDS.RULE_UPDATE, { filename, content: finalContent });
-        // Count actual rule lines (TYPE,value[,policy]), not every YAML line.
-        const ruleCount = finalContent.split('\n')
-            .map((l) => l.trim().replace(/^-\s*/, ''))
-            .filter((l) => /^[A-Z][A-Z0-9-]*,/.test(l)).length;
+        await invoke(COMMANDS.RULE_UPDATE, { filename, content: finalContent, expectedContent });
+        const ruleCount = countRulesInYaml(finalContent);
 
         try {
-            await prism.apply();
+            // Rebuilt, not applied over the running config: that still holds
+            // the old line, so an edited match would keep matching as before.
+            const rebuilt = await prism.rebuildWithOverrides();
+            if (notRunning(rebuilt)) {
+                showSavedReloadFailure(t, rebuilt);
+                return true;
+            }
             showNotification(
                 (t.ruleLibrarySavedApplied || 'Saved and applied · @@count@@ rules').replace('@@count@@', String(ruleCount)),
                 'success',
@@ -1942,6 +2124,7 @@ async function handleSaveRules(t, filename, rawContent, rules, originalContent) 
         return true;
     } catch (err) {
         showNotification(String(err), 'error');
+        if (String(err).includes('RULE_FILE_CHANGED:')) return { conflict: finalContent };
         return false;
     }
 }

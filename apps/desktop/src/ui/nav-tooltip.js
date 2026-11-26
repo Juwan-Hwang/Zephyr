@@ -99,6 +99,15 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
         clearShowTimer();
         const label = getNavLabel(btn);
         if (!label) return;
+        // An expanded sidebar already shows each label beside its icon; only
+        // a label cut off by the sidebar width still gets the tooltip.
+        if (document.documentElement.classList.contains('sidebar-expanded')) {
+            const text = btn.querySelector('.nav-label');
+            if (!(text instanceof HTMLElement) || text.scrollWidth <= text.clientWidth) {
+                hide();
+                return;
+            }
+        }
         tip.textContent = label;
         position(btn);
         current = btn;
@@ -132,6 +141,8 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
      * @type {HTMLElement | null}
      */
     let suppressed = null;
+    /** @type {HTMLElement | null} */
+    let keyboardDismissed = null;
 
     /** Whether the last focus-moving input was a pointer press. */
     let pointerFocus = false;
@@ -182,7 +193,7 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
         hovered = null;
         // Hand the label back to the keyboard-focused button, if there is one.
         const focused = focusedNavBtn();
-        if (focused) {
+        if (focused && focused !== keyboardDismissed) {
             if (focused !== current) show(focused);
             return;
         }
@@ -193,11 +204,13 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
     const onFocusIn = (e) => {
         const btn = navBtnFrom(e.target);
         if (!btn) return;
+        if (keyboardDismissed !== btn) keyboardDismissed = null;
         if (isFocusVisible(btn)) show(btn);
     };
 
     /** @param {FocusEvent} e */
     const onFocusOut = (e) => {
+        if (navBtnFrom(e.relatedTarget) !== keyboardDismissed) keyboardDismissed = null;
         if (navBtnFrom(e.relatedTarget)) return;
         // Focus left the sidebar, but the pointer may still rest on a button.
         if (hovered && hovered.isConnected && hovered !== suppressed) {
@@ -213,6 +226,7 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
      */
     const dismiss = () => {
         suppressed = hovered;
+        keyboardDismissed = focusedNavBtn();
         hide();
     };
 
@@ -237,6 +251,7 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
         pointerFocus = false;
         // Also cancels a hover that is still waiting out its delay.
         if (e.key === 'Escape' && (tip.classList.contains('is-visible') || pending)) {
+            keyboardDismissed = focusedNavBtn();
             suppressed = hovered || pending;
             hide();
         }
@@ -251,6 +266,16 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
         if (current && current.isConnected) show(current);
     };
 
+    const onSidebarChange = () => {
+        hide();
+        const focused = focusedNavBtn();
+        const btn = (focused !== keyboardDismissed ? focused : null) || (hovered !== suppressed ? hovered : null);
+        if (btn?.isConnected) show(btn);
+    };
+    const onSidebarTransitionEnd = (/** @type {TransitionEvent} */ event) => {
+        if (event.target === nav && event.propertyName === 'width') onSidebarChange();
+    };
+
     nav.addEventListener('pointerover', onPointerOver);
     nav.addEventListener('pointerout', onPointerOut);
     nav.addEventListener('focusin', onFocusIn);
@@ -258,6 +283,9 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
     nav.addEventListener('pointerdown', onPointerDown);
     nav.addEventListener('click', onClick);
     document.addEventListener('keydown', onKeyDown);
+    // Expanding or collapsing the sidebar changes which labels need a tooltip.
+    document.addEventListener('zephyr:sidebar-change', onSidebarChange);
+    nav.addEventListener('transitionend', onSidebarTransitionEnd);
     window.addEventListener('resize', onViewportChange);
     window.addEventListener('blur', onViewportChange);
     nav.addEventListener('scroll', onViewportChange, { capture: true, passive: true });
@@ -272,6 +300,8 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
         nav.removeEventListener('pointerdown', onPointerDown);
         nav.removeEventListener('click', onClick);
         document.removeEventListener('keydown', onKeyDown);
+        document.removeEventListener('zephyr:sidebar-change', onSidebarChange);
+        nav.removeEventListener('transitionend', onSidebarTransitionEnd);
         window.removeEventListener('resize', onViewportChange);
         window.removeEventListener('blur', onViewportChange);
         nav.removeEventListener('scroll', onViewportChange, { capture: true });

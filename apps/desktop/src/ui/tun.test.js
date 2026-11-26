@@ -10,6 +10,7 @@ vi.mock('../api.js', () => ({
     invoke: vi.fn(),
     restartCore: vi.fn().mockResolvedValue({}),
     whileCoreReplaced: vi.fn((/** @type {() => Promise<any>} */ replace) => replace()),
+    coreReplacements: vi.fn(() => 0),
     setSecret: vi.fn(),
     getConfig: vi.fn(),
     getCurrentWindow: vi.fn(() => ({
@@ -30,7 +31,8 @@ vi.mock('./lifecycle.js', () => ({
 }));
 vi.mock('./settings/subscriptions.js', () => ({ keepFallbackProfile: vi.fn().mockResolvedValue(true) }));
 
-import { invoke, getConfig, restartCore } from '../api.js';
+import { invoke, getConfig, patchConfig, restartCore, setSecret, coreReplacements } from '../api.js';
+import { Bus, Events } from './events.js';
 import { postRestartRecovery } from './lifecycle.js';
 import { keepFallbackProfile } from './settings/subscriptions.js';
 import { showNotification, showConfirmModal } from './notifications.js';
@@ -86,6 +88,7 @@ function click(el) {
 
 beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(coreReplacements).mockReturnValue(0);
     appStore.set('isTunEnabled', false);
     appStore.set('isNetworkUpdating', false);
     // The core refuses TUN (no administrator rights): the toggle has to roll back.
@@ -107,6 +110,66 @@ afterEach(async () => {
 });
 
 describe('console TUN switch follows the home toggle', () => {
+    it('shows unknown status on all switches when an unconfirmed TUN value cannot be read', async () => {
+        setPlatform('Mozilla/5.0 (X11; Linux x86_64)', 'Linux x86_64');
+        mInvoke.mockImplementation(async (command) => {
+            if (command === 'apply_runtime_tun') throw new Error('TUN_UPDATE_UNCONFIRMED');
+            return null;
+        });
+        mGetConfig.mockRejectedValueOnce(new Error('unavailable'));
+        const { home, mirror } = mount();
+        click(home);
+        await settle();
+        expect(home.indeterminate).toBe(true);
+        expect(mirror.indeterminate).toBe(true);
+        expect(home.checked).toBe(mirror.checked);
+        expect(document.getElementById('tun-status-text').dataset.i18n).toBe('unknown');
+        mInvoke.mockImplementation(async (command) => {
+            if (command === 'apply_runtime_tun') throw new Error('TUN_UPDATE_BUSY');
+            return null;
+        });
+        click(mirror);
+        await settle();
+        expect(home.indeterminate).toBe(true);
+        expect(mirror.indeterminate).toBe(true);
+        expect(home.checked).toBe(mirror.checked);
+        expect(document.getElementById('tun-status-text').dataset.i18n).toBe('unknown');
+    });
+
+    it('discards a TUN observation returned by a replaced core', async () => {
+        setPlatform('Mozilla/5.0 (X11; Linux x86_64)', 'Linux x86_64');
+        mInvoke.mockImplementation(async (command) => {
+            if (command === 'apply_runtime_tun') throw new Error('TUN_UPDATE_UNCONFIRMED');
+            return null;
+        });
+        let answer = (/** @type {any} */ _value) => {};
+        mGetConfig.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+        const { home } = mount();
+        click(home);
+        try {
+            await vi.waitFor(() => expect(mGetConfig).toHaveBeenCalledOnce());
+            vi.mocked(coreReplacements).mockReturnValue(1);
+            home.checked = false;
+            answer({ tun: { enable: true } });
+            await settle();
+            expect(home.checked).toBe(false);
+            expect(appStore.get('isTunEnabled')).toBe(false);
+        } finally { answer({}); }
+    });
+    it.each(['TUN_UPDATE_BUSY', 'TUN_UPDATE_UNCONFIRMED'])('does not request permission for runtime coordination: %s', async (reason) => {
+        setPlatform('Mozilla/5.0 (X11; Linux x86_64)', 'Linux x86_64');
+        mGetConfig.mockResolvedValue({ tun: { enable: true } });
+        mInvoke.mockImplementation(async (command) => {
+            if (command === 'apply_runtime_tun') throw new Error(reason);
+            return null;
+        });
+        const { home } = mount();
+        click(home);
+        await settle();
+        expect(mConfirm).not.toHaveBeenCalled();
+        expect(mInvoke.mock.calls.some(([command]) => command === 'record_tun_enabled')).toBe(false);
+        expect(home.checked).toBe(reason === 'TUN_UPDATE_UNCONFIRMED');
+    });
     it('puts itself back when clicked before the home switch is wired', () => {
         document.body.innerHTML = `<input type="checkbox" id="tun-proxy-toggle"><input type="checkbox" id="dz-tun-toggle">`;
         const home = /** @type {HTMLInputElement} */ (document.getElementById('tun-proxy-toggle'));
@@ -157,6 +220,25 @@ describe('console TUN switch follows the home toggle', () => {
         expect(appStore.get('isTunEnabled')).toBe(true);
         expect(home.checked).toBe(true);
         expect(mirror.checked).toBe(true);
+        expect(mInvoke).toHaveBeenCalledWith('apply_runtime_tun', { enable: true });
+        expect(patchConfig).not.toHaveBeenCalled();
+        expect(mInvoke).toHaveBeenCalledWith('record_tun_enabled', { enable: true, alreadyApplied: true });
+    });
+
+    it('does not record TUN when the serialized runtime command is refused', async () => {
+        setPlatform('Mozilla/5.0 (X11; FreeBSD amd64)', 'FreeBSD amd64');
+        mGetConfig.mockResolvedValue({ tun: { enable: true } });
+        mInvoke.mockImplementation(async (/** @type {string} */ command) => {
+            if (command === 'apply_runtime_tun') throw new Error('Run config is busy');
+            return null;
+        });
+        const { home, mirror } = mount();
+        click(mirror);
+        await settle();
+        expect(mGetConfig).not.toHaveBeenCalled();
+        expect(mInvoke.mock.calls.some(([command]) => command === 'record_tun_enabled')).toBe(false);
+        expect(home.checked).toBe(false);
+        expect(mirror.checked).toBe(false);
     });
 
     it('cannot start a second switch while one is in flight', async () => {
@@ -325,6 +407,19 @@ describe('Windows: TUN without administrator rights', () => {
 });
 
 describe('recovery restart after a failed root TUN start', () => {
+    it('announces a successful privileged replacement after installing its secret', async () => {
+        setPlatform('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)', 'MacIntel');
+        mInvoke.mockImplementation(async (cmd) => cmd === 'restart_core_as_root_cmd' ? 'new-secret' : null);
+        const replaced = vi.fn(() => vi.mocked(setSecret).mock.calls.at(-1)?.[0]);
+        const unsubscribe = Bus.on(Events.CORE_RESTARTED, replaced);
+        try {
+            const { home } = mount();
+            click(home);
+            await settle();
+            expect(replaced).toHaveBeenCalledOnce();
+            expect(replaced).toHaveReturnedWith('new-secret');
+        } finally { unsubscribe(); }
+    });
     it('keeps the fallback profile and recovers the one the core loaded', async () => {
         setPlatform('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)', 'MacIntel');
         const mRestart = /** @type {import('vitest').Mock} */ (/** @type {unknown} */ (restartCore));
