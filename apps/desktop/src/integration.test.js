@@ -610,6 +610,7 @@ describe('Backend emit ↔ Frontend listen event contract', () => {
         'profiles-imported',     // lib.rs:382
         'deep-link',             // deep_link.rs:103, 115
         'prism-event',           // prism.rs:100
+        'diagnostics-invalidated', // confirmed runtime reload
         'tray-mode-changed',     // tray.rs:239
         'tray-subscription-changed', // tray.rs:244
         'tray-sysproxy-changed', // tray.rs:283
@@ -633,6 +634,7 @@ describe('Backend emit ↔ Frontend listen event contract', () => {
         'global-shortcut',           // ui/global-shortcut.js:474
         'profiles-imported',         // ui/settings.js:1035
         'prism-event',               // ui/logs.js:371
+        'diagnostics-invalidated',   // modules/backend-events.js
         'core-download-status',      // ui/update-dialog.js
         'backend-event',             // ui/logs.js:445 (prism logs via backend_event.rs)
         'network-state-changed',      // main.js (network coordinator UI updates)
@@ -869,6 +871,10 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
         'failover_enabled',
         'network_optim_auto_apply',
         'lightweight_mode',
+        'latency_test_url',
+        'speed_test_url',
+        'speed_test_max_secs',
+        'show_exit_ip',
     ];
 
     // All settings.xxx property accesses in frontend JS code
@@ -899,7 +905,25 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
         'failover_enabled',   // settings.js
         'network_optim_auto_apply', // settings.js
         'lightweight_mode',   // settings.js
+        'latency_test_url',   // main.js, settings/speed-settings.js
+        'speed_test_url',     // speed-test.js
+        'speed_test_max_secs', // speed-test.js
+        'show_exit_ip',       // home-stats.js, settings/speed-settings.js
     ];
+
+    it('every listed Rust field is still declared in lib.rs', () => {
+        // The list above is kept by hand: a field renamed or dropped in Rust
+        // must fail here, not pass against a stale copy.
+        const libRs = fs.readFileSync(
+            path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src-tauri/src/lib.rs'),
+            'utf8',
+        );
+        const settingsStruct = libRs.match(/(?:pub\s+)?struct Settings\s*\{([\s\S]*?)^\}/m)?.[1];
+        expect(settingsStruct).toBeDefined();
+        const declared = new Set([...(settingsStruct ?? '').matchAll(/^\s+(?:pub(?:\([a-z]+\))?\s+)?([a-z][a-z0-9_]*):\s/gm)].map((m) => m[1]));
+        const stale = rustSettingsFields.filter((f) => !declared.has(f));
+        expect(stale, `not declared in lib.rs: ${stale.join(', ')}`).toEqual([]);
+    });
 
     it('every frontend settings.xxx access has a matching Rust struct field', () => {
         const rustFields = new Set(rustSettingsFields);

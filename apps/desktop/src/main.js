@@ -41,6 +41,7 @@ import {
   setSecret,
   setCoreReachable,
   noteCoreReplaced,
+  setLatencyTestUrl,
 } from './api.js';
 import {
   setBaseUrl as setWsBaseUrl,
@@ -66,14 +67,16 @@ import { initSettings, initUwpExemption } from './ui/settings.js';
 import { autoApplyIfNeeded } from './ui/network-optim.js';
 import { initNavigation, switchPage, navigateTo } from './ui/navigation.js';
 import { initNavTooltips } from './ui/nav-tooltip.js';
+import { initSidebar } from './ui/sidebar.js';
 import { initProxyControls, syncCoreConfig, refreshProxies } from './ui/proxies.js';
 import { initPlugins } from './ui/plugins.js';
 import { initModeSelector } from './ui/modes.js';
 import { initConsoleHome, activateConsole, deactivateConsole } from './ui/console-home.js';
 import { initTunToggle } from './ui/tun.js';
 import { initDnsRewriteToggle } from './ui/dns.js';
-import { initNodeWheel } from './ui/node-wheel.js';
+import { initHomeNodePicker, switchNodeFromHome } from './ui/home-node-picker.js';
 import { initHomeStats } from './ui/home-stats.js';
+import { initHomeProfile } from './ui/home-profile.js';
 import { initHeaderFit } from './ui/header-fit.js';
 import { initTablistKeys } from './ui/tablist-keys.js';
 import {
@@ -276,6 +279,8 @@ async function startCoreAndConfigure() {
     const tGetSettings = performance.now();
     const settings = await invoke(COMMANDS.GET_SETTINGS);
     apiLogger.info(`[Zephyr] get_settings: +${(performance.now() - tGetSettings).toFixed(0)}ms`);
+    // The latency test asks for the address chosen in Settings > Proxy.
+    setLatencyTestUrl(settings.latency_test_url);
 
     // Apply saved UI scale early (before UI renders)
     if (settings.ui_scale && settings.ui_scale > 0 && settings.ui_scale !== 1) {
@@ -332,9 +337,10 @@ async function startCoreAndConfigure() {
     setWsSecret(secret || '');
     setCoreReachable(true);
 
-    // 5b. Initialize Prism engine — compile patches and populate rule annotations.
+    // Build rules and enabled overrides together. The wrapper restores the
+    // runtime DNS rewrite only after this final combined reload is accepted.
     const tPrism = performance.now();
-    prism.apply().then((applyResult) => {
+    prism.rebuildWithOverrides().then((applyResult) => {
         const elapsed = (performance.now() - tPrism).toFixed(0);
         const stats = applyResult?.stats;
         const annotationCount = applyResult?.rule_annotations?.length ?? 0;
@@ -351,16 +357,6 @@ async function startCoreAndConfigure() {
         apiLogger.warn('[Zephyr] prism.apply failed (non-fatal, rules page may be empty):', err);
     });
 
-    // 5c. Apply all enabled overrides (JS + Prism YAML).
-    invoke(COMMANDS.OVERRIDE.APPLY_ALL).then((logs) => {
-        const successCount = logs?.filter((/** @type {{success: boolean}} */ l) => l.success).length ?? 0;
-        const failCount = logs?.filter((/** @type {{success: boolean}} */ l) => !l.success).length ?? 0;
-        if (logs && logs.length > 0) {
-            apiLogger.info(`[Zephyr] override_apply_all: ${successCount} succeeded, ${failCount} failed (${logs.length} total)`);
-        }
-    }).catch((err) => {
-        apiLogger.warn('[Zephyr] override_apply_all failed (non-fatal):', err);
-    });
   } catch (err) {
     const message = err?.toString?.() || 'Core start failed';
     apiLogger.error('Failed to start core', err);
@@ -473,6 +469,10 @@ async function initApp() {
   await _backendListenersReady;
   registerCleanup(cleanupBackendEventListeners);
 
+  // Restore the sidebar's expanded/collapsed state before the window is
+  // shown, so it does not jump open once the core has started.
+  registerCleanup(initSidebar());
+
   apiLogger.info(`[Zephyr] initApp started at ${new Date().toLocaleTimeString()}`);
 
   // 0a. Reset transient locks that may have been persisted to localStorage
@@ -561,8 +561,9 @@ async function initApp() {
   await initSettings();
   initUwpExemption();
   autoApplyIfNeeded().catch(() => {}); // Non-blocking: avoid freezing UI on admin password prompt
-  initNodeWheel();
-  registerCleanup(initHomeStats());
+  initHomeNodePicker();
+  registerCleanup(initHomeProfile());
+  registerCleanup(initHomeStats({ switchNode: switchNodeFromHome, openConnections: () => navigateTo('connections') }));
   registerCleanup(initHeaderFit());
   registerCleanup(initTablistKeys());
   initShortcutSettings();

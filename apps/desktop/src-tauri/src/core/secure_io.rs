@@ -89,8 +89,32 @@ fn write_new_private_file(path: &Path, content: &str) -> std::io::Result<()> {
 /// Returns `Err` if either the file write or permission setting fails.
 /// Callers can distinguish "secure write succeeded" from "file written but insecure".
 pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
-    fs::write(path, content).map_err(|e| format!("Failed to write to {path:?}: {e}"))?;
+    write_owner_only(path, content).map_err(|e| format!("Failed to write to {path:?}: {e}"))?;
     restrict_permissions(path)
+}
+
+/// On Unix, secure the open handle before truncating or writing, including
+/// existing files with permissions inherited from an older installation.
+fn write_owner_only(path: &Path, content: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        use std::os::unix::fs::PermissionsExt as _;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(path)?;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        file.set_len(0)?;
+        file.write_all(content.as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, content)
+    }
 }
 
 /// Owner-only permissions for an existing file (the second half of
@@ -281,4 +305,26 @@ fn restrict_permissions(path: &Path) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    #[test]
+    fn owner_only_writer_secures_existing_files_and_truncates_old_content() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("private.yaml");
+        fs::write(&path, "previous content that is longer").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        // Exercise the write half directly: the later restriction is not
+        // what protects the new contents of a previously permissive file.
+        write_owner_only(&path, "secret").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "secret");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
 }
