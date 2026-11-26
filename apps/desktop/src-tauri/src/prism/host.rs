@@ -17,8 +17,43 @@ use super::types::sanitize_filename;
 
 use std::cell::Cell;
 
+static RULE_ANNOTATIONS_CONFIRMED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+pub(crate) fn set_rule_annotations_confirmed(confirmed: bool) {
+    RULE_ANNOTATIONS_CONFIRMED.store(confirmed, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[must_use]
+pub(crate) fn rule_annotations_confirmed() -> bool {
+    RULE_ANNOTATIONS_CONFIRMED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 thread_local! {
     static CURRENT_APPLY_HTTP_STATUS: Cell<Option<u16>> = const { Cell::new(None) };
+    static DEFER_RELOAD: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Compile a whole candidate on one blocking thread before reloading it.
+pub(crate) struct DeferredReloadGuard {
+    previous: bool,
+    _marker: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl DeferredReloadGuard {
+    #[must_use]
+    pub(crate) fn enter() -> Self {
+        Self {
+            previous: DEFER_RELOAD.with(|value| value.replace(true)),
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Drop for DeferredReloadGuard {
+    fn drop(&mut self) {
+        DEFER_RELOAD.with(|value| value.set(self.previous));
+    }
 }
 
 pub(crate) fn set_current_apply_http_status(status: Option<u16>) {
@@ -473,6 +508,17 @@ impl PrismHost for ZephyrPrismHost {
                     lock.last_port()
                         .map(|port| (port, lock.last_secret().to_owned()))
                 };
+                if endpoint.is_some() {
+                    // The script's output normally keeps the speed-test group
+                    // and listener from the running config it started from;
+                    // put them back if it dropped them (a no-op otherwise).
+                    // Reuse a confirmed port when available. A new candidate
+                    // stays unavailable until a successful reload binds it.
+                    let held = crate::speed_test::held_port(&self.app);
+                    crate::speed_test::with_running_port(held, || {
+                        crate::speed_test::inject_for_runtime(target);
+                    });
+                }
                 if let Some((port, secret)) = &endpoint {
                     if let serde_yaml::Value::Mapping(map) = target {
                         map.insert(
@@ -513,6 +559,17 @@ impl PrismHost for ZephyrPrismHost {
             &run_config_path,
             config_to_write,
         )?;
+        set_rule_annotations_confirmed(false);
+
+        if DEFER_RELOAD.with(Cell::get) || endpoint.is_none() {
+            set_current_apply_http_status(None);
+            return Ok(ApplyStatus {
+                files_saved: true,
+                hot_reload_success: false,
+                message: "Config saved; reload deferred".to_owned(),
+                restarted: false,
+            });
+        }
 
         // Mihomo's PUT /configs expects a JSON body {"path": "..."} to reload
         // from disk — NOT the raw YAML config. Sending raw YAML with
@@ -527,18 +584,30 @@ impl PrismHost for ZephyrPrismHost {
         // Hot-reload via mihomo REST API (PUT for full config replacement).
         // The endpoint was read above, under the sequence lock, so the
         // PUT talks to the same core the injected controller values
-        // belong to. With no endpoint the core is stopped: there is
-        // nothing to reload, so no PUT is made — but a 0 is still
-        // recorded (a reload attempt with no answer), rather than
-        // leaving "no reload was attempted" (None), or the caller
-        // retries the reload itself against the stopped core (see
-        // `execute_prism_yaml_write`).
+        // belong to. Stopped and deferred writes returned above without
+        // attempting a reload; only a sent request can record a missing answer.
         // Synchronous HTTP PUT --- apply_config is a sync trait method that may be
         // called from non-tokio threads (e.g. WebView2 COM callbacks). Using
         // std::net avoids the "no reactor running" panic from block_on().
         let http_status_code = if let Some((port, secret)) = &endpoint {
+            let diagnostics = crate::speed_test::ReloadGuard::acquire();
             let url = format!("http://127.0.0.1:{port}/configs?force=true");
             let code = Self::http_put(&url, &body, secret);
+            if code.is_some_and(crate::network_coordinator::is_http_success) {
+                set_rule_annotations_confirmed(true);
+                crate::speed_test::confirm_listener(
+                    &self.app,
+                    crate::speed_test::listener_from_config(config_to_write),
+                );
+                drop(diagnostics);
+                crate::speed_test::notify_reloaded(&self.app);
+            } else if code.is_none() {
+                crate::speed_test::invalidate_listener(
+                    &self.app,
+                    crate::speed_test::listener_from_config(config_to_write).is_some(),
+                );
+                drop(diagnostics);
+            }
             // A reload attempt without an HTTP answer (the connection or the
             // write failed, or the core never replied) is recorded as 0, so
             // callers can tell it from "no reload was attempted" (None);
@@ -758,6 +827,9 @@ None => "Config saved. Failed to apply via core REST API (connection or response
                 // Collect all non-special proxy group names
                 let names: Vec<String> = groups
                     .iter()
+                    // Zephyr's hidden download-test group is never a routing
+                    // target; a profile's own group of that name is.
+                    .filter(|g| !crate::speed_test::is_injected_group(g))
                     .filter_map(|g| g.get("name").and_then(|n| n.as_str()).map(String::from))
                     .filter(|n| {
                         // Skip internal/special groups

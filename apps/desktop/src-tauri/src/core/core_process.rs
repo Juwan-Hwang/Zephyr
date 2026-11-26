@@ -1416,6 +1416,10 @@ pub fn prepare_runtime_config(
         }
     }
 
+    // The hidden group and loopback listener the download speed test goes
+    // through (see `speed_test`).
+    crate::speed_test::inject_for_runtime(&mut yaml_val);
+
     // Parse proxy_port AFTER all overrides are applied so it reflects
     // any user-overridden values (mixed_port, socks_port, http_port).
     let proxy_endpoint = parse_proxy_endpoint(&yaml_val);
@@ -1939,6 +1943,14 @@ async fn authenticated_health_check(port: u16, secret: &str) -> Result<(), Strin
         "Core started but authenticated health check failed. Check the logs for details."
             .to_owned(),
     )
+}
+
+async fn confirm_started_listener(app: &AppHandle, listener: Option<crate::speed_test::Listener>) {
+    let app_for_listener = app.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        crate::speed_test::confirm_listener(&app_for_listener, listener);
+    })
+    .await;
 }
 
 /// Notify the network coordinator that a fresh core instance was started.
@@ -2700,6 +2712,7 @@ async fn start_core_locked(
         &resolved_secret,
         global_prefs.as_ref(),
     )?;
+    let speed_test_listener = crate::speed_test::listener_from_config(&final_config);
 
     // A fresh running config is about to replace the previous core: a
     // live TUN override described that core, while this start derives
@@ -2925,6 +2938,7 @@ async fn start_core_locked(
         active_config_name: &Option<String>,
         config_port: u16,
         proxy_endpoint: Option<ProxyEndpoint>,
+        listener: Option<crate::speed_test::Listener>,
     ) {
         record_running_root_core_exe(app);
         set_tun_mode(true);
@@ -2945,6 +2959,7 @@ async fn start_core_locked(
                 proxy_endpoint,
             );
         }
+        confirm_started_listener(app, listener).await;
         // The recorded state changed to a running TUN core, but the icon
         // still shows whatever the failed start painted last (the stop
         // inside it paints idle), and both callers return an error right
@@ -3150,12 +3165,9 @@ async fn start_core_locked(
                             config_port,
                             proxy_port,
                         );
-                        // Published: the health check already passed, so
-                        // release the start guard here (as on the normal
-                        // path) instead of letting the notify and tray
-                        // refresh below keep Prism writes refused.
-                        drop(core_start_guard);
                     }
+                    confirm_started_listener(&app, speed_test_listener).await;
+                    drop(core_start_guard);
                     notify_core_started(&app).await;
                     refresh_tray_icon_after_start(&app).await;
                     // Clearing the override above changed the state the
@@ -3201,6 +3213,7 @@ async fn start_core_locked(
                         &active_config_name,
                         config_port,
                         proxy_port,
+                        speed_test_listener,
                     )
                     .await;
                     emit_warn!(
@@ -3254,6 +3267,7 @@ async fn start_core_locked(
                         &active_config_name,
                         config_port,
                         proxy_port,
+                        speed_test_listener,
                     )
                     .await;
                 }
@@ -3290,6 +3304,8 @@ async fn start_core_locked(
                 proxy_port,
             );
         }
+        confirm_started_listener(&app, speed_test_listener).await;
+        drop(core_start_guard);
         notify_core_started(&app).await;
         refresh_tray_icon_after_start(&app).await;
         // Clearing the override above changed the state the tray's TUN
@@ -3376,6 +3392,7 @@ async fn start_core_locked(
     // those instead of the previous run's. Release the guard here
     // instead of at the end of the function, so the notify and tray
     // refresh below do not keep Prism writes refused.
+    confirm_started_listener(&app, speed_test_listener).await;
     drop(core_start_guard);
 
     notify_core_started(&app).await;
@@ -3762,6 +3779,7 @@ pub(super) fn terminate_child_process(mut child_process: std::process::Child) {
 
 /// Internal: stop the core process (no rate limiter reset).
 pub fn stop_core_inner(app: &AppHandle, state: &MihomoState) -> Result<(), String> {
+    let _diagnostics = crate::speed_test::ReloadGuard::acquire();
     #[cfg(target_os = "macos")]
     let root_kill_err = {
         let mut err = None;
@@ -5330,6 +5348,10 @@ mod tests {
         core_data.set_started_at(Some(std::time::Instant::now()));
         core_data.set_last_port(Some(9090));
         core_data.set_last_proxy_endpoint(Some(ProxyEndpoint::http(7890)));
+        core_data.set_speed_test_listener(Some(crate::speed_test::Listener {
+            port: 7891,
+            auth: Some(("u".to_owned(), "p".to_owned())),
+        }));
 
         assert!(core_data.started_at().is_some());
         assert_eq!(core_data.last_port(), Some(9090));
@@ -5340,5 +5362,6 @@ mod tests {
         assert!(core_data.process().is_none());
         assert!(core_data.last_port().is_none());
         assert!(core_data.last_proxy_endpoint().is_none());
+        assert!(core_data.speed_test_listener().is_none());
     }
 }

@@ -512,6 +512,8 @@ export function initTunnelSettings({
                 };
                 /** @param {KeyboardEvent} e */
                 const onProtocolKey = (e) => {
+                    // The shared radio-group keys (ui/tablist-keys.js) already moved it.
+                    if (e.defaultPrevented) return;
                     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
                     const from = protocolButtons.indexOf(/** @type {HTMLElement} */ (e.currentTarget));
                     if (!step || from < 0) return;
