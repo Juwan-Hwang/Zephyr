@@ -207,6 +207,8 @@ export const Events = Object.freeze({
     SYS_PROXY_CHANGED: 'sys-proxy-changed',
     CONFIG_SYNCED: 'config-synced',
     CONFIG_UPDATED: 'config-updated',
+    DIAGNOSTICS_INVALIDATED: 'diagnostics-invalidated',
+    EXIT_IP_SETTING_CHANGED: 'exit-ip-setting-changed',
     CORE_RESTARTED: 'core-restarted',
     RULES_CHANGED: 'rules-changed',
     HOME_PAGE_MODE_CHANGED: 'home-page-mode-changed',
@@ -221,3 +223,19 @@ export const Events = Object.freeze({
     /** The smart engine's `enabled` was read from the engine (fires even when unchanged). */
     SMART_ENABLED_SYNCED: 'smart-enabled-synced',
 });
+
+// Connection details load lazily. Retain reload history here so a connection
+// that predates a reload is never attributed to a newly matching rule file.
+let rulesRevision = 0;
+let rulesChangedAt = 0;
+const noteRulesChanged = () => { rulesRevision += 1; rulesChangedAt = Date.now(); };
+Bus.on(Events.CONFIG_UPDATED, (/** @type {any} */ data) => {
+    if (data?.reloaded || data?.restoreRuntime) noteRulesChanged();
+});
+Bus.on(Events.CORE_RESTARTED, noteRulesChanged);
+Bus.on(Events.DIAGNOSTICS_INVALIDATED, noteRulesChanged);
+
+/** @returns {{ revision: number, changedAt: number }} */
+export function currentRulesVersion() {
+    return { revision: rulesRevision, changedAt: rulesChangedAt };
+}

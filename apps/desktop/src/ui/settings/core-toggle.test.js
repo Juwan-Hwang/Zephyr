@@ -67,6 +67,30 @@ describe('core settings switch', () => {
         expect(d.notify).toHaveBeenCalledWith('Applied', 'success');
     });
 
+    it('keeps an unconfirmed edit without recording it as the running value', async () => {
+        const toggle = { checked: true };
+        const d = deps(vi.fn(async () => 'unconfirmed'));
+        expect(await applyCoreToggle(toggle, 'ipv6', d)).toBe('unconfirmed');
+        expect(d.persist).toHaveBeenCalledWith(true);
+        expect(coreToggleApplied(toggle)).toBeUndefined();
+        expect(d.notify).not.toHaveBeenCalled();
+        d.saveCore.mockResolvedValue(false);
+        toggle.checked = false;
+        expect(await applyCoreToggle(toggle, 'ipv6', d)).toBe(false);
+        expect(toggle.checked).toBe(true);
+    });
+
+    it('marks a replacement core unknown after an unconfirmed follow-up', async () => {
+        const toggle = { checked: true };
+        const d = deps(vi.fn().mockImplementationOnce(async () => { noteCoreReplaced(); return true; })
+            .mockResolvedValueOnce('unconfirmed').mockResolvedValue(false));
+        expect(await applyCoreToggle(toggle, 'ipv6', d)).toBe('unconfirmed');
+        expect(coreToggleApplied(toggle)).toBeUndefined();
+        toggle.checked = false;
+        expect(await applyCoreToggle(toggle, 'ipv6', d)).toBe(false);
+        expect(toggle.checked).toBe(true);
+    });
+
     it('a failed write to settings.json is not reported as applied', async () => {
         const toggle = { checked: true };
         const d = deps(vi.fn(async () => true), vi.fn(async () => { throw new Error('disk full'); }));
