@@ -9,7 +9,29 @@ import {
 } from './tray-mocks.js';
 
 const { initTrayEventListeners } = await import('./tray.js');
+const { Bus, Events } = await import('./events.js');
 await initTrayEventListeners();
+
+describe('tray TUN ownership', () => {
+    it('releases the native flag only after its own handler settles', async () => {
+        const { appStore } = await import('./state.js');
+        appStore.set('isNetworkUpdating', false);
+        vi.clearAllMocks();
+        api.invoke.mockResolvedValue(null);
+        document.body.innerHTML = '<input id="tun-proxy-toggle" type="checkbox">';
+        const toggle = document.getElementById('tun-proxy-toggle');
+        let finish = () => {};
+        toggle.onchange = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+        const pending = handlers['tray-tun-changed']({ payload: true });
+        try {
+            expect(toggle.onchange).toHaveBeenCalledOnce();
+            expect(api.invoke).not.toHaveBeenCalledWith('release_tun_toggle');
+            finish();
+            await pending;
+            expect(api.invoke.mock.calls.filter(([command]) => command === 'release_tun_toggle')).toHaveLength(1);
+        } finally { finish(); await pending; document.body.innerHTML = ''; }
+    });
+});
 
 describe('a node picked in the tray', () => {
     beforeEach(() => {
@@ -26,8 +48,15 @@ describe('a node picked in the tray', () => {
 
     it('is remembered for the running profile, so a later restart restores it', async () => {
         api.invoke.mockImplementation(async (cmd) => (cmd === 'get_settings' ? { last_config: 'sub.yaml' } : null));
-        await handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Tokyo' } });
-        expect(memory.saveProxySelection).toHaveBeenCalledWith('sub.yaml', { node: 'Tokyo', group: 'Proxy' });
+        const selected = vi.fn();
+        const off = Bus.on(Events.PROXY_SELECTED, selected);
+        try {
+            await handlers['tray-proxy-changed']({ payload: { group: 'Proxy', proxy: 'Tokyo' } });
+            expect(memory.saveProxySelection).toHaveBeenCalledWith('sub.yaml', { node: 'Tokyo', group: 'Proxy' });
+            expect(selected).toHaveBeenCalledWith({ node: 'Tokyo', group: 'Proxy' });
+        } finally {
+            off();
+        }
     });
 
     it('is remembered for the profile running when it was picked, even if a profile switch lands meanwhile', async () => {

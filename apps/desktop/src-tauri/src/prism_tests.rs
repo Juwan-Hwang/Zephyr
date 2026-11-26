@@ -349,9 +349,39 @@ mod tests {
         }
 
         #[test]
+        fn raw_scalar_rule_text_counts_like_the_editor() {
+            assert_eq!(count_rules("DOMAIN,example.com,DIRECT"), 1);
+            assert_eq!(count_rules("# comment\nDOMAIN,example.com,DIRECT\n"), 1);
+            assert_eq!(count_rules("just text"), 0);
+        }
+
+        #[test]
         fn no_rules_section_returns_zero() {
             let content = "mixed-port: 7890\nallow-lan: true\n";
             assert_eq!(count_rules(content), 0);
+        }
+
+        #[test]
+        fn inherited_rule_lists_and_operations_match_explicit_precedence() {
+            assert_eq!(
+                count_rules("defaults: &r {rules: ['MATCH,DIRECT']}\n<<: *r\n"),
+                1
+            );
+            assert_eq!(count_rules("<<: {rules: ['MATCH,DIRECT']}\nrules: []\n"), 0);
+            assert_eq!(
+                count_rules(
+                    "rules: {<<: {$append: ['MATCH,DIRECT'], $prepend: ['MATCH,REJECT']}, $append: []}"
+                ),
+                1
+            );
+        }
+
+        #[test]
+        fn root_sequences_do_not_count_nested_rule_lists() {
+            assert_eq!(
+                count_rules("- metadata:\n    rules:\n      - MATCH,DIRECT\n"),
+                0
+            );
         }
 
         #[test]
@@ -411,14 +441,17 @@ proxies:
         }
 
         #[test]
-        fn ignores_items_without_comma() {
+        fn counts_yaml_entries_without_validating_rule_strings() {
             let content = "\
 rules:
   - DOMAIN-SUFFIX,example.com,PROXY
   - some yaml mapping without comma
   - DOMAIN,github.com,PROXY
 ";
-            assert_eq!(count_rules(content), 2);
+            // Match the editor's YAML entry count. Rule validation belongs to
+            // compilation; a scalar without a comma is still a sequence entry.
+            assert_eq!(count_rules(content), 3);
+            assert_eq!(count_rules("rules: [not-a-valid-rule]"), 1);
         }
 
         #[test]
@@ -1129,74 +1162,18 @@ rules:
 
         #[test]
         fn rule_extraction_produces_valid_prism_yaml() {
-            let config = "\
-mixed-port: 7890
-rules:
-    - 'DOMAIN-SUFFIX,example.com,Proxy'
-    - 'DOMAIN-KEYWORD,google,Proxy'
-    - 'GEOIP,CN,DIRECT'
-    - 'MATCH,*,Proxy'
-";
-
-            let yaml: serde_yaml::Value =
-                serde_yaml::from_str(config).expect("failed to parse config YAML");
-
-            let rules = yaml
-                .get("rules")
-                .and_then(|v| v.as_sequence())
-                .expect("no rules section found");
-
-            // Build content following the same logic as rule_extract_from_profile()
-            const BUILTIN_POLICIES: &[&str] = &["DIRECT", "REJECT", "PASS"];
-            let mut lines = Vec::with_capacity(rules.len() + 5);
-            lines.push("__when__:".to_owned());
-            lines.push("  enabled: false".to_owned());
-            lines.push(String::new());
-            lines.push("rules:".to_owned());
-            lines.push("  $append:".to_owned());
-            for rule in rules {
-                if let Some(s) = rule.as_str() {
-                    let parts: Vec<&str> = s.splitn(4, ',').collect();
-                    if parts.len() >= 3 {
-                        let policy = parts.get(2).map(|p| p.trim()).unwrap_or("");
-                        if BUILTIN_POLICIES
-                            .iter()
-                            .any(|b| b.eq_ignore_ascii_case(policy))
-                        {
-                            lines.push(format!("    - {s}"));
-                        } else {
-                            let mut rebuilt = String::new();
-                            if let Some(p0) = parts.first() {
-                                rebuilt.push_str(p0);
-                            }
-                            rebuilt.push(',');
-                            if let Some(p1) = parts.get(1) {
-                                rebuilt.push_str(p1);
-                            }
-                            rebuilt.push_str(",{{proxy}}");
-                            let mut line = String::from("    - ");
-                            line.push_str(&rebuilt);
-                            if let Some(opts) = parts.get(3) {
-                                line.push(',');
-                                line.push_str(opts);
-                            }
-                            lines.push(line);
-                        }
-                    } else {
-                        lines.push(format!("    - {s}"));
-                    }
-                }
-            }
-            let content = lines.join("\n") + "\n";
-
-            // Regression test: ensure extracted rules are disabled by default
-            assert!(content.contains("__when__:\n  enabled: false"), "extracted rule should have __when__: enabled: false to avoid false 'checked' state in UI");
+            let config = "rules:\n  - 'DOMAIN-SUFFIX,example.com,Proxy'\n  - 'DOMAIN,foo: bar,Proxy'\n  - 'GEOIP,CN,DIRECT'\n  - 'MATCH,Proxy'\n";
+            let content = crate::prism::extract_profile_rules(config).unwrap();
+            let parsed: serde_yaml::Value = serde_yaml::from_str(&content).unwrap();
+            assert_eq!(parsed["__when__"]["enabled"].as_bool(), Some(false));
             assert_eq!(count_rules(&content), 4);
-            assert!(content.contains("rules:\n"));
-            assert!(content.contains("DOMAIN-SUFFIX,example.com,{{proxy}}"));
-            assert!(content.contains("DOMAIN-KEYWORD,google,{{proxy}}"));
-            assert!(content.contains("GEOIP,CN,DIRECT"));
-            assert!(content.contains("MATCH,*,{{proxy}}"));
+            assert_eq!(
+                parsed["rules"]["$append"][0],
+                "DOMAIN-SUFFIX,example.com,{{proxy}}"
+            );
+            assert_eq!(parsed["rules"]["$append"][1], "DOMAIN,foo: bar,{{proxy}}");
+            assert_eq!(parsed["rules"]["$append"][2], "GEOIP,CN,DIRECT");
+            assert_eq!(parsed["rules"]["$append"][3], "MATCH,{{proxy}}");
         }
     }
 
@@ -1336,7 +1313,7 @@ rules:
         }
 
         #[test]
-        fn count_rules_handles_multiline_yaml_block_scalar() {
+        fn count_rules_counts_top_level_structured_entries_once() {
             let content = "\
 rules:
   - DOMAIN-SUFFIX,example.com,PROXY
@@ -1345,7 +1322,11 @@ rules:
       - test.com
   - DOMAIN,github.com,PROXY
 ";
-            assert_eq!(count_rules(content), 2);
+            // The payload mapping is one top-level entry; its nested sequence
+            // does not add extra entries to the card or save-notice count.
+            assert_eq!(count_rules(content), 3);
+            let nested = "rules: [{payload: ['DOMAIN,nested.example,DIRECT', 'MATCH,DIRECT']}]";
+            assert_eq!(count_rules(nested), 1);
         }
 
         #[test]

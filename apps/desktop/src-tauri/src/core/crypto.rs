@@ -41,6 +41,12 @@ static DERIVED_KEY: OnceLock<Vec<u8>> = OnceLock::new();
 /// Returns Ok(key) on success, or Err if the key could not be persisted (session-only key).
 static MACHINE_KEY_PERSISTED: AtomicBool = AtomicBool::new(false);
 
+const PERSISTENT_KEY_UNAVAILABLE: &str = concat!(
+    "Cannot save encrypted subscription data with a session-only machine key. ",
+    "Repair the Zephyr key storage path or its write permissions, ",
+    "then restart Zephyr before retrying."
+);
+
 pub(super) fn get_machine_key() -> Vec<u8> {
     DERIVED_KEY.get_or_init(compute_machine_key).clone()
 }
@@ -269,16 +275,32 @@ pub fn is_machine_key_persisted() -> bool {
     MACHINE_KEY_PERSISTED.load(Ordering::SeqCst)
 }
 
+/// Refuse persistent subscription writes before a profile is replaced.
+pub(super) fn require_persistent_machine_key() -> Result<(), String> {
+    if is_machine_key_persisted() {
+        Ok(())
+    } else {
+        Err(PERSISTENT_KEY_UNAVAILABLE.to_owned())
+    }
+}
+
 /// Encrypt a string using AES-256-GCM with the machine key.
 /// Returns base64-encoded ciphertext with version prefix and nonce prepended.
 /// Format: "v2:" + nonce (12 bytes) + ciphertext + auth tag (16 bytes)
 pub(super) fn obfuscate_string(s: &str) -> Result<String, String> {
+    let key_bytes = get_machine_key();
+    encrypt_persistent_string(s, &key_bytes, MACHINE_KEY_PERSISTED.load(Ordering::SeqCst))
+}
+
+fn encrypt_persistent_string(s: &str, key_bytes: &[u8], persisted: bool) -> Result<String, String> {
     use aes_gcm::{
         aead::{Aead as _, KeyInit as _},
         Aes256Gcm, Nonce,
     };
 
-    let key_bytes = get_machine_key();
+    if !persisted {
+        return Err(PERSISTENT_KEY_UNAVAILABLE.to_owned());
+    }
 
     if key_bytes.len() != 32 {
         return Err(format!(
@@ -287,7 +309,7 @@ pub(super) fn obfuscate_string(s: &str) -> Result<String, String> {
         ));
     }
 
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+    let cipher = Aes256Gcm::new_from_slice(key_bytes)
         .map_err(|e| format!("Failed to initialize AES cipher: {e}"))?;
 
     let nonce_bytes: [u8; 12] = rand::rng().random();
@@ -576,6 +598,14 @@ pub fn decrypt_all_profiles(
     profiles_dir: &Path,
     sanitize: Option<&std::collections::HashSet<PathBuf>>,
 ) -> (Result<(), String>, Vec<PathBuf>) {
+    decrypt_all_profiles_with(profiles_dir, sanitize, deobfuscate_string)
+}
+
+fn decrypt_all_profiles_with(
+    profiles_dir: &Path,
+    sanitize: Option<&std::collections::HashSet<PathBuf>>,
+    decrypt: impl Fn(&str) -> Result<String, String>,
+) -> (Result<(), String>, Vec<PathBuf>) {
     let entries = match fs::read_dir(profiles_dir) {
         Ok(entries) => entries,
         Err(e) => return (Err(format!("Failed to read profiles dir: {e}")), Vec::new()),
@@ -618,7 +648,7 @@ pub fn decrypt_all_profiles(
         if !is_encrypted_content(&content) {
             continue; // already plaintext
         }
-        match deobfuscate_string(&content) {
+        match decrypt(&content) {
             Ok(decrypted) => {
                 // The import staging sanitizer skips encrypted profiles
                 // (they arrive as an opaque base64 scalar), so without
@@ -934,8 +964,8 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result
         obf_meta.configs.insert(
             k.clone(),
             ConfigMetadata {
-                url: v.url.as_ref().and_then(|s| obfuscate_string(s).ok()),
-                sub_info: v.sub_info.as_ref().and_then(|s| obfuscate_string(s).ok()),
+                url: v.url.as_deref().map(obfuscate_string).transpose()?,
+                sub_info: v.sub_info.as_deref().map(obfuscate_string).transpose()?,
                 last_updated: v.last_updated,
                 auto_update_interval: v.auto_update_interval,
                 // user_agent is not sensitive — store as-is (no obfuscation)
@@ -948,48 +978,10 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result
     let data = serde_json::to_string_pretty(&obf_meta)
         .map_err(|e| format!("Failed to serialize metadata: {e}"))?;
 
-    // Durable atomic replace (temp file fsync, rename, directory fsync):
-    // readers see either the old or the new file, and a power loss cannot
-    // leave an empty metadata.json that load_metadata would read as "no
-    // subscriptions". A transient handle that outlives the rename retries
-    // falls back to a non-atomic direct write below.
-    if let Err(e) = write_file_secure_atomic(&meta_path, &data) {
-        // Keep a recoverable copy: an interrupted direct write truncates
-        // metadata.json, and load_metadata would then silently degrade to
-        // an empty default that the next save persists. Refuse the
-        // destructive write when no backup could be made.
-        let bak_path = paths.profiles_dir.join("metadata.json.bak");
-        if meta_path.exists() && std::fs::copy(&meta_path, &bak_path).is_err() {
-            return Err(format!(
-                "Failed to persist metadata: atomic rename failed ({e}) and no backup could be created"
-            ));
-        }
-        if let Err(write_err) = write_file_secure(&meta_path, &data) {
-            // Restore from backup if the direct write failed
-            if let Err(restore_err) = std::fs::rename(&bak_path, &meta_path) {
-                emit_warn!(
-                    Core,
-                    CORE_CRASHED,
-                    "metadata.json may be truncated: restore from {} failed: {restore_err}",
-                    bak_path.display()
-                );
-                return Err(format!(
-                    "Failed to persist metadata: atomic rename failed ({e}), direct write failed ({write_err}), restore failed ({restore_err}) — recover manually from {}",
-                    bak_path.display()
-                ));
-            }
-            return Err(format!("Failed to persist metadata: atomic rename failed ({e}), direct write also failed: {write_err}"));
-        }
-        // Direct write succeeded — clean up backup
-        let _ = std::fs::remove_file(&bak_path);
-        emit_warn!(
-            Core,
-            CORE_CRASHED,
-            "Atomic rename of metadata.json failed, used direct write: {e}"
-        );
-    }
-
-    Ok(())
+    // The atomic writer already retries replacement. An error leaves the
+    // previous file intact; no in-place write or backup restoration is needed.
+    write_file_secure_atomic(&meta_path, &data)
+        .map_err(|error| format!("Failed to persist metadata: {error}"))
 }
 
 /// Whether a metadata key still names a profile file on disk.
@@ -1253,37 +1245,42 @@ pub mod test_helpers {
     /// Decrypt a string encrypted with AES-256-GCM using an explicit key (test-only).
     #[must_use]
     pub fn deobfuscate_with_key(ciphertext: &str, key: &[u8]) -> String {
+        try_deobfuscate_with_key(ciphertext, key).unwrap_or_default()
+    }
+
+    /// Keep decryption failures distinct from valid empty fixture content.
+    pub fn try_deobfuscate_with_key(ciphertext: &str, key: &[u8]) -> Result<String, String> {
         use aes_gcm::{
             aead::{Aead as _, KeyInit as _},
             Aes256Gcm,
         };
 
         let Ok(decoded) = base64_standard.decode(ciphertext) else {
-            return String::new();
+            return Err("Invalid fixture encoding".to_owned());
         };
 
         if !decoded.starts_with(b"v2:") || decoded.len() < 31 {
-            return String::new();
+            return Err("Invalid fixture ciphertext".to_owned());
         }
 
         if key.len() != 32 {
-            return String::new();
+            return Err("Invalid fixture key length".to_owned());
         }
 
         let nonce_bytes = &decoded[3..15];
         let ct = &decoded[15..];
 
         let Ok(cipher) = Aes256Gcm::new_from_slice(key) else {
-            return String::new();
+            return Err("Invalid fixture key".to_owned());
         };
 
         let Ok(nonce) = nonce_bytes.try_into() else {
-            return String::new();
+            return Err("Invalid fixture nonce".to_owned());
         };
 
         match cipher.decrypt(&nonce, ct) {
-            Ok(pt) => String::from_utf8_lossy(&pt).into_owned(),
-            Err(_) => String::new(),
+            Ok(pt) => String::from_utf8(pt).map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
         }
     }
 
@@ -1310,6 +1307,16 @@ mod tests {
 
     fn random_test_key() -> [u8; 32] {
         rand::rng().random()
+    }
+
+    #[test]
+    fn persistent_encryption_rejects_a_session_only_key() {
+        let key = random_test_key();
+        let error = super::encrypt_persistent_string("subscription", &key, false).unwrap_err();
+        assert!(error.contains("session-only machine key"));
+        assert!(error.contains("restart Zephyr"));
+        let encrypted = super::encrypt_persistent_string("subscription", &key, true).unwrap();
+        assert_eq!(deobfuscate_with_key(&encrypted, &key), "subscription");
     }
 
     /// Whether `dir` tells apart filenames that differ only by case.
@@ -1482,17 +1489,19 @@ mod tests {
         };
         std::fs::write(dir.join("FOO.yaml"), "port: 7890\n").unwrap();
         let mut metadata = super::ProfilesMetadata::default();
+        // This test exercises file identity, so use metadata that does not
+        // require the host's persistent encryption key.
         metadata.configs.insert(
             "foo.yaml".to_owned(),
             super::ConfigMetadata {
-                url: Some("https://example.com/a".to_owned()),
+                last_updated: Some(1),
                 ..Default::default()
             },
         );
         metadata.configs.insert(
             "FOO.yaml".to_owned(),
             super::ConfigMetadata {
-                url: Some("https://example.com/b".to_owned()),
+                last_updated: Some(2),
                 ..Default::default()
             },
         );
@@ -1641,7 +1650,8 @@ mod tests {
         std::fs::write(&bad_decrypt, "djI6").unwrap();
         // A valid encrypted profile: decrypts and is written plaintext.
         let good = dir.join("imported-good.yaml");
-        let encrypted = super::obfuscate_string("port: 7890\n").unwrap();
+        let key = random_test_key();
+        let encrypted = obfuscate_with_key("port: 7890\n", &key);
         std::fs::write(&good, &encrypted).unwrap();
         // The same undecryptable content, but pre-existing: it stays
         // encrypted and must never be refused.
@@ -1651,7 +1661,9 @@ mod tests {
         let imported: HashSet<PathBuf> = [bad_read.clone(), bad_decrypt.clone(), good.clone()]
             .into_iter()
             .collect();
-        let (result, refused) = super::decrypt_all_profiles(&dir, Some(&imported));
+        let (result, refused) = super::decrypt_all_profiles_with(&dir, Some(&imported), |value| {
+            try_deobfuscate_with_key(value, &key)
+        });
         assert!(result.is_err());
         let refused_set: HashSet<PathBuf> = refused.into_iter().collect();
         assert_eq!(refused_set.len(), 2);
@@ -1677,7 +1689,8 @@ mod tests {
         let dir = std::env::temp_dir().join(&unique);
         std::fs::create_dir_all(&dir).unwrap();
         let good = dir.join("imported-good.yaml");
-        let encrypted = super::obfuscate_string("port: 7890\n").unwrap();
+        let key = random_test_key();
+        let encrypted = obfuscate_with_key("port: 7890\n", &key);
         std::fs::write(&good, &encrypted).unwrap();
         // A read-only profiles dir blocks the atomic write (its temp
         // file cannot be created): the encrypted original stays on
@@ -1696,7 +1709,9 @@ mod tests {
         }
         let imported: std::collections::HashSet<std::path::PathBuf> =
             std::iter::once(good.clone()).collect();
-        let (result, refused) = super::decrypt_all_profiles(&dir, Some(&imported));
+        let (result, refused) = super::decrypt_all_profiles_with(&dir, Some(&imported), |value| {
+            try_deobfuscate_with_key(value, &key)
+        });
         assert!(result.is_err());
         assert_eq!(refused, vec![good.clone()]);
         assert!(super::is_encrypted_content(

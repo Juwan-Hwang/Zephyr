@@ -17,7 +17,7 @@ import { switchToConfig, postRestartRecovery, restartedProfile, persistActiveCon
 import { currentProfile, noteProfileRenamed } from '../active-profile.js';
 import { noteKnownSelection, renameKnownSelection } from '../known-selection.js';
 import { COMMANDS } from '@zephyr/shared';
-import { translations, t as tr } from '../../i18n.js';
+import { translations, t as tr, getDirection } from '../../i18n.js';
 import { rulesLogger } from '../../utils/logger.js';
 import { showNotification, showConfirmModal } from '../notifications.js';
 import { appStore } from '../state.js';
@@ -36,6 +36,8 @@ import { validateHttpUrl } from '../../utils/url-validate.js';
 import * as prism from '../prism.js';
 import { queueSmartConfigWrite } from './auto-switch.js';
 import { subDownloadSlot } from './sub-download-gate.js';
+import { readRuleBinding, setRuleBinding, hasGlobalRuleBinding, hasPatternRuleBinding } from './profile-rule-binding.js';
+import { syncTablist } from '../tablist-keys.js';
 
 /** Longest wait for another network operation before giving up on activating a new profile. */
 const NETWORK_IDLE_TIMEOUT_MS = 15000;
@@ -534,7 +536,7 @@ async function showEditPanel(configInfo) {
         autoUpdateOptions.push({ value: String(currentInterval), label: tr('autoUpdateEveryHours', { hours }) });
     }
     const intervalTabs = autoUpdateOptions.map(opt =>
-        `<button type="button" role="radio" class="seg-tab flex-1 justify-center${opt.value === String(currentInterval) ? ' active' : ''}" aria-checked="${opt.value === String(currentInterval) ? 'true' : 'false'}" data-value="${opt.value}">${escapeHtml(opt.label)}</button>`
+        `<button type="button" role="radio" class="choice-card choice-card-compact" aria-checked="${opt.value === String(currentInterval) ? 'true' : 'false'}" data-value="${opt.value}"><span class="choice-card-title">${escapeHtml(opt.label)}</span></button>`
     ).join('');
 
     // Determine which UA option is currently selected (prefix match for versioned values)
@@ -617,7 +619,7 @@ async function showEditPanel(configInfo) {
                 </div>
                 <div class="flex flex-col gap-1.5">
                     <span id="edit-auto-update-label" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</span>
-                    <div id="edit-auto-update" class="seg-tabs seg-tabs-lg w-full" role="radiogroup" aria-labelledby="edit-auto-update-label" data-value="${String(currentInterval)}">
+                    <div id="edit-auto-update" class="choice-grid w-full" role="radiogroup" aria-labelledby="edit-auto-update-label" data-value="${String(currentInterval)}">
                         ${intervalTabs}
                     </div>
                     <p id="edit-next-update" class="edit-field-hint"></p>
@@ -663,18 +665,21 @@ async function showEditPanel(configInfo) {
         /** @type {HTMLInputElement|null} */ (modal.querySelector('#edit-url'))?.focus();
     });
 
-    // Auto-update as a segmented control (the old dropdown was cut off by the window edge).
+    // Auto-update as choice cards: four or more single-choice options use
+    // cards, two or three use a segmented control.
     const intervalGroup = /** @type {HTMLElement|null} */ (modal.querySelector('#edit-auto-update'));
-    intervalGroup?.querySelectorAll('.seg-tab').forEach((tab) => {
+    intervalGroup?.style.setProperty('--choice-cols', String(autoUpdateOptions.length));
+    intervalGroup?.querySelectorAll('.choice-card').forEach((tab) => {
         tab.addEventListener('click', () => {
-            intervalGroup.querySelectorAll('.seg-tab').forEach((b) => {
-                b.classList.toggle('active', b === tab);
+            intervalGroup.querySelectorAll('.choice-card').forEach((b) => {
                 b.setAttribute('aria-checked', b === tab ? 'true' : 'false');
             });
             intervalGroup.dataset.value = /** @type {HTMLElement} */ (tab).dataset.value || '0';
+            syncTablist(intervalGroup);
             renderNextUpdate();
         });
     });
+    syncTablist(intervalGroup);
     // "Next update: today 21:40" under the interval, following the selected tab.
     function renderNextUpdate() {
         const el = modal.querySelector('#edit-next-update');
@@ -930,6 +935,24 @@ export function initSubscriptionSettings({
     updateAllSubBtn,
     configsList,
 }) {
+    let subscriptionMenuRequest = 0;
+    /** @type {(() => void)|null} */
+    let disposePendingMenu = null;
+    /** @type {HTMLElement|null} */
+    let mountedMenu = null;
+    /** @type {string|null} */
+    let mountedMenuProfile = null;
+    /** @type {Set<() => void>} */
+    const menuFocusCleanups = new Set();
+    let menuRemovalObserver = /** @type {MutationObserver|null} */ (null);
+    const cleanupMountedMenu = () => {
+        menuFocusCleanups.forEach((cleanup) => cleanup());
+        menuFocusCleanups.clear();
+        menuRemovalObserver?.disconnect();
+        menuRemovalObserver = null;
+        mountedMenu = null;
+        mountedMenuProfile = null;
+    };
 
     // ---- Subscription add ----
     if (subAddBtn) {
@@ -1129,186 +1152,6 @@ export function initSubscriptionSettings({
         };
     }
 
-    // ---- YAML-aware profile manipulation helpers ----
-
-    /**
-     * Parse profile values from a YAML block. Handles three formats:
-     *   Flow array:   profile: [a, b]
-     *   Block seq:    profile:\n    - a\n    - b
-     *   Single value: profile: a
-     * Returns { items: string[], startLine, endLine, indent } or null.
-     */
-    function parseProfileBlock(/** @type {string[]} */ lines, /** @type {number} */ profileLineIdx) {
-        const header = lines[profileLineIdx];
-        const hm = header.match(/^([ \t]*)profile\s*:\s*(.*)/);
-        if (!hm) return null;
-        const indent = hm[1];
-        const rest = hm[2].trim();
-
-        // Flow array: profile: [a, b]
-        if (rest.startsWith('[')) {
-            const items = rest.replace(/,\s*$/, '').slice(1, -1).split(',').map(s => s.trim()).filter(Boolean);
-            return { items, startLine: profileLineIdx, endLine: profileLineIdx, indent };
-        }
-
-        // Single value: profile: a
-        if (rest.length > 0 && !rest.startsWith('-') && !rest.startsWith('|') && !rest.startsWith('>')) {
-            return { items: [rest], startLine: profileLineIdx, endLine: profileLineIdx, indent };
-        }
-
-        // Block sequence: profile:\n  - a\n  - b  (or empty: profile:\n  next_key:)
-        const seqIndent = indent + '  '; // YAML standard: sequence items indented 2 more
-        const items = [];
-        let endLine = profileLineIdx;
-        for (let i = profileLineIdx + 1; i < lines.length; i++) {
-            const line = lines[i];
-            // Check if this line is a sequence item under profile
-            // Static regex captures indent + content; compare indent with startsWith
-            // to preserve original behavior (allowed deeper indentation via \s*)
-            // Use [ \t] instead of \s to avoid super-linear backtracking (SonarCloud)
-            // Prefix-only pattern avoids (.+) backtracking (SonarCloud)
-            const seqItemPrefix = line.match(/^([ \t]*)-[ \t]+/);
-            if (seqItemPrefix && seqItemPrefix[1].startsWith(seqIndent)) {
-                // Guard against empty items (e.g. "- " with no value) (Qodo)
-                const itemValue = line.slice(seqItemPrefix[0].length).trim();
-                if (itemValue) {
-                    items.push(itemValue);
-                    endLine = i;
-                }
-            } else if (line.match(/^\s*$/)) {
-                // Blank line — skip but don't end
-                continue;
-            } else {
-                // Non-sequence, non-blank line — end of block
-                break;
-            }
-        }
-        return { items, startLine: profileLineIdx, endLine, indent };
-    }
-
-    /**
-     * Parse __when__ block from rule file content.
-     * Returns { enabled: boolean, profiles: string[] } or null if no __when__.
-     */
-    function parseWhenBlock(/** @type {string} */ content) {
-        if (!/__when__\s*:/i.test(content)) return null;
-
-        const lines = content.split('\n');
-        let inWhen = false;
-        let whenIndent = 0;
-        const result = { enabled: true, profiles: /** @type {string[]} */ ([]) };
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            // Enter __when__ block
-            if (/^__when__\s*:/i.test(trimmed)) {
-                inWhen = true;
-                whenIndent = line.search(/\S/);
-                // Check inline enabled: false (e.g., __when__: { enabled: false })
-                const inline = trimmed.match(/enabled\s*:\s*(false|true)/i);
-                if (inline) result.enabled = inline[1].toLowerCase() !== 'false';
-                continue;
-            }
-
-            if (!inWhen) continue;
-
-            // Exit when block ends (less indented or same level non-empty line)
-            const currentIndent = line.search(/\S/);
-            if (trimmed && currentIndent <= whenIndent) break;
-
-            // Parse enabled field
-            if (/^enabled\s*:/i.test(trimmed)) {
-                result.enabled = !/false/i.test(trimmed);
-                continue;
-            }
-
-            // Parse profile field
-            const profileMatch = trimmed.match(/^profile\s*:\s*(.+)$/);
-            if (profileMatch) {
-                const value = profileMatch[1].trim();
-                // Flow array: [a, b, c]
-                if (value.startsWith('[')) {
-                    const arr = value.slice(1, -1).split(',').map(s => s.trim()).filter(Boolean);
-                    result.profiles.push(...arr);
-                } else {
-                    // Single value
-                    result.profiles.push(value);
-                }
-                continue;
-            }
-
-            // Block sequence: - item
-            if (trimmed.startsWith('- ')) {
-                const item = trimmed.slice(2).trim();
-                if (item) result.profiles.push(item);
-            }
-        }
-
-        return result;
-    }
-
-    /**
-     * Add a profile name to the __when__ block's profile field.
-     * Handles flow array, block sequence, and single value formats.
-     */
-    function addProfileToWhen(/** @type {string} */ content, /** @type {string} */ profileName) {
-        const lowerName = profileName.toLowerCase();
-        const lines = content.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-            const m = lines[i].match(/^\s*profile\s*:/);
-            if (!m) continue;
-
-            const parsed = parseProfileBlock(lines, i);
-            if (!parsed) continue;
-
-            // Already present?
-            if (parsed.items.some(item => item.toLowerCase() === lowerName)) {
-                return content;
-            }
-
-            parsed.items.push(profileName);
-
-            // Rebuild: always output as flow array (simplest, unambiguous)
-            const newLine = `${parsed.indent}profile: [${parsed.items.join(', ')}]`;
-            const before = lines.slice(0, parsed.startLine);
-            const after = lines.slice(parsed.endLine + 1);
-            return [...before, newLine, ...after].join('\n');
-        }
-        return content;
-    }
-
-    /**
-     * Remove a profile name from the __when__ block's profile field.
-     * If no profiles remain, replaces with enabled: false.
-     */
-    function removeProfileFromWhen(/** @type {string} */ content, /** @type {string} */ profileName) {
-        const lowerName = profileName.toLowerCase();
-        const lines = content.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-            const m = lines[i].match(/^\s*profile\s*:/);
-            if (!m) continue;
-
-            const parsed = parseProfileBlock(lines, i);
-            if (!parsed) continue;
-
-            const filtered = parsed.items.filter(item => item.toLowerCase() !== lowerName);
-
-            let newLines;
-            if (filtered.length === 0) {
-                newLines = `${parsed.indent}enabled: false`;
-            } else {
-                newLines = `${parsed.indent}profile: [${filtered.join(', ')}]`;
-            }
-
-            const before = lines.slice(0, parsed.startLine);
-            const after = lines.slice(parsed.endLine + 1);
-            return [...before, newLines, ...after].join('\n');
-        }
-        return content;
-    }
-
     // ---- Subscription card right-click context menu (rule library integration) ----
 
     /**
@@ -1320,22 +1163,59 @@ export function initSubscriptionSettings({
     const showSubscriptionContextMenu = async (e, configInfo) => {
         e.preventDefault();
         e.stopPropagation();
+        disposePendingMenu?.();
+        mountedMenu?.remove();
+        cleanupMountedMenu();
+        const request = ++subscriptionMenuRequest;
+        const origin = e.currentTarget instanceof HTMLElement ? e.currentTarget : null;
+        const ownsRequest = () => request === subscriptionMenuRequest && !!origin?.isConnected;
+        const cancelPending = () => {
+            if (request === subscriptionMenuRequest) subscriptionMenuRequest++;
+            dispose();
+        };
+        /** @param {KeyboardEvent} event */
+        const cancelOnEscape = (event) => { if (event.key === 'Escape') cancelPending(); };
+        const dispose = () => {
+            document.removeEventListener('click', cancelPending, true);
+            document.removeEventListener('keydown', cancelOnEscape, true);
+            if (disposePendingMenu === dispose) disposePendingMenu = null;
+        };
+        disposePendingMenu = dispose;
+        document.addEventListener('click', cancelPending, { once: true, capture: true });
+        document.addEventListener('keydown', cancelOnEscape, true);
 
         const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[appStore.get('currentLang')]);
         const name = configInfo.name;
         // Stem name for __when__.profile matching (must match get_current_profile() which uses file_stem)
         const profileStem = name.replace(/\.(yaml|yml)$/i, '');
-
+        const touch = 'pointerType' in e && e.pointerType === 'touch';
+        const keyboardAnchor = e.button === 0 && !e.ctrlKey && !touch && document.activeElement instanceof HTMLElement
+            ? document.activeElement : null;
         const { menu, scroll: menuScroll } = createContextMenuContainer(e);
+        if (keyboardAnchor) {
+            const scale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+            const rect = keyboardAnchor.getBoundingClientRect();
+            const start = getDirection() === 'rtl' ? window.innerWidth - rect.right : rect.left;
+            menu.style.insetInlineStart = `${start / scale}px`;
+            menu.style.top = `${rect.bottom / scale}px`;
+        }
 
         // --- "Edit" item ---
-        const editItem = document.createElement('div');
-        editItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
+        const resolveFocusTarget = () => {
+            if (!keyboardAnchor) return null;
+            const current = [...(configsList?.querySelectorAll('[data-config-name]') || [])]
+                .find((card) => /** @type {HTMLElement} */ (card).dataset.configName === name);
+            return current instanceof HTMLElement ? current : keyboardAnchor.isConnected ? keyboardAnchor : null;
+        };
+        const editItem = document.createElement('button');
+        editItem.type = 'button';
+        editItem.className = 'flex items-center gap-2 w-full text-start px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
         // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         editItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg><span>${escapeHtml(t.edit || 'Edit')}</span>`;
         editItem.addEventListener('click', async (ev) => {
             ev.stopPropagation();
             removeContextMenu();
+            resolveFocusTarget()?.focus({ preventScroll: true });
             void showEditPanel({ name, url_display: configInfo.url_display, last_updated: configInfo.last_updated, auto_update_interval: configInfo.auto_update_interval, user_agent: configInfo.user_agent });
         });
         menuScroll.appendChild(editItem);
@@ -1346,13 +1226,15 @@ export function initSubscriptionSettings({
         menuScroll.appendChild(renameSep);
 
         // --- "Extract Rules to Library" item ---
-        const extractItem = document.createElement('div');
-        extractItem.className = 'flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
+        const extractItem = document.createElement('button');
+        extractItem.type = 'button';
+        extractItem.className = 'flex items-center gap-2 w-full text-start px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
         // eslint-disable-next-line no-unsanitized/property -- static SVG + values escaped via escapeHtml() // nosemgrep: js-innerhtml-assignment — verified safe, see eslint-disable above
         extractItem.innerHTML = `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>${escapeHtml(t.ruleLibrarySubscriptionExtract || 'Extract Rules to Library')}</span>`;
         extractItem.addEventListener('click', async (ev) => {
             ev.stopPropagation();
             removeContextMenu();
+            resolveFocusTarget()?.focus({ preventScroll: true });
             try {
                 const createdFile = await invoke(COMMANDS.RULE_EXTRACT_FROM_PROFILE, {
                     profileId: name,
@@ -1372,19 +1254,16 @@ export function initSubscriptionSettings({
 
         // --- "Extension Rules" submenu ---
         try {
-            const [ruleFilesData, groupData, allConfigs] = await Promise.all([
+            const [ruleFilesData, groupData] = await Promise.all([
                 invoke(COMMANDS.RULE_LIST).catch(() => []),
                 invoke(COMMANDS.RULE_GROUP_LIST).catch(() => ({ groups: [] })),
-                invoke(COMMANDS.LIST_CONFIGS).catch(() => []),
             ]);
+            if (!ownsRequest()) return;
 
             // Files switched off in the rule library are parked as .disabled and cannot be read; leave them out.
-            const files = /** @type {{filename: string, rule_count: number, source: string, enabled?: boolean}[]} */ (ruleFilesData || [])
-                .filter((f) => f.enabled !== false);
+            const files = /** @type {{filename: string, rule_count: number, source: string, enabled?: boolean, read_only?: boolean}[]} */ (ruleFilesData || [])
+                .filter((f) => f.enabled !== false && !f.read_only);
             const groupsList = /** @type {{name: string, files: string[]}[]} */ ((groupData?.groups) || []);
-            // All profile stems (for "exclude one profile" logic when unchecking global rules)
-            const allProfileStems = (/** @type {any[]} */ (allConfigs || []))
-                .map((c) => c.name.replace(/\.(yaml|yml)$/i, ''));
 
             if (files.length === 0) {
                 const emptyItem = document.createElement('div');
@@ -1421,47 +1300,104 @@ export function initSubscriptionSettings({
 
                 // Helper: create a checkbox item for a rule file
                 const createRuleItem = (/** @type {{filename: string, rule_count: number}} */ file) => {
-                    const item = document.createElement('label');
-                    item.className = 'flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
+                    const item = document.createElement('div');
+                    item.className = 'flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--zephyr-bg-muted)] hover:text-[var(--text-primary)] transition-colors';
+                    const bindingLabel = document.createElement('label');
+                    bindingLabel.className = 'flex items-center gap-2 flex-1 min-w-0 cursor-pointer';
 
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
                     checkbox.className = 'w-3 h-3 rounded border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-input)] text-accent focus:ring-accent/50 shrink-0';
                     checkbox.checked = false;
+                    // A default unchecked value is not the saved binding. Do
+                    // not let a click race the read that establishes it.
+                    checkbox.disabled = true;
                     checkbox.dataset.filename = file.filename;
+                    let savedBinding = false;
+                    let bindingLoaded = false;
+                    let bindingChanged = false;
+                    const retryBinding = document.createElement('button');
+                    retryBinding.type = 'button';
+                    retryBinding.className = 'btn-ghost text-xs hidden';
+                    retryBinding.textContent = t.retry || 'Retry';
+                    const patternNote = document.createElement('span');
+                    patternNote.className = 'text-2xs text-[var(--text-tertiary)] shrink-0 hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent';
+                    patternNote.tabIndex = -1;
+                    patternNote.textContent = `${t.ruleLibraryEditRule || 'Edit'} · YAML`;
+                    patternNote.title = t.ruleBindingPatternHint || 'Profile patterns must be edited in the rule file’s YAML editor.';
 
                     // Check binding by parsing __when__ block from rule file.
                     // - __when__.enabled === false → unchecked (explicitly disabled)
                     // - __when__.profile contains current profile → checked
                     // - no __when__ → global rule, checked (assumes already applied)
-                    invoke(COMMANDS.RULE_READ, { filename: file.filename })
+                    const readBinding = () => {
+                        const hadRetryFocus = document.activeElement === retryBinding;
+                        let focusMoved = false;
+                        /** @param {FocusEvent} event */
+                        const noteFocus = (event) => {
+                            if (event.target !== retryBinding && event.target !== document.body) focusMoved = true;
+                        };
+                        const cleanupFocus = () => {
+                            document.removeEventListener('focusin', noteFocus);
+                            menuFocusCleanups.delete(cleanupFocus);
+                        };
+                        if (hadRetryFocus) {
+                            document.addEventListener('focusin', noteFocus);
+                            menuFocusCleanups.add(cleanupFocus);
+                        }
+                        bindingLoaded = false;
+                        checkbox.disabled = true;
+                        retryBinding.disabled = true;
+                        return invoke(COMMANDS.RULE_READ, { filename: file.filename })
                         .then((content) => {
                             const str = /** @type {string} */ (content || '');
-                            const whenBlock = parseWhenBlock(str);
-                            if (!whenBlock) {
-                                // No __when__ → global rule, assume applied
-                                checkbox.checked = true;
+                            const binding = readRuleBinding(str, profileStem);
+                            const patterned = hasPatternRuleBinding(str);
+                            patternNote.classList.toggle('hidden', !patterned);
+                            checkbox.indeterminate = binding === null;
+                            checkbox.title = patterned ? patternNote.title : '';
+                            if (patterned) {
+                                checkbox.checked = binding === true;
+                                retryBinding.classList.add('hidden');
                                 return;
                             }
-                            if (whenBlock.enabled === false) {
-                                checkbox.checked = false;
-                                return;
+                            savedBinding = binding === true;
+                            bindingLoaded = true;
+                            if (!bindingChanged) {
+                                checkbox.checked = savedBinding;
+                                checkbox.disabled = false;
+                                retryBinding.classList.add('hidden');
                             }
-                            // Use flat loop instead of .some() to reduce nesting (SonarCloud)
-                            const normStem = profileStem.toLowerCase();
-                            let profileFound = false;
-                            for (const p of whenBlock.profiles) {
-                                if (p.toLowerCase() === normStem) { profileFound = true; break; }
-                            }
-                            checkbox.checked = profileFound;
                         })
-                        .catch(() => {});
+                        .catch((error) => {
+                            if (request !== subscriptionMenuRequest || mountedMenu !== menu || !menu.isConnected) return;
+                            showNotification(String(error), 'error');
+                            retryBinding.classList.remove('hidden');
+                        })
+                        .finally(() => {
+                            cleanupFocus();
+                            retryBinding.disabled = false;
+                            if (!hadRetryFocus || focusMoved || request !== subscriptionMenuRequest || mountedMenu !== menu || !menu.isConnected) return;
+                            if (document.activeElement !== retryBinding && document.activeElement !== document.body) return;
+                            if (!checkbox.disabled) checkbox.focus();
+                            else if (!retryBinding.classList.contains('hidden')) retryBinding.focus();
+                            else if (!patternNote.classList.contains('hidden')) patternNote.focus();
+                        });
+                    };
+                    retryBinding.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void readBinding();
+                    });
+                    void readBinding();
 
                     checkbox.addEventListener('change', async (ev) => {
                         ev.stopPropagation();
+                        if (!bindingLoaded) { checkbox.checked = savedBinding; return; }
+                        bindingChanged = true;
                         // Remember target state and revert immediately to avoid false state
                         const targetChecked = checkbox.checked;
-                        checkbox.checked = !targetChecked;
+                        checkbox.checked = savedBinding;
 
                         // Show spinner while processing
                         const spinner = document.createElement('span');
@@ -1469,64 +1405,27 @@ export function initSubscriptionSettings({
                         spinner.innerHTML = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 1 10 10"/></svg>'; // nosemgrep: js-innerhtml-assignment — static HTML
                         item.appendChild(spinner);
                         checkbox.disabled = true;
+                        let bindingSaved = false;
 
                         try {
                             const currentContent = /** @type {string} */ (await invoke(COMMANDS.RULE_READ, { filename: file.filename }));
-
-                            let newContent = currentContent;
-                            const hasWhen = /__when__\s*:/i.test(newContent);
-                            const hasProfile = /__when__\s*:\s*\{?[\s\S]*?profile\s*:/i.test(newContent);
-
-                            rulesLogger.info(`[rule-toggle] file=${file.filename} target=${targetChecked} hasWhen=${hasWhen} hasProfile=${hasProfile} profileStem=${profileStem}`);
-                            rulesLogger.info(`[rule-toggle] original content (first 500 chars):\n`, currentContent.slice(0, 500));
-
-                            if (targetChecked) {
-                                if (hasWhen) {
-                                    // Remove stale enabled: false
-                                    newContent = newContent.replace(/^[ \t]*enabled\s*:\s*false\s*?\n?/gim, '');
-                                    if (hasProfile) {
-                                        newContent = addProfileToWhen(newContent, profileStem);
-                                    } else {
-                                        // __when__ exists but no profile line — insert profile after __when__ header line
-                                        const lines = newContent.split('\n');
-                                        let insertIdx = -1;
-                                        for (let i = 0; i < lines.length; i++) {
-                                            if (/^__when__\s*:/i.test(lines[i])) {
-                                                insertIdx = i + 1;
-                                                break;
-                                            }
-                                        }
-                                        if (insertIdx >= 0) {
-                                            lines.splice(insertIdx, 0, `  profile: ${profileStem}`);
-                                            newContent = lines.join('\n');
-                                        }
-                                    }
-                                } else {
-                                    newContent = `__when__:\n  profile: ${profileStem}\n\n${newContent}`;
-                                }
-                            } else if (hasProfile) {
-                                newContent = removeProfileFromWhen(newContent, profileStem);
-                            } else if (hasWhen) {
-                                // Has __when__ but no profile line — add enabled: false to disable
-                                newContent = newContent.replace(/(__when__\s*:\s*\n)/i, '$1  enabled: false\n');
-                            } else {
-                                // No __when__ at all — rule applies to all profiles.
-                                // Add __when__ with all profiles EXCEPT the current one,
-                                // so the rule still works for other profiles.
-                                const normalizedStem = profileStem.toLowerCase();
-                                const otherProfiles = [];
-                                for (const p of allProfileStems) {
-                                    if (p.toLowerCase() !== normalizedStem) otherProfiles.push(p);
-                                }
-                                if (otherProfiles.length > 0) {
-                                    newContent = `__when__:\n  profile:\n${otherProfiles.map((p) => `    - ${p}`).join('\n')}\n\n${newContent}`;
-                                } else {
-                                    // Only one profile exists — disable the rule entirely
-                                    newContent = `__when__:\n  enabled: false\n\n${newContent}`;
-                                }
+                            savedBinding = readRuleBinding(currentContent, profileStem) === true;
+                            let allProfileStems = null;
+                            if (!targetChecked && hasGlobalRuleBinding(currentContent)) {
+                                const profiles = await invoke(COMMANDS.LIST_CONFIGS);
+                                if (!Array.isArray(profiles)) throw new Error('Could not list profiles. Reopen the menu and retry.');
+                                allProfileStems = profiles.map((c) => c.name.replace(/\.(yaml|yml)$/i, ''));
                             }
-
-                            await invoke(COMMANDS.RULE_UPDATE, { filename: file.filename, content: newContent });
+                            const newContent = setRuleBinding(currentContent, profileStem, targetChecked, allProfileStems);
+                            if (newContent === currentContent) {
+                                checkbox.checked = savedBinding;
+                                bindingChanged = false;
+                                return;
+                            }
+                            await invoke(COMMANDS.RULE_UPDATE, { filename: file.filename, content: newContent, expectedContent: currentContent });
+                            bindingSaved = true;
+                            savedBinding = targetChecked;
+                            checkbox.checked = targetChecked;
                             rulesLogger.info(`[rule-toggle] newContent (first 500 chars):\n`, newContent.slice(0, 500));
                             rulesLogger.info(`[rule-toggle] RULE_UPDATE done, calling prism.rebuild() ...`);
                             // Use rebuild instead of apply to ensure a clean base config.
@@ -1536,9 +1435,12 @@ export function initSubscriptionSettings({
                             // base to the original subscription profile first, so skipped/
                             // disabled patches produce no residual rules.
                             /** @type {any} */
-                            const rebuildResult = await prism.rebuild();
-                            // Only update visual state after rebuild succeeds
-                            checkbox.checked = targetChecked;
+                            const rebuildResult = await prism.rebuildWithOverrides();
+                            // The checkbox reflects the saved binding even if reload fails.
+                            if (rebuildResult?.core_reload_confirmed === true && rebuildResult.runtime_restore_success === false) {
+                                showNotification(t.rulesLoadedDnsRestoreFailed || 'Rules are running, but DNS restoration failed. Check DNS settings and retry.', 'warning');
+                                return;
+                            }
                             if (rebuildResult?.hot_reload_success === false) {
                                 // The rule file is saved and the config rebuilt, but the
                                 // core refused the reload: it is not running yet.
@@ -1555,11 +1457,16 @@ export function initSubscriptionSettings({
                             );
                         } catch (err) {
                             rulesLogger.error(`[rule-toggle] FAILED`, err);
-                            // Restore to previous state (opposite of target)
-                            checkbox.checked = !targetChecked;
-                            showNotification(String(err), 'error');
+                            checkbox.checked = savedBinding;
+                            showNotification(bindingSaved
+                                ? `${t.requireRestart || 'Changes saved. Restart the core to take effect.'}\n${String(err)}`
+                                : String(err), bindingSaved ? 'warning' : 'error');
+                            if (!bindingSaved && (String(err).includes('RULE_FILE_CHANGED:') || String(err).includes('PROFILE_BINDING_PATTERN:'))) {
+                                bindingChanged = false;
+                                await readBinding();
+                            }
                         } finally {
-                            checkbox.disabled = false;
+                            checkbox.disabled = !bindingLoaded;
                             spinner.remove();
                         }
                     });
@@ -1567,14 +1474,18 @@ export function initSubscriptionSettings({
                     const label = document.createElement('span');
                     label.className = 'truncate';
                     label.textContent = file.filename.replace(/\.yaml\.prism\.yaml$/i, '').replace(/\.(yaml|yml)$/i, '');
+                    retryBinding.setAttribute('aria-label', `${t.retry || 'Retry'}: ${label.textContent}`);
 
                     const count = document.createElement('span');
                     count.className = 'ms-auto text-2xs text-[var(--text-tertiary)] shrink-0';
                     count.textContent = String(file.rule_count || 0);
 
-                    item.appendChild(checkbox);
-                    item.appendChild(label);
+                    bindingLabel.appendChild(checkbox);
+                    bindingLabel.appendChild(label);
+                    item.appendChild(bindingLabel);
                     item.appendChild(count);
+                    item.appendChild(patternNote);
+                    item.appendChild(retryBinding);
                     return item;
                 };
 
@@ -1603,10 +1514,20 @@ export function initSubscriptionSettings({
             }
         } catch {
             // Silently skip rule list on error
+        } finally {
+            dispose();
         }
 
+        if (!ownsRequest()) return;
         document.body.appendChild(menu);
-        attachContextMenuCloseHandlers(menu);
+        mountedMenu = menu;
+        mountedMenuProfile = name;
+        menuRemovalObserver = new MutationObserver(() => {
+            if (mountedMenu === menu && !menu.isConnected) cleanupMountedMenu();
+        });
+        menuRemovalObserver.observe(document.body, { childList: true });
+        attachContextMenuCloseHandlers(menu, keyboardAnchor ? resolveFocusTarget : null);
+        if (keyboardAnchor && document.activeElement === keyboardAnchor) editItem.focus();
     };
 
     // ---- Config management (renderConfigs) ----
@@ -1721,6 +1642,11 @@ export function initSubscriptionSettings({
 
         // A newer render or destroy() has superseded this call — bail out.
         if (rev !== _renderRev) return;
+        if (mountedMenuProfile !== null && !configs.some((config) => config.name === mountedMenuProfile)) {
+            subscriptionMenuRequest++;
+            mountedMenu?.remove();
+            cleanupMountedMenu();
+        }
 
         const currentConfig = currentProfile(cfgSettings, 'config.yaml');
         const customArgs = cfgSettings.custom_args || [];
@@ -2287,6 +2213,10 @@ export function initSubscriptionSettings({
         renderConfigs,
         destroy: () => {
             _renderRev++; // Invalidate any in-flight render.
+            subscriptionMenuRequest++;
+            disposePendingMenu?.();
+            mountedMenu?.remove();
+            cleanupMountedMenu();
             _configUpdatedUnsub();
         },
     };

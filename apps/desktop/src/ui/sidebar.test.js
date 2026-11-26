@@ -1,0 +1,224 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { initSidebar, isToggleShortcut, snapExpanded, STORAGE_KEY, NARROW_PX, COLLAPSED_W, EXPANDED_W } from './sidebar.js';
+
+/** @param {Partial<KeyboardEventInit>} init */
+const key = (init) => new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+/** @param {string} type @param {number} pointerId @param {number} clientX */
+const pointer = (type, pointerId, clientX) => Object.assign(new MouseEvent(type, { bubbles: true, button: 0, clientX }), { pointerId });
+
+describe('isToggleShortcut', () => {
+    it('uses Control+Command+S on macOS', () => {
+        expect(isToggleShortcut(key({ key: 's', ctrlKey: true, metaKey: true }), true)).toBe(true);
+        expect(isToggleShortcut(key({ key: 's', metaKey: true }), true)).toBe(false);
+        expect(isToggleShortcut(key({ key: 'b', ctrlKey: true }), true)).toBe(false);
+    });
+    it('uses Ctrl+B elsewhere', () => {
+        expect(isToggleShortcut(key({ key: 'b', ctrlKey: true }), false)).toBe(true);
+        expect(isToggleShortcut(key({ key: 'B', ctrlKey: true }), false)).toBe(true);
+        expect(isToggleShortcut(key({ key: 'b', ctrlKey: true, shiftKey: true }), false)).toBe(false);
+        expect(isToggleShortcut(key({ key: 'b', ctrlKey: true, repeat: true }), false)).toBe(false);
+    });
+    it('uses the physical key only for a layout without Latin letters', () => {
+        // Russian layout: physical B types и.
+        expect(isToggleShortcut(key({ key: 'и', code: 'KeyB', ctrlKey: true }), false)).toBe(true);
+        // Dvorak: physical B is X, so Ctrl+X stays cut.
+        expect(isToggleShortcut(key({ key: 'x', code: 'KeyB', ctrlKey: true }), false)).toBe(false);
+    });
+});
+
+describe('snapExpanded', () => {
+    it('snaps to the nearer width', () => {
+        expect(snapExpanded(COLLAPSED_W)).toBe(false);
+        expect(snapExpanded(COLLAPSED_W + 30)).toBe(false);
+        expect(snapExpanded(EXPANDED_W - 30)).toBe(true);
+        expect(snapExpanded(EXPANDED_W)).toBe(true);
+    });
+});
+
+describe('initSidebar', () => {
+    /** @type {() => void} */
+    let cleanup = () => {};
+    const root = document.documentElement;
+    const setWidth = (/** @type {number} */ w) => {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: w });
+    };
+
+    beforeEach(() => {
+        localStorage.clear();
+        // Most cases start from a sidebar the user has expanded once.
+        localStorage.setItem(STORAGE_KEY, 'expanded');
+        root.className = '';
+        root.removeAttribute('style');
+        document.body.innerHTML = '<nav id="sidebar-nav"><button class="nav-btn"><span class="nav-label">Home</span></button></nav>';
+        setWidth(1200);
+    });
+    afterEach(() => {
+        cleanup();
+        document.body.innerHTML = '';
+    });
+
+    it('starts collapsed when nothing is saved, and adds an edge handle', () => {
+        localStorage.clear();
+        cleanup = initSidebar();
+        expect(root.classList.contains('sidebar-expanded')).toBe(false);
+        expect(document.querySelector('#sidebar-nav .sidebar-edge')).not.toBeNull();
+    });
+
+    it('restores a saved expanded state', () => {
+        cleanup = initSidebar();
+        expect(root.classList.contains('sidebar-expanded')).toBe(true);
+    });
+
+    it('restores a saved collapsed state', () => {
+        localStorage.setItem(STORAGE_KEY, 'collapsed');
+        cleanup = initSidebar();
+        expect(root.classList.contains('sidebar-expanded')).toBe(false);
+    });
+
+    it('toggles and remembers the choice with the shortcut', () => {
+        cleanup = initSidebar();
+        const ev = key({ key: 'b', ctrlKey: true });
+        document.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(true);
+        expect(root.classList.contains('sidebar-expanded')).toBe(false);
+        expect(localStorage.getItem(STORAGE_KEY)).toBe('collapsed');
+        document.dispatchEvent(key({ key: 'b', ctrlKey: true }));
+        expect(root.classList.contains('sidebar-expanded')).toBe(true);
+        expect(localStorage.getItem(STORAGE_KEY)).toBe('expanded');
+    });
+
+    it('collapses below the narrow width and comes back after', () => {
+        cleanup = initSidebar();
+        setWidth(NARROW_PX - 1);
+        window.dispatchEvent(new Event('resize'));
+        expect(root.classList.contains('sidebar-expanded')).toBe(false);
+        // Auto-collapse does not overwrite the saved choice.
+        expect(localStorage.getItem(STORAGE_KEY)).toBe('expanded');
+        setWidth(NARROW_PX + 100);
+        window.dispatchEvent(new Event('resize'));
+        expect(root.classList.contains('sidebar-expanded')).toBe(true);
+    });
+
+    it('overlays the content when expanded in a narrow window, without saving', () => {
+        localStorage.setItem(STORAGE_KEY, 'collapsed');
+        setWidth(NARROW_PX - 100);
+        cleanup = initSidebar();
+        expect(root.classList.contains('sidebar-expanded')).toBe(false);
+        document.dispatchEvent(key({ key: 'b', ctrlKey: true }));
+        expect(root.classList.contains('sidebar-overlay')).toBe(true);
+        // The wide-window choice stays as saved.
+        expect(localStorage.getItem(STORAGE_KEY)).toBe('collapsed');
+        document.dispatchEvent(key({ key: 'Escape' }));
+        expect(root.classList.contains('sidebar-expanded')).toBe(false);
+        expect(root.classList.contains('sidebar-overlay')).toBe(false);
+    });
+
+    it('leaves handled Escape and modal Escape alone while the sidebar is overlaid', () => {
+        setWidth(NARROW_PX - 100);
+        cleanup = initSidebar();
+        document.dispatchEvent(key({ key: 'b', ctrlKey: true }));
+        const handled = key({ key: 'Escape' });
+        handled.preventDefault();
+        document.dispatchEvent(handled);
+        expect(root.classList.contains('sidebar-overlay')).toBe(true);
+        document.body.insertAdjacentHTML('beforeend', '<div id="modal" aria-modal="true"></div>');
+        document.dispatchEvent(key({ key: 'Escape' }));
+        expect(root.classList.contains('sidebar-overlay')).toBe(true);
+        document.getElementById('modal')?.remove();
+        document.dispatchEvent(key({ key: 'Escape' }));
+        expect(root.classList.contains('sidebar-overlay')).toBe(false);
+    });
+
+    it('leaves the shortcut to text fields and open dialogs', () => {
+        document.body.insertAdjacentHTML('beforeend', '<textarea id="ta"></textarea><div id="dlg" role="dialog" aria-modal="true" class="hidden"></div>');
+        cleanup = initSidebar();
+        const ta = /** @type {HTMLElement} */ (document.getElementById('ta'));
+        const inField = key({ key: 'b', ctrlKey: true });
+        ta.dispatchEvent(inField);
+        expect(inField.defaultPrevented).toBe(false);
+        expect(root.classList.contains('sidebar-expanded')).toBe(true);
+        // A dialog panel left inside a hidden backdrop does not count.
+        document.body.insertAdjacentHTML('beforeend', '<div class="hidden"><div role="dialog" aria-modal="true"></div></div>');
+        document.dispatchEvent(key({ key: 'b', ctrlKey: true }));
+        expect(root.classList.contains('sidebar-expanded')).toBe(false);
+        document.dispatchEvent(key({ key: 'b', ctrlKey: true }));
+        expect(root.classList.contains('sidebar-expanded')).toBe(true);
+        document.getElementById('dlg')?.classList.remove('hidden');
+        document.dispatchEvent(key({ key: 'b', ctrlKey: true }));
+        expect(root.classList.contains('sidebar-expanded')).toBe(true);
+    });
+
+    it('uses layout width under UI scaling', async () => {
+        root.style.setProperty('--ui-scale', '1.5');
+        setWidth(1200); // 800 CSS px of layout
+        cleanup = initSidebar();
+        expect(root.classList.contains('sidebar-expanded')).toBe(false);
+        root.style.setProperty('--ui-scale', '1'); // 1200 CSS px: wide again
+        await Promise.resolve();
+        expect(root.classList.contains('sidebar-expanded')).toBe(true);
+    });
+
+    it('pins the width before overlaying a narrow-window drag', () => {
+        setWidth(NARROW_PX - 100);
+        cleanup = initSidebar();
+        const nav = /** @type {HTMLElement} */ (document.getElementById('sidebar-nav'));
+        const edge = /** @type {HTMLElement} */ (document.querySelector('.sidebar-edge'));
+        edge.dispatchEvent(pointer('pointerdown', 1, 80));
+        expect(root.classList.contains('sidebar-overlay')).toBe(true);
+        expect(nav.style.getPropertyValue('--sidebar-drag-w')).not.toBe('');
+        const initialWidth = nav.style.getPropertyValue('--sidebar-drag-w');
+        edge.dispatchEvent(pointer('pointermove', 2, 100));
+        expect(nav.style.getPropertyValue('--sidebar-drag-w')).toBe(initialWidth);
+        edge.dispatchEvent(pointer('pointermove', 1, 100));
+        expect(nav.style.getPropertyValue('--sidebar-drag-w')).not.toBe(initialWidth);
+        edge.dispatchEvent(pointer('pointerup', 2, 100));
+        expect(root.classList.contains('sidebar-dragging')).toBe(true);
+        edge.dispatchEvent(pointer('pointercancel', 1, 100));
+        expect(root.classList.contains('sidebar-overlay')).toBe(false);
+        expect(nav.style.getPropertyValue('--sidebar-drag-w')).toBe('');
+    });
+
+    it('snaps using the release coordinate when it crosses the midpoint after the last move', () => {
+        cleanup = initSidebar();
+        const nav = /** @type {HTMLElement} */ (document.getElementById('sidebar-nav'));
+        const edge = /** @type {HTMLElement} */ (document.querySelector('.sidebar-edge'));
+        vi.spyOn(nav, 'getBoundingClientRect').mockReturnValue(/** @type {DOMRect} */ ({ width: 80 }));
+        edge.dispatchEvent(pointer('pointerdown', 1, 80));
+        edge.dispatchEvent(pointer('pointermove', 1, 119));
+        edge.dispatchEvent(pointer('pointerup', 1, 121));
+        expect(root.classList.contains('sidebar-expanded')).toBe(true);
+        expect(localStorage.getItem(STORAGE_KEY)).toBe('expanded');
+    });
+
+    it('toggles on a double-click of the edge', () => {
+        cleanup = initSidebar();
+        document.querySelector('.sidebar-edge')?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+        expect(root.classList.contains('sidebar-expanded')).toBe(false);
+    });
+
+    it('anchors a keyboard context menu to the focused sidebar control', () => {
+        cleanup = initSidebar();
+        const button = /** @type {HTMLElement} */ (document.querySelector('.nav-btn'));
+        button.focus();
+        const event = key({ key: 'F10', shiftKey: true });
+        button.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(true);
+        expect(document.activeElement).toBe(document.querySelector('.sidebar-menu-item'));
+        document.dispatchEvent(key({ key: 'Escape' }));
+        expect(document.activeElement).toBe(button);
+    });
+
+    it('opens a one-item menu on right-click', () => {
+        cleanup = initSidebar();
+        const nav = /** @type {HTMLElement} */ (document.getElementById('sidebar-nav'));
+        const edge = /** @type {HTMLElement} */ (document.querySelector('.sidebar-edge'));
+        edge.dispatchEvent(pointer('pointerdown', 1, 80));
+        nav.dispatchEvent(new MouseEvent('contextmenu', { button: 2, bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+        const item = document.querySelector('.sidebar-menu-item');
+        expect(item).not.toBeNull();
+        /** @type {HTMLElement} */ (item).click();
+        edge.dispatchEvent(pointer('pointercancel', 1, 80));
+        expect(root.classList.contains('sidebar-expanded')).toBe(false);
+        expect(localStorage.getItem(STORAGE_KEY)).toBe('collapsed');
+    });
+});

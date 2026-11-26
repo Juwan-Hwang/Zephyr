@@ -26,13 +26,23 @@ export async function updateSysProxyUI() {
         }
 
         if (!statusText) return;
+        if (document.getElementById('app-main-container')?.classList.contains('core-down')) {
+            statusText.dataset.i18n = 'coreNotRunning';
+            statusText.textContent = t('coreNotRunning');
+            statusText.classList.remove('text-accent');
+            statusText.classList.add('text-[var(--text-muted)]');
+            return;
+        }
 
+        // data-i18n follows the state, so a language switch keeps it.
+        const key = isActive ? 'stateOn' : (appStore.get('noSubscription') ? 'sysProxyNeedsSubscription' : 'stateOff');
+        statusText.dataset.i18n = key;
         if (isActive) {
-            statusText.textContent = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]).proxyStatusActive || 'Proxy Active';
+            statusText.textContent = t('stateOn');
             statusText.classList.remove('text-[var(--text-muted)]');
             statusText.classList.add('text-accent');
         } else {
-            statusText.textContent = appStore.get('noSubscription') ? t('sysProxyNeedsSubscription') : t('proxyStatusReady');
+            statusText.textContent = appStore.get('noSubscription') ? t('sysProxyNeedsSubscription') : t('stateOff');
             statusText.classList.remove('text-accent');
             statusText.classList.add('text-[var(--text-muted)]');
         }

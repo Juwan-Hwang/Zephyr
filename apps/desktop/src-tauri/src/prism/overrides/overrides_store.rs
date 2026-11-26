@@ -369,9 +369,8 @@ fn load_meta_inner(state: &PrismState) -> Result<OverrideMeta, String> {
     }
     let content =
         fs::read_to_string(&path).map_err(|e| format!("Failed to read meta.json: {e}"))?;
-    // Handle empty file gracefully (return default instead of error)
     if content.trim().is_empty() {
-        return Ok(OverrideMeta::default());
+        return Err("Failed to parse meta.json: existing metadata is empty".to_owned());
     }
     serde_json::from_str(&content).map_err(|e| format!("Failed to parse meta.json: {e}"))
 }
