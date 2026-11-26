@@ -7,7 +7,8 @@
 //  Fatal/Error events trigger immediate Toast notifications.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { listen } from '../api.js';
+import { listen, clearProviderCache } from '../api.js';
+import { Bus, Events } from '../ui/events.js';
 import { showNotification } from '../ui/notifications.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -26,6 +27,42 @@ let _prismEventUnlisten = null;
 
 /** @type {(() => Promise<void>) | null} */
 let _backendEventUnlisten = null;
+/** @type {(() => Promise<void>) | null} */
+let _diagnosticsUnlisten = null;
+let _diagnosticsEpoch = 0;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let _diagnosticsRetry = null;
+/** @type {Promise<void> | null} */
+let _diagnosticsRegistration = null;
+
+function ensureDiagnosticsListener() {
+    if (_diagnosticsUnlisten || _diagnosticsRegistration) return _diagnosticsRegistration;
+    const epoch = _diagnosticsEpoch;
+    const attempt = (async () => {
+        try {
+            const unlisten = await listen('diagnostics-invalidated', () => {
+                if (epoch !== _diagnosticsEpoch) return;
+                clearProviderCache();
+                Bus.emit(Events.DIAGNOSTICS_INVALIDATED);
+            });
+            if (epoch !== _diagnosticsEpoch) { await unlisten?.(); return; }
+            _diagnosticsUnlisten = unlisten;
+        } catch (error) {
+            logger.warn('Diagnostic reload listener could not be registered', error);
+            if (epoch === _diagnosticsEpoch) {
+                _diagnosticsRetry = setTimeout(() => {
+                    _diagnosticsRetry = null;
+                    if (epoch === _diagnosticsEpoch) void ensureDiagnosticsListener();
+                }, 3000);
+            }
+        }
+    })();
+    _diagnosticsRegistration = attempt;
+    void attempt.finally(() => {
+        if (_diagnosticsRegistration === attempt) _diagnosticsRegistration = null;
+    });
+    return attempt;
+}
 
 /** @type {Set<(entry: { type: string, message: string, timestamp: string, source?: string, data?: any }) => void>} */
 const _eventSubscribers = new Set();
@@ -286,7 +323,7 @@ export function clearExtLogEvents() {
  */
 export async function initBackendEventListeners() {
     // Already initialized
-    if (_backendEventUnlisten && _prismEventUnlisten) return;
+    if (_backendEventUnlisten && _prismEventUnlisten && _diagnosticsUnlisten) return;
 
     // backend-event listener — registered FIRST and awaited directly.
     //
@@ -311,6 +348,7 @@ export async function initBackendEventListeners() {
             // Tauri event API not available (e.g. browser dev mode)
         }
     }
+    await ensureDiagnosticsListener();
 }
 
 /**
@@ -318,11 +356,16 @@ export async function initBackendEventListeners() {
  * @returns {void}
  */
 export function cleanupBackendEventListeners() {
-    for (const unlisten of [_prismEventUnlisten, _backendEventUnlisten]) {
+    _diagnosticsEpoch++;
+    if (_diagnosticsRetry !== null) clearTimeout(_diagnosticsRetry);
+    _diagnosticsRetry = null;
+    _diagnosticsRegistration = null;
+    for (const unlisten of [_prismEventUnlisten, _backendEventUnlisten, _diagnosticsUnlisten]) {
         unlisten?.().catch((/** @type {unknown} */ err) => {
             logger.warn('unlisten failed:', err);
         });
     }
     _prismEventUnlisten = null;
     _backendEventUnlisten = null;
+    _diagnosticsUnlisten = null;
 }

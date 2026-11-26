@@ -8,6 +8,7 @@
 
 import { setup3DEffect } from './3d-effect.js';
 import { appStore } from './state.js';
+import { relocateCoreStartError } from './core-error.js';
 
 /** @returns {boolean} */
 function prefersReducedMotion() {
@@ -61,6 +62,9 @@ export function switchPage(pageId) {
             dropPageEnterListener(p);
         }
     });
+
+    // A core-start error card follows the user to the page now showing.
+    relocateCoreStartError();
 
     // Cross-fade the shared background glow for the active page
     document.querySelectorAll('[id^="glow-"]').forEach(g => {

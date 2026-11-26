@@ -50,6 +50,12 @@ import { setSysProxyEnabled, refreshSysProxyStatus } from './sysproxy.js';
 import { syncNoSubscriptionState } from './no-subscription.js';
 import { createProcessIcon } from './process-icon.js';
 import { mirrorTunToggle } from './tun.js';
+import { lowerLatencyNodes, splitFlag, exitIpButton, exitIpKey } from './home-stats.js';
+import { exitIpFor, onExitIpRefreshed, retryFailedExitIp } from './exit-ip.js';
+import { exitIpSummary, closeNodeDetails, adoptNodeDetails, dropOrphanedNodeDetails } from './node-details.js';
+import { initHomeProfile } from './home-profile.js';
+import { isSpeedTestRunning, onSpeedTestChange } from './speed-test.js';
+import { parseSubInfo, gb } from '../utils/sub-info.js';
 
 /**
  * The profile a node switch is filed under, read in the switch's turn and
@@ -539,6 +545,9 @@ export async function measureLatency(leaf) {
     // A stop or switch earlier leaves the shared signal aborted, and a later one
     // could not be told apart from a timeout: with no full test running, start
     // from a fresh controller (as the proxies page does).
+    // A download test is running: a probe now would share its bandwidth (and
+    // read slow); it says nothing about the node.
+    if (isSpeedTestRunning()) return { delay: -1, cancelled: true };
     if (getLatencyTestSignal().aborted && !appStore.get('isTestingLatency')) resetLatencyTestController();
     const signal = getLatencyTestSignal();
     // A stopped full test is still winding down: this test would be cut short.
@@ -551,7 +560,7 @@ export async function measureLatency(leaf) {
         result = -1;
     }
     if (isUsableDelay(result)) return { delay: /** @type {number} */ (result), cancelled: false };
-    return { delay: -1, cancelled: signal.aborted };
+    return { delay: -1, cancelled: signal.aborted || getLatencyTestSignal() !== signal };
 }
 
 /**
@@ -698,6 +707,14 @@ let pendingLatencyRetry = null;
  * @returns {() => void} cancels the retry
  */
 export function scheduleLatencyRetry(run) {
+    if (isSpeedTestRunning()) {
+        const unsubscribe = onSpeedTestChange(() => {
+            if (isSpeedTestRunning()) return;
+            unsubscribe();
+            run();
+        });
+        return unsubscribe;
+    }
     if (appStore.get('isTestingLatency') && getLatencyTestSignal().aborted) {
         const unsubscribe = appStore.subscribe('isTestingLatency', (/** @type {unknown} */ testing) => {
             if (testing) return;
@@ -876,6 +893,7 @@ async function pollConnections() {
 
 /** @type {Array<{ name: string, type: string, host: string, lat: number }>} */
 let pickerNodes = [];
+let pickerGroupName = '';
 let activeNodeIdx = 0;
 /** @type {Array<{ name: string, file: string, active: boolean }>} */
 let subConfigs = [];
@@ -977,9 +995,11 @@ async function buildPickerFromProxyGroups(proxyGroupsResult, generation) {
     // Build host map from run_config.yaml
     const runConfig = await getRunConfigCached();
     const hostMap = buildHostMap(runConfig);
+    if (generation !== latencyGeneration) return { currentNodeName, proxyMap, hostMap };
 
     // Build the flat node list for the picker
     const activeGroupAll = proxyMap[uiGroupName]?.all || [];
+    pickerGroupName = uiGroupName;
     pickerNodes = activeGroupAll.map((/** @type {string} */ name) => ({
         name,
         type: proxyMap[name]?.type || 'Unknown',
@@ -1118,8 +1138,11 @@ function scheduleNodeRetry() {
  * @param {Record<string, {server?: string, port?: number|string}>} [hostMap]
  */
 function renderNodeCard(nodeName, proxies, hostMap = {}) {
+    _lastNodeArgs = [nodeName, proxies, hostMap];
     // Resolve to leaf node (nodeName may be a group like "♻️ 自动选择")
     const leafName = resolveLeafNode(nodeName, proxies) || nodeName;
+    renderNodeAlts(proxies, leafName || nodeName);
+    void renderNodeIp(leafName || nodeName);
     const node = proxies[leafName] || proxies[nodeName];
     const host = hostMap[leafName] || hostMap[nodeName];
     const nameEl = $('dz-node-name');
@@ -1139,6 +1162,209 @@ function renderNodeCard(nodeName, proxies, hostMap = {}) {
 
     // Render node picker
     renderPicker();
+}
+
+/** @type {[string, Record<string, any>, Record<string, {server?: string, port?: number|string}>] | null} */
+let _lastNodeArgs = null;
+
+/** Most lower-latency nodes the node card lists; ones that do not fit are hidden. */
+const CONSOLE_ALTS = 3;
+
+/**
+ * List the selected group's fastest other nodes under the node card.
+ * @param {Record<string, any>} proxies
+ * @param {string} leaf
+ */
+function renderNodeAlts(proxies, leaf) {
+    const wrap = $('dz-node-alts');
+    const list = $('dz-node-alts-list');
+    if (!wrap || !list) return;
+    const group = pickerGroupName;
+    const alts = group ? lowerLatencyNodes(proxies, group, leaf, CONSOLE_ALTS) : [];
+    wrap.hidden = alts.length === 0;
+    // A refresh must not take keyboard focus away from the row it rebuilds.
+    const focused = /** @type {HTMLElement | null} */ (list.contains(document.activeElement) ? document.activeElement : null);
+    const focusedNode = focused?.dataset?.node ?? null;
+    list.replaceChildren();
+    for (const alt of alts) {
+        const { flag, label } = splitFlag(alt.name);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'dz-alt';
+        btn.dataset.node = alt.name;
+        btn.dataset.group = group;
+        btn.title = t('homeSwitchTo', { name: alt.name });
+        if (flag) {
+            const f = document.createElement('span');
+            f.className = 'home-alt-flag';
+            f.setAttribute('aria-hidden', 'true');
+            f.textContent = flag;
+            btn.append(f);
+        }
+        const n = document.createElement('span');
+        n.className = 'home-alt-name';
+        n.textContent = label;
+        const ms = document.createElement('span');
+        ms.className = 'home-alt-ms';
+        ms.textContent = `${alt.delay} ms`;
+        btn.append(n, ms);
+        list.append(btn);
+        if (focusedNode !== null && alt.name === focusedNode) btn.focus({ preventScroll: true });
+    }
+    fitNodeAlts();
+}
+
+/** Hide trailing lower-latency rows that would overflow the node card (never half a row). */
+function fitNodeAlts() {
+    const card = $('dz-node-alts')?.closest('.glass-card');
+    const rows = /** @type {HTMLElement[]} */ (Array.from(document.querySelectorAll('#dz-node-alts-list .dz-alt')));
+    rows.forEach((r) => { r.hidden = false; });
+    if (!card || !document.documentElement.classList.contains('dz-wide')) return;
+    let overflow = card.scrollHeight - card.clientHeight - 1;
+    const bottoms = rows.map((r) => r.offsetTop + r.offsetHeight);
+    let firstHidden = rows.length;
+    for (let i = rows.length - 1; i > 0 && overflow > 0; i--) {
+        overflow -= bottoms[i] - bottoms[i - 1];
+        firstHidden = i;
+    }
+    if (rows.slice(firstHidden).some((row) => row.contains(document.activeElement))) {
+        (rows[Math.max(0, firstHidden - 1)] || $('dz-node-picker-btn'))?.focus({ preventScroll: true });
+    }
+    rows.forEach((r, i) => { r.hidden = i >= firstHidden; });
+}
+
+/** Bumped by every renderNodeIp: an older lookup must not draw over a newer one. */
+let nodeIpAsk = 0;
+
+/**
+ * Drop the shown exit address (core restarted): another profile can have a
+ * node of the same name, so the old address must not stay beside it.
+ */
+function forgetNodeIp() {
+    nodeIpAsk++;
+    // The node gets its one later try again after this.
+    nodeIpRetryLeaf = '';
+    if (nodeIpRetryTimer) clearTimeout(nodeIpRetryTimer);
+    nodeIpRetryTimer = null;
+    const el = $('dz-node-ip');
+    if (!el) return;
+    if (el.dataset.leaf) closeNodeDetails();
+    el.replaceChildren();
+    el.hidden = true;
+    delete el.dataset.leaf;
+}
+
+/** The node whose one later lookup was scheduled (a node gets one per visit). */
+let nodeIpRetryLeaf = '';
+/** @type {ReturnType<typeof setTimeout> | null} */
+let nodeIpRetryTimer = null;
+/** A lookup that found nothing (a network hiccup) is tried once more, after this. */
+const NODE_IP_RETRY_MS = 30_000;
+
+/**
+ * After a lookup found nothing, look `leaf` up once more later while it is
+ * still the node shown (the minimal home does the same for its own line).
+ * @param {string} leaf
+ */
+function scheduleNodeIpRetry(leaf) {
+    // Hidden: nothing to show it on, and an armed marker would block the
+    // retry when the page comes back to this node.
+    if (!isActive || !leaf || nodeIpRetryLeaf === leaf) return;
+    nodeIpRetryLeaf = leaf;
+    if (nodeIpRetryTimer) clearTimeout(nodeIpRetryTimer);
+    nodeIpRetryTimer = setTimeout(() => {
+        nodeIpRetryTimer = null;
+        if (!isActive) {
+            // Not spent: the next visit to this node may arm it again.
+            if (nodeIpRetryLeaf === leaf) nodeIpRetryLeaf = '';
+            return;
+        }
+        if ($('dz-node-ip')?.dataset.leaf !== leaf) return;
+        retryFailedExitIp(leaf);
+        void renderNodeIp(leaf);
+    }, NODE_IP_RETRY_MS);
+}
+
+/**
+ * The exit address line under the node name, when "show IP address" is on.
+ * @param {string} leaf
+ */
+async function renderNodeIp(leaf) {
+    if (!isActive) return;
+    const el = $('dz-node-ip');
+    if (!el) return;
+    const ask = ++nodeIpAsk;
+    // Another node: its predecessor's address must not stay beside the new name.
+    if (el.dataset.leaf !== leaf) {
+        if (el.dataset.leaf) closeNodeDetails();
+        el.replaceChildren();
+        el.hidden = true;
+    }
+    // Another node: it gets its own later try.
+    if (nodeIpRetryLeaf && nodeIpRetryLeaf !== leaf) {
+        nodeIpRetryLeaf = '';
+        if (nodeIpRetryTimer) clearTimeout(nodeIpRetryTimer);
+        nodeIpRetryTimer = null;
+    }
+    el.dataset.leaf = leaf;
+    const r = leaf ? await exitIpFor(leaf) : null;
+    // A later render (another node, the setting turned off) wins.
+    if (!isActive || ask !== nodeIpAsk) return;
+    if ($('dz-node-name')?.dataset.leaf && $('dz-node-name')?.dataset.leaf !== leaf) return;
+    if (!r) {
+        el.replaceChildren();
+        el.hidden = true;
+        dropOrphanedNodeDetails();
+        fitNodeAlts();
+        scheduleNodeIpRetry(leaf);
+        return;
+    }
+    const summary = exitIpSummary(r);
+    // The same address again: keep the button (and its focus).
+    const shown = /** @type {HTMLElement | null} */ (el.querySelector('.home-ip-btn'));
+    if (shown && shown.dataset.leaf === leaf && shown.dataset.key === exitIpKey(summary)) {
+        el.hidden = false;
+        return;
+    }
+    const btn = exitIpButton(summary, leaf);
+    el.replaceChildren(btn);
+    // Only once the old line is gone does the open card move to the new one.
+    adoptNodeDetails(btn, leaf);
+    el.hidden = false;
+    // The card's box keeps its size, so no resize tells the rows to refit.
+    fitNodeAlts();
+}
+
+/**
+ * Wide windows (≥ 1081 px): the subscription card sits in the bottom row
+ * beside connections and events, so the right column holds only the node
+ * card and the traffic card is not stretched by two side cards. Narrower:
+ * under the node card, as before.
+ * @returns {() => void}
+ */
+function placeSubCard() {
+    const card = $('dz-sub-card');
+    const side = document.querySelector('.dz-side');
+    const bottom = document.querySelector('.dz-grid-bottom');
+    if (!card || !side || !bottom || typeof window.matchMedia !== 'function') return () => {};
+    const mq = window.matchMedia('(min-width: 1081px)');
+    const place = () => {
+        const wide = mq.matches;
+        document.documentElement.classList.toggle('dz-wide', wide);
+        if (wide) { bottom.append(card); card.style.flex = ''; }
+        else { side.append(card); card.style.flex = '1'; }
+        fitNodeAlts();
+    };
+    place();
+    mq.addEventListener?.('change', place);
+    const nodeCard = $('dz-node-alts')?.closest('.glass-card');
+    const ro = nodeCard && typeof ResizeObserver === 'function' ? new ResizeObserver(() => requestAnimationFrame(fitNodeAlts)) : null;
+    if (ro && nodeCard) ro.observe(nodeCard);
+    return () => {
+        mq.removeEventListener?.('change', place);
+        ro?.disconnect();
+        document.documentElement.classList.remove('dz-wide');
+    };
 }
 
 function renderPicker() {
@@ -1250,10 +1476,13 @@ function renderPicker() {
 /**
  * Select a picker node by index — extracted for event delegation.
  * @param {number} i
+ * @param {string} [drawnGroup] group whose rows supplied this click
  */
-async function selectPickerNode(i) {
+async function selectPickerNode(i, drawnGroup = pickerGroupName) {
     const n = pickerNodes[i];
     if (!n) return;
+    const currentGroup = appStore.get('uiGroupName') || '';
+    if (!drawnGroup || drawnGroup !== pickerGroupName || drawnGroup !== currentGroup) return;
     if (i === activeNodeIdx) {
         setPicker(false);
         return;
@@ -1264,7 +1493,7 @@ async function selectPickerNode(i) {
         return;
     }
     try {
-        const targetGroup = appStore.get('uiGroupName') || '';
+        const targetGroup = drawnGroup;
         if (!targetGroup) {
             consoleLogger.warn('No proxy group selected, cannot switch node');
             showNotification(t('notifSwitchFailed'), 'error');
@@ -1274,11 +1503,12 @@ async function selectPickerNode(i) {
         // a later click cannot go out first: a profile switch while the
         // request runs must not file this node under the one that replaced it.
         const coreAtClick = coreReplacements();
+        const networkUnchanged = noNetworkChangeSince();
         const { ok: success, reason, maybeApplied, prepared: profileAtClick = '', seq: switchSeq } = await switchProxyResult(targetGroup, n.name, {
             prepare: profileForSwitch,
             // A change that began meanwhile could carry its own node over
             // this switch, or take it to the core that replaces this one.
-            canSend: noNetworkChangeSince(),
+            canSend: () => networkUnchanged() && pickerGroupName === targetGroup && appStore.get('uiGroupName') === targetGroup,
         });
         if (reason === SWITCH_BUSY) {
             showNotification(t('consoleSubUpdateBusy'), 'info');
@@ -1391,19 +1621,38 @@ function setPicker(open) {
 /** @type {any} */
 let _subConfig = null;
 
+/** Bumped by every refreshSubscriptionData: an older one must not draw over a newer one. */
+let subAsk = 0;
+
+function forgetSubscriptionData() {
+    subAsk++;
+    _subConfig = null;
+    renderSubscriptionCard();
+}
+
 async function refreshSubscriptionData() {
     if (!isActive) return;
+    const ask = ++subAsk;
     try {
         const settings = await getSettingsCached();
+        // A newer refresh already ran: these settings may be the old profile's.
+        if (ask !== subAsk) return;
         const currentConfig = currentProfile(settings);
+        // Another profile now: the old one's figures and Update Now go until
+        // its own are read (a failed read must not leave them acting on it).
+        if (_subConfig && _subConfig.name !== currentConfig) {
+            _subConfig = null;
+            renderSubscriptionCard();
+        }
         const configs = await invoke(COMMANDS.LIST_CONFIGS);
+        if (ask !== subAsk) return;
         const subscriptionConfigs = (configs || []).filter((/** @type {any} */ c) => c.url_display);
-        // Show the currently active subscription, not just the first one
-        _subConfig = subscriptionConfigs.find((/** @type {any} */ c) => c.name === currentConfig)
-            || subscriptionConfigs[0]
-            || null;
+        // Only the active profile's figures: the card sits under the profile
+        // menu that names it, so another subscription's would read as its own.
+        _subConfig = subscriptionConfigs.find((/** @type {any} */ c) => c.name === currentConfig) || null;
         renderSubscriptionCard();
     } catch (e) {
+        if (ask === subAsk) forgetSubscriptionData();
         consoleLogger.warn('Failed to fetch subscription data', e);
     }
 }
@@ -1423,24 +1672,6 @@ function fmtRelativeTime(timestamp) {
 }
 
 /**
- * Parse subscription info string into { upload, download, total, expire }.
- * @param {string | undefined} subInfo
- * @returns {{ upload: number, download: number, total: number, expire: number }}
- */
-function parseSubInfo(subInfo) {
-    if (!subInfo) return { upload: 0, download: 0, total: 0, expire: 0 };
-    let upload = 0, download = 0, total = 0, expire = 0;
-    for (const p of subInfo.split(';')) {
-        const s = p.trim();
-        if (s.startsWith('upload=')) upload = Number.parseInt(s.slice(7), 10) || 0;
-        else if (s.startsWith('download=')) download = Number.parseInt(s.slice(9), 10) || 0;
-        else if (s.startsWith('total=')) total = Number.parseInt(s.slice(6), 10) || 0;
-        else if (s.startsWith('expire=')) expire = Number.parseInt(s.slice(7), 10) || 0;
-    }
-    return { upload, download, total, expire };
-}
-
-/**
  * Render quota (used / total) into the card elements.
  * @param {number} used
  * @param {number} total
@@ -1451,11 +1682,8 @@ function renderQuota(used, total) {
     const progressEl = $('dz-sub-progress');
     if (total > 0) {
         const pct = Math.min(100, Math.max(0, (used / total) * 100));
-        // "102 GB / 200 GB used": both figures carry the unit, decimals only below 10 GB.
-        const gb = (/** @type {number} */ bytes) => {
-            const v = bytes / 1073741824;
-            return `${v < 10 ? v.toFixed(1) : Math.round(v)} GB`;
-        };
+        // "102 GB / 200 GB used": both figures carry the unit; under 1 GB in MB,
+        // as the profile menu shows it.
         if (usedValEl) usedValEl.textContent = gb(used);
         if (usedLabelEl) usedLabelEl.textContent = `/ ${gb(total)} ${t('consoleSubUsed')}`;
         if (progressEl) progressEl.style.width = pct + '%';
@@ -1478,7 +1706,8 @@ function renderExpiry(expireTs) {
         const dateStr = new Intl.DateTimeFormat(uiLocale(), {
             year: 'numeric', month: '2-digit', day: '2-digit',
         }).format(d);
-        const diffDays = Math.floor((expireTs - Date.now() / 1000) / 86400);
+        // Rounded up, as the profile menu and subscription list show it.
+        const diffDays = Math.ceil((expireTs - Date.now() / 1000) / 86400);
         expiryEl.textContent = diffDays > 0 ? `${dateStr} · ${t('consoleSubDaysLeft', diffDays, { d: String(diffDays) })}` : dateStr;
     } else {
         expiryEl.textContent = '—';
@@ -1568,9 +1797,18 @@ async function updateSubscription() {
         return;
     }
     appStore.set('isNetworkUpdating', true);
+    // Read once: a profile switch meanwhile clears _subConfig.
+    const subName = _subConfig.name;
+    const coreAtClick = coreGeneration;
     try {
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        if (coreAtClick !== coreGeneration || currentProfile(settings) !== subName) {
+            forgetSubscriptionData();
+            void refreshSubscriptionData();
+            return;
+        }
         const results = await invoke(COMMANDS.DOWNLOAD_SUB_BATCH, {
-            items: [{ name: _subConfig.name }],
+            items: [{ name: subName }],
             userAgent: getSubscriptionUserAgent(),
         });
         if (Array.isArray(results) && results.length > 0 && results[0].success) {
@@ -1581,8 +1819,8 @@ async function updateSubscription() {
             // If the updated subscription is the active config, reload the core
             // so the new node list takes effect immediately.
             const cfgSettings = await getSettingsCached();
-            if (currentProfile(cfgSettings) === _subConfig.name) {
-                await switchToConfig(_subConfig.name, cfgSettings?.custom_args || []);
+            if (currentProfile(cfgSettings) === subName) {
+                await switchToConfig(subName, cfgSettings?.custom_args || []);
             }
             showNotification(t('consoleSubUpdateOk'), 'success');
         } else {
@@ -1674,17 +1912,35 @@ function syncModeSegs(/** @type {string} */ mode) {
 
 const TEMPLATE = `
 <div class="dz-content custom-scrollbar">
-    <header class="dz-header">
-        <div>
-            <h1 id="dz-page-title" data-i18n="consoleTitle">Console</h1>
-            <div class="dz-sub">
-                <span class="dz-live-dot"></span>
-                <span id="dz-uptime" data-i18n="consoleUptimeRunning">Core running —</span>
-                <span style="color:var(--zephyr-text-tertiary)">·</span>
-                <span id="dz-version" style="font-family:var(--font-mono)">mihomo</span>
+    <!-- Switch strip: system proxy, mode, TUN (in place of the page title) -->
+    <div class="glass-card home-strip dz-strip relative z-10 shrink-0" id="dz-strip">
+        <div class="home-strip-cell">
+            <span class="home-strip-icon is-accent" aria-hidden="true"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+            <div class="home-strip-text">
+                <h3 id="dz-sys-toggle-label" class="home-strip-title" data-i18n="consoleSysProxy">System Proxy</h3>
+                <p id="dz-sys-sub" class="home-strip-sub" data-i18n="stateOff">Off</p>
+            </div>
+            <label class="ios-switch shrink-0"><input type="checkbox" id="dz-sys-toggle" aria-labelledby="dz-sys-toggle-label" aria-describedby="dz-sys-sub"><span class="switch-slider"></span></label>
+        </div>
+        <div class="home-strip-sep" aria-hidden="true"></div>
+        <div class="home-strip-cell is-mode">
+            <div class="dz-mode-seg" id="dz-mode-seg" role="group" aria-label="Proxy Mode" data-i18n-aria-label="mode">
+                <div class="dz-mode-slider" id="dz-mode-slider"></div>
+                <button type="button" data-mode="rule" aria-pressed="true" data-i18n="rule">Rule</button>
+                <button type="button" data-mode="global" aria-pressed="false" data-i18n="global">Global</button>
+                <button type="button" data-mode="direct" aria-pressed="false" data-i18n="direct">Direct</button>
             </div>
         </div>
-    </header>
+        <div class="home-strip-sep" aria-hidden="true"></div>
+        <div class="home-strip-cell">
+            <span class="home-strip-icon is-rose" aria-hidden="true"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>
+            <div class="home-strip-text">
+                <h3 id="dz-tun-toggle-label" class="home-strip-title">TUN</h3>
+                <p id="dz-tun-sub" class="home-strip-sub" data-i18n="stateOff">Off</p>
+            </div>
+            <label class="ios-switch shrink-0"><input type="checkbox" id="dz-tun-toggle" aria-labelledby="dz-tun-toggle-label" aria-describedby="dz-tun-sub"><span class="switch-slider"></span></label>
+        </div>
+    </div>
 
     <!-- KPI strip -->
     <div class="dz-kpis">
@@ -1718,25 +1974,15 @@ const TEMPLATE = `
             <div class="dz-kpi-value"><b id="dz-total-val">0 B</b></div>
             <div class="dz-kpi-foot">↓ <span id="dz-total-down">0 B</span> · ↑ <span id="dz-total-up">0 B</span></div>
         </div>
-        <div class="glass-card dz-kpi">
+        <div class="glass-card dz-kpi dz-kpi-link" id="dz-conn-kpi" role="link" tabindex="0">
             <div class="dz-kpi-top">
-                <span class="dz-kpi-label" data-i18n="consoleActiveConn">Active Connections</span>
+                <span class="dz-kpi-label"><span data-i18n="consoleActiveConn">Active Connections</span><svg class="dz-kpi-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>
                 <span class="dz-kpi-icon" style="background:rgba(245,158,11,.12);color:var(--zephyr-color-warning);">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="12" r="2.5"/><path d="M7.5 12h9"/></svg>
                 </span>
             </div>
             <div class="dz-kpi-value"><b id="dz-conn-val">0</b><span data-i18n="consoleConnUnit">conn</span></div>
             <div class="dz-kpi-foot">TCP <span id="dz-conn-tcp">0</span> · UDP <span id="dz-conn-udp">0</span></div>
-        </div>
-        <div class="glass-card dz-kpi">
-            <div class="dz-kpi-top">
-                <span class="dz-kpi-label" data-i18n="consoleNodeLatency">Node Latency</span>
-                <span class="dz-kpi-icon" style="background:color-mix(in srgb, var(--color-accent) 12%, transparent);color:var(--color-accent);">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
-                </span>
-            </div>
-            <div class="dz-kpi-value" data-lat-state="pending"><b id="dz-lat-val" class="dz-lat-num is-pending"></b><span class="dz-lat-unit">ms</span></div>
-            <div class="dz-kpi-foot"><span class="latency-badge" id="dz-lat-badge" hidden></span></div>
         </div>
     </div>
 
@@ -1777,6 +2023,7 @@ const TEMPLATE = `
                     <div class="dz-node-sub">
                         <span style="font-family:var(--font-mono)" id="dz-node-host"></span>
                     </div>
+                    <div class="dz-node-ip home-node-sub" id="dz-node-ip" hidden></div>
                     <div class="dz-node-latency">
                         <span class="dz-latency-num" data-lat-state="pending"><span id="dz-node-lat" class="dz-lat-num is-pending"></span><small class="dz-lat-unit">ms</small></span>
                         <span class="latency-badge" id="dz-node-lat-badge" hidden></span>
@@ -1785,6 +2032,10 @@ const TEMPLATE = `
                             <span data-i18n="consoleTestLatency">Test</span>
                         </button>
                     </div>
+                    <div class="dz-node-alts" id="dz-node-alts" role="group" aria-labelledby="dz-node-alts-label" hidden>
+                        <p id="dz-node-alts-label" data-i18n="homeLowerLatency">Lower latency</p>
+                        <div id="dz-node-alts-list"></div>
+                    </div>
                 </div>
                 <div class="dz-node-picker dz-hidden" id="dz-node-picker">
                     <div class="dz-picker-subs" id="dz-picker-subs"></div>
@@ -1792,33 +2043,6 @@ const TEMPLATE = `
                 </div>
             </div>
 
-            <div class="glass-card dz-card-pad" style="flex:1;">
-                <div class="dz-card-head" style="margin-bottom:0;">
-                    <div class="dz-card-title"><span class="dot"></span><span data-i18n="consoleQuickControl">Quick Controls</span></div>
-                </div>
-                <div class="dz-mode-seg" id="dz-mode-seg" role="group" aria-label="Proxy Mode" data-i18n-aria-label="mode">
-                    <div class="dz-mode-slider" id="dz-mode-slider"></div>
-                    <button type="button" data-mode="rule" aria-pressed="true" data-i18n="rule">Rule</button>
-                    <button type="button" data-mode="global" aria-pressed="false" data-i18n="global">Global</button>
-                    <button type="button" data-mode="direct" aria-pressed="false" data-i18n="direct">Direct</button>
-                </div>
-                <div class="dz-quick-rows">
-                    <div class="dz-quick-row">
-                        <span class="dz-quick-row-label">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                            <span id="dz-sys-toggle-label" data-i18n="consoleSysProxy">System Proxy</span>
-                        </span>
-                        <label class="ios-switch switch-lg"><input type="checkbox" id="dz-sys-toggle" aria-labelledby="dz-sys-toggle-label"><span class="switch-slider"></span></label>
-                    </div>
-                    <div class="dz-quick-row">
-                        <span class="dz-quick-row-label">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                            <span id="dz-tun-toggle-label" data-i18n="consoleTunAdapter">TUN Adapter</span>
-                        </span>
-                        <label class="ios-switch switch-lg"><input type="checkbox" id="dz-tun-toggle" aria-labelledby="dz-tun-toggle-label"><span class="switch-slider"></span></label>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -1835,11 +2059,12 @@ const TEMPLATE = `
             <div class="dz-conn-list custom-scrollbar" id="dz-conn-list"></div>
         </div>
 
-        <div class="glass-card dz-card-pad" style="display:flex;flex-direction:column;overflow:visible;">
+        <div class="glass-card dz-card-pad dz-sub-card" id="dz-sub-card" style="display:flex;flex-direction:column;overflow:visible;">
             <div class="dz-card-head">
                 <div class="dz-card-title"><span class="dot"></span><span data-i18n="consoleSubUsage">Subscription</span></div>
             </div>
-            <div style="font-size:13px;font-weight:600;color:var(--zephyr-text-primary);" id="dz-sub-name">—</div>
+            <div id="dz-profile" class="home-profile dz-profile relative"></div>
+            <span id="dz-sub-name" hidden>—</span>
             <div class="dz-sub-used"><b id="dz-sub-used-val">—</b><span id="dz-sub-used-label"> / —</span></div>
             <div class="dz-progress"><div class="dz-progress-fill" id="dz-sub-progress" style="width:0%"></div></div>
             <div class="dz-sub-rows">
@@ -2277,7 +2502,9 @@ function _buildConsoleHome(container) {
     // settings changes (restore defaults, node-scroll toggle, etc.).
     const _coreRestartedUnsub = Bus.on(Events.CORE_RESTARTED, () => {
         coreGeneration++;
+        forgetSubscriptionData();
         forgetLatencies();
+        forgetNodeIp();
         state.totalDown = 0;
         state.totalUp = 0;
         state.downPeak = 0;
@@ -2291,14 +2518,33 @@ function _buildConsoleHome(container) {
         lastTrafficTsMsSession = null;
     });
     _cleanups.push(() => _coreRestartedUnsub());
+    _cleanups.push(Bus.on(Events.DIAGNOSTICS_INVALIDATED, () => {
+        forgetLatencies();
+        forgetNodeIp();
+        _lastNodeArgs = null;
+        pickerNodes = [];
+        pickerGroupName = '';
+        $('dz-node-alts-list')?.replaceChildren();
+        const alts = $('dz-node-alts');
+        if (alts) alts.hidden = true;
+        renderPicker();
+        if (isActive) void refreshNodeData({ forceInvalidate: true });
+    }));
 
     // ── Config update: refresh all console data ──
     // Listen to CONFIG_UPDATED (emitted after full postRestartRecovery:
     // overrides applied, proxy selection restored, caches invalidated).
     // Also fires on non-restart settings changes — that's fine for data refresh.
-    const _configUpdatedUnsub = Bus.on(Events.CONFIG_UPDATED, () => {
+    const _configUpdatedUnsub = Bus.on(Events.CONFIG_UPDATED, (/** @type {any} */ data) => {
+        // Clear before the first read: a failed read cannot retain the old profile's card.
+        forgetSubscriptionData();
         // Node names may now point at other servers: measure them afresh.
         forgetLatencies();
+        // A reload (an override can re-point a node) drops the old address too.
+        if (data?.reloaded) {
+            // exit-ip.js has already reset the shared cache for this reload.
+            forgetNodeIp();
+        }
         if (!isActive) return; // skip IPC calls when console page is hidden
         nodeRetryCount = 0; // core fully restarted - give retry budget back
         void fetchCoreUptime(); // uptime resets after restart
@@ -2399,6 +2645,61 @@ function _buildConsoleHome(container) {
         if (navBtn instanceof HTMLElement) navBtn.click();
     });
 
+    // ── Connections KPI: the whole card opens the connections page ──
+    const connKpi = $('dz-conn-kpi');
+    if (connKpi) {
+        const openConns = () => {
+            const navBtn = document.querySelector('[data-nav="connections"]');
+            if (navBtn instanceof HTMLElement) navBtn.click();
+        };
+        on(connKpi, 'click', openConns);
+        // A link opens on Enter only (Space scrolls, as on any link).
+        on(connKpi, 'keydown', (/** @type {KeyboardEvent} */ e) => {
+            if (e.key === 'Enter') { e.preventDefault(); openConns(); }
+        });
+    }
+
+    // ── Strip subtitles: on / off ──
+    /** @param {string} id @param {boolean} on */
+    const paintState = (id, on) => {
+        const el = $(id);
+        if (!el) return;
+        const key = on ? 'stateOn' : 'stateOff';
+        el.dataset.i18n = key;
+        el.textContent = t(key);
+    };
+    paintState('dz-sys-sub', !!appStore.get('isSysProxyEnabled'));
+    paintState('dz-tun-sub', !!appStore.get('isTunEnabled'));
+    _cleanups.push(appStore.subscribe('isSysProxyEnabled', (/** @type {boolean} */ v) => paintState('dz-sys-sub', !!v)));
+    _cleanups.push(appStore.subscribe('isTunEnabled', (/** @type {boolean} */ v) => paintState('dz-tun-sub', !!v)));
+
+    // ── Lower-latency nodes in the node card ──
+    const altsList = $('dz-node-alts-list');
+    if (altsList) on(altsList, 'click', (/** @type {Event} */ e) => {
+        const btn = /** @type {HTMLElement | null} */ ((/** @type {HTMLElement} */ (e.target)).closest?.('.dz-alt'));
+        const idx = btn ? pickerNodes.findIndex((n) => n.name === btn.dataset.node) : -1;
+        if (idx >= 0) void selectPickerNode(idx, btn?.dataset.group || '');
+    });
+
+    // ── Profile menu in the subscription card ──
+    _cleanups.push(initHomeProfile({ hostId: 'dz-profile', btnId: 'dz-profile-btn' }));
+    // Only the address line redraws (the node's other controls keep focus),
+    // and only while the console shows: the minimal home has its own.
+    const shownLeaf = () => $('dz-node-name')?.dataset.leaf || '';
+    _cleanups.push(Bus.on(Events.EXIT_IP_SETTING_CHANGED, () => {
+        closeNodeDetails();
+        // Hidden or not, the old address goes now: turned off, it must not
+        // show again on the way back (a failed refresh would leave it there).
+        forgetNodeIp();
+        if (isActive && shownLeaf()) void renderNodeIp(shownLeaf());
+    }));
+    _cleanups.push(onExitIpRefreshed((leaf) => {
+        if (isActive && leaf && leaf === shownLeaf()) void renderNodeIp(leaf);
+    }));
+
+    // ── Wide windows: the subscription card joins the bottom row ──
+    _cleanups.push(placeSubCard());
+
     // ── i18n: re-render dynamic content on language change ──
     _cleanups.push(Bus.on(Events.I18N_APPLIED, () => {
         // Sort label and tooltip
@@ -2419,6 +2720,14 @@ function _buildConsoleHome(container) {
         renderSubscriptionCard();
         // Pending too: its screen-reader label is in the old language.
         renderLatency(state.latency, latencyStatus);
+        // The exit address line: its country and title, from the cached lookup.
+        const ipLine = $('dz-node-ip');
+        const ipLeaf = ipLine?.dataset.leaf;
+        if (ipLine && ipLeaf && !ipLine.hidden) {
+            const ipBtn = /** @type {HTMLElement | null} */ (ipLine.querySelector('.home-ip-btn'));
+            if (ipBtn) ipBtn.dataset.key = '';
+            void renderNodeIp(ipLeaf);
+        }
     }));
 
     // Register all cleanups (after all _cleanups pushes are done)
@@ -2490,10 +2799,15 @@ export function activateConsole() {
  */
 export function deactivateConsole() {
     isActive = false;
+    nodeIpAsk++;
+    closeNodeDetails();
     if (uptimeTimer) { clearInterval(uptimeTimer); uptimeTimer = null; }
     if (connPollTimer) { clearInterval(connPollTimer); connPollTimer = null; }
     if (nodeRetryTimer) { clearTimeout(nodeRetryTimer); nodeRetryTimer = null; }
     nodeRetryCount = 0;
+    // Each visit gets its own later exit-address try.
+    if (nodeIpRetryTimer) { clearTimeout(nodeIpRetryTimer); nodeIpRetryTimer = null; }
+    nodeIpRetryLeaf = '';
     pendingLatencyRetry?.();
     pendingLatencyRetry = null;
     prevConnStats.clear(); // discard stale snapshot to avoid huge fake speed on re-activate

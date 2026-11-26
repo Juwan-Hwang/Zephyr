@@ -68,8 +68,9 @@ export function createContextMenuContainer(e) {
  * Call this after populating the container and appending it to the DOM.
  *
  * @param {HTMLElement} menu - The menu container element
+ * @param {HTMLElement | null} [keyboardAnchor] focus return point for a keyboard-opened menu
  */
-export function attachContextMenuCloseHandlers(menu) {
+export function attachContextMenuCloseHandlers(menu, keyboardAnchor = null) {
     // Viewport overflow correction
     requestAnimationFrame(() => {
         const uiScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
@@ -98,7 +99,11 @@ export function attachContextMenuCloseHandlers(menu) {
     /** @param {MouseEvent} ev */
     const onContext = (ev) => close(ev);
     /** @param {KeyboardEvent} ev */
-    const onKey = (ev) => { if (ev.key === 'Escape') close(); };
+    const onKey = (ev) => {
+        if (ev.key !== 'Escape') return;
+        close();
+        if (keyboardAnchor?.isConnected) keyboardAnchor.focus({ preventScroll: true });
+    };
 
     document.addEventListener('click', onClick);
     document.addEventListener('contextmenu', onContext);
@@ -123,7 +128,20 @@ export function attachContextMenuCloseHandlers(menu) {
  * @param {Array<{label?: string, html?: string, icon?: string, action?: () => void, separator?: boolean, className?: string}>} items
  */
 export function showContextMenu(e, items) {
+    // Native right clicks use button 2; keyboard context-menu events use button 0.
+    const keyboardAnchor = e.button === 0 && !e.ctrlKey && document.activeElement instanceof HTMLElement
+        ? document.activeElement : null;
     const { menu, scroll } = createContextMenuContainer(e);
+    const restoreKeyboardFocus = () => {
+        if (keyboardAnchor?.isConnected) keyboardAnchor.focus({ preventScroll: true });
+    };
+    if (keyboardAnchor) {
+        const scale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+        const rect = keyboardAnchor.getBoundingClientRect();
+        const start = getDirection() === 'rtl' ? window.innerWidth - rect.right : rect.left;
+        menu.style.insetInlineStart = `${start / scale}px`;
+        menu.style.top = `${rect.bottom / scale}px`;
+    }
 
     items.forEach((item) => {
         // Separator
@@ -137,13 +155,16 @@ export function showContextMenu(e, items) {
         // SECURITY: sanitize HTML to prevent XSS while preserving allowed tags
         // Custom HTML item (for complex widgets like checkboxes)
         if (item.html) {
-            const wrapper = document.createElement('div');
+            // With an action it is a button, so the keyboard can reach and press it.
+            const wrapper = document.createElement(item.action ? 'button' : 'div');
+            if (wrapper instanceof HTMLButtonElement) wrapper.type = 'button';
             wrapper.className = item.className || '';
             wrapper.innerHTML = sanitizeHtml(item.html); // nosemgrep: js-innerhtml-assignment — dynamic content escaped
             if (item.action) {
                 wrapper.addEventListener('click', (ev) => {
                     ev.stopPropagation();
                     removeContextMenu();
+                    restoreKeyboardFocus();
                     item.action?.();
                 });
             }
@@ -160,11 +181,13 @@ export function showContextMenu(e, items) {
         btn.addEventListener('click', (ev) => {
             ev.stopPropagation();
             removeContextMenu();
+            restoreKeyboardFocus();
             item.action?.();
         });
         scroll.appendChild(btn);
     });
 
     document.body.appendChild(menu);
-    attachContextMenuCloseHandlers(menu);
+    attachContextMenuCloseHandlers(menu, keyboardAnchor);
+    if (keyboardAnchor) menu.querySelector('button')?.focus({ preventScroll: true });
 }

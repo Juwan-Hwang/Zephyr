@@ -118,7 +118,16 @@ export async function updateTrayStatus(modeOverride) {
 
 // --- Tray menu ---
 
+let trayMenuSeq = 0;
+/** Only a refresh with usable data supersedes an earlier successful read. */
+let trayMenuReadySeq = 0;
+/** @type {Promise<void>} Native menu writes finish in the order they were sent. */
+let trayMenuWrites = Promise.resolve();
+
 export async function updateTrayMenu(forceRefresh = false) {
+    const seq = ++trayMenuSeq;
+    // A later cached refresh must not reuse the state this refresh invalidated.
+    if (forceRefresh) trayMenuCache.lastUpdate = 0;
     const now = Date.now();
     const useCache = !forceRefresh && (now - trayMenuCache.lastUpdate) < TRAY_CACHE_TTL;
 
@@ -145,6 +154,7 @@ export async function updateTrayMenu(forceRefresh = false) {
             getProxies(),
             invoke(COMMANDS.GET_SETTINGS),
         ]);
+        if (seq < trayMenuReadySeq) return;
 
         /** @type {any} */
         const cfg = config;
@@ -205,6 +215,24 @@ export async function updateTrayMenu(forceRefresh = false) {
         trayMenuCache.lastUpdate = now;
     }
 
+    if (seq < trayMenuReadySeq) return;
+    trayMenuReadySeq = seq;
+    const write = trayMenuWrites.then(async () => {
+        if (seq !== trayMenuReadySeq) return;
+        await writeTrayMenu(currentMode, configs, proxyGroups, sysProxyEnabled, tunEnabled);
+    });
+    trayMenuWrites = write.catch(() => {});
+    await write;
+}
+
+/**
+ * @param {string} currentMode
+ * @param {any} configs
+ * @param {Array<any>} proxyGroups
+ * @param {boolean} sysProxyEnabled
+ * @param {boolean} tunEnabled
+ */
+async function writeTrayMenu(currentMode, configs, proxyGroups, sysProxyEnabled, tunEnabled) {
     try {
         await invoke(COMMANDS.UPDATE_TRAY_FULL_MENU, {
             params: {
@@ -264,6 +292,56 @@ async function trayPickProfile() {
     } catch (err) {
         trayLogger.warn('Failed to read the profile for the tray proxy choice', err);
         return '';
+    }
+}
+
+/**
+ * Switch to another profile the way the tray does: one network change at a
+ * time, a notice when it lands, then the core config and tray menu redrawn.
+ * Used by the tray and by the home page's profile menu.
+ * @param {string} subName profile file name
+ * @returns {Promise<void>}
+ */
+export async function switchProfile(subName) {
+    // A core update or another switch is restarting the core: starting a
+    // second restart now would race it.
+    if (appStore.get('isNetworkUpdating')) {
+        showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
+        // Forced: the tray already moved its check mark to the clicked
+        // profile, and a cached menu would keep it there.
+        await updateTrayMenu(true).catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
+        return;
+    }
+    appStore.set('isNetworkUpdating', true);
+    try {
+        /** @type {any} */
+        const settings = await invoke(COMMANDS.GET_SETTINGS);
+        const customArgs = settings.custom_args || [];
+
+        const result = await switchToConfig(subName, customArgs);
+
+        // 只在没有回退时显示切换通知（回退时已显示警告）
+        if (!result.fallbackOccurred) {
+            showNotification(`${tr('notifSwitchTo', 'Switched to')} ${subName}`, 'info');
+        }
+
+        // Sync core config first (updates appStore including TUN state), then update tray.
+        // The switch already succeeded: a failed refresh is logged, not
+        // reported as a failed switch.
+        try {
+            const { syncCoreConfig } = await import('./proxies.js');
+            await syncCoreConfig();
+        } catch (refreshErr) {
+            trayLogger.warn('Refreshing after the tray subscription switch failed', refreshErr);
+        }
+        // Forced, and even when the sync failed: a refresh during the
+        // switch cached the old profile's check mark.
+        await updateTrayMenu(true).catch((/** @type {unknown} */ trayErr) => trayLogger.warn('Refreshing the tray after the subscription switch failed', trayErr));
+    } catch (err) {
+        trayLogger.error('Failed to switch subscription from tray', err);
+        showNotification(toError(err).toString(), 'error');
+    } finally {
+        appStore.set('isNetworkUpdating', false);
     }
 }
 
@@ -348,46 +426,7 @@ export async function initTrayEventListeners() {
         const ev = event;
         const subName = ev.payload;
 
-        // A core update or another switch is restarting the core: starting a
-        // second restart now would race it.
-        if (appStore.get('isNetworkUpdating')) {
-            showNotification(tr('updNetworkBusy', 'Another network change is in progress. Try again when it finishes.'), 'warning');
-            // Forced: the tray already moved its check mark to the clicked
-            // profile, and a cached menu would keep it there.
-            await updateTrayMenu(true).catch((/** @type {unknown} */ err) => trayLogger.warn('Failed to refresh tray menu', err));
-            return;
-        }
-        appStore.set('isNetworkUpdating', true);
-        try {
-            /** @type {any} */
-            const settings = await invoke(COMMANDS.GET_SETTINGS);
-            const customArgs = settings.custom_args || [];
-
-            const result = await switchToConfig(subName, customArgs);
-
-            // 只在没有回退时显示切换通知（回退时已显示警告）
-            if (!result.fallbackOccurred) {
-                showNotification(`${tr('notifSwitchTo', 'Switched to')} ${subName}`, 'info');
-            }
-
-            // Sync core config first (updates appStore including TUN state), then update tray.
-            // The switch already succeeded: a failed refresh is logged, not
-            // reported as a failed switch.
-            try {
-                const { syncCoreConfig } = await import('./proxies.js');
-                await syncCoreConfig();
-            } catch (refreshErr) {
-                trayLogger.warn('Refreshing after the tray subscription switch failed', refreshErr);
-            }
-            // Forced, and even when the sync failed: a refresh during the
-            // switch cached the old profile's check mark.
-            await updateTrayMenu(true).catch((/** @type {unknown} */ trayErr) => trayLogger.warn('Refreshing the tray after the subscription switch failed', trayErr));
-        } catch (err) {
-            trayLogger.error('Failed to switch subscription from tray', err);
-            showNotification(toError(err).toString(), 'error');
-        } finally {
-            appStore.set('isNetworkUpdating', false);
-        }
+        await switchProfile(subName);
     });
 
     // Listen for proxy change from tray

@@ -169,6 +169,13 @@ export const MISC = Object.freeze({
     GET_PROCESS_ICON: "get_process_icon",
     // clash:// links that arrived before the page had its listener.
     TAKE_PENDING_DEEP_LINKS: "take_pending_deep_links",
+    // Download speed test through the hidden speed-test listener.
+    SPEED_TEST_PORT: "speed_test_port",
+    SPEED_TEST_GENERATION: "speed_test_generation",
+    SPEED_TEST_DOWNLOAD: "speed_test_download",
+    SPEED_TEST_CANCEL: "speed_test_cancel",
+    LOOKUP_EXIT_IP: "lookup_exit_ip",
+    LOOKUP_EXIT_IP_CANCEL: "lookup_exit_ip_cancel",
 });
 
 // ---------------------------------------------------------------------------

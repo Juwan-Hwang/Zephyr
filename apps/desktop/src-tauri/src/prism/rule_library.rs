@@ -14,6 +14,15 @@ use crate::prism::types::{
 use crate::prism::PrismState;
 use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
 
+// Compare-and-save also excludes creation, deletion and rename of the same file.
+static RULE_FILE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn lock_rule_files() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+    RULE_FILE_LOCK
+        .lock()
+        .map_err(|error| format!("Rule file lock poisoned: {error}"))
+}
+
 /// A rule file name is taken by the file itself or by its disabled copy
 /// (`<name>.disabled`), which the library lists under the same name.
 fn name_taken(path: &std::path::Path) -> bool {
@@ -109,6 +118,7 @@ pub fn rule_create(
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let path = prism_dir.join(&filename);
+    let _files = lock_rule_files()?;
     if name_taken(&path) {
         return Err(format!("Rule file '{filename}' already exists"));
     }
@@ -119,26 +129,54 @@ pub fn rule_create(
 }
 
 #[tauri::command]
-pub fn rule_update(
-    state: State<PrismState>,
+pub async fn rule_update(
+    state: State<'_, PrismState>,
     filename: String,
     content: String,
+    expected_content: Option<String>,
 ) -> Result<(), String> {
     check_input_size(&content, "Rule content")?;
     let prism_dir = state.get_prism_workspace()?;
     let path = resolve_rule_path(&prism_dir, &filename)?;
+    tokio::task::spawn_blocking(move || {
+        let _config = crate::prism::pipeline::RUN_CONFIG_LOCK
+            .lock()
+            .map_err(|error| format!("Run config lock poisoned: {error}"))?;
+        update_rule_file(&path, &content, expected_content.as_deref())
+    })
+    .await
+    .map_err(|error| format!("Rule save task failed: {error}"))?
+}
+
+fn update_rule_file(
+    path: &std::path::Path,
+    content: &str,
+    expected_content: Option<&str>,
+) -> Result<(), String> {
+    let _files = lock_rule_files()?;
     if !path.exists() {
-        return Err(format!("Rule file '{filename}' not found"));
+        return Err("Rule file not found".to_owned());
+    }
+    if let Some(expected) = expected_content {
+        let current = std::fs::read_to_string(path)
+            .map_err(|error| format!("Failed to read rule file: {error}"))?;
+        if current != expected {
+            return Err(
+                "RULE_FILE_CHANGED: The rule file changed. Reopen it and retry your edit."
+                    .to_owned(),
+            );
+        }
     }
     // Strip dangerous keys from YAML input to prevent injection
-    let safe_content = sanitize_rule_yaml(&content)?;
-    write_file_secure(&path, &safe_content)
+    let safe_content = sanitize_rule_yaml(content)?;
+    crate::core_manager::core::secure_io::write_file_secure_atomic(path, &safe_content)
 }
 
 #[tauri::command]
 pub fn rule_delete(state: State<PrismState>, filename: String) -> Result<(), String> {
     let prism_dir = state.get_prism_workspace()?;
     let path = resolve_rule_path(&prism_dir, &filename)?;
+    let _files = lock_rule_files()?;
     if !path.exists() {
         return Err(format!("Rule file '{filename}' not found"));
     }
@@ -170,6 +208,7 @@ pub fn rule_rename(
     let safe_new = ensure_prism_ext(&sanitize_filename(&new_filename)?);
     let old_path = prism_dir.join(&safe_old);
     let new_path = prism_dir.join(&safe_new);
+    let _files = lock_rule_files()?;
 
     if !old_path.exists() {
         return Err(format!("Rule file '{safe_old}' not found"));
@@ -280,6 +319,7 @@ pub fn rule_extract_from_profile(
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let path = prism_dir.join(&filename);
+    let _files = lock_rule_files()?;
     if name_taken(&path) {
         return Err(format!("Rule file '{filename}' already exists"));
     }
@@ -320,6 +360,7 @@ pub fn rule_import_text(
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let path = prism_dir.join(&filename);
+    let _files = lock_rule_files()?;
     if name_taken(&path) {
         return Err(format!("Rule file '{filename}' already exists"));
     }
@@ -391,6 +432,7 @@ pub fn rule_import_file(
 
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let target = prism_dir.join(&filename);
+    let _files = lock_rule_files()?;
     if name_taken(&target) {
         return Err(format!("Rule file '{filename}' already exists"));
     }
@@ -436,6 +478,7 @@ pub async fn rule_import_url(
     let prism_dir = state.get_prism_workspace()?;
     let filename = ensure_prism_ext(&sanitize_filename(&name)?);
     let target = prism_dir.join(&filename);
+    let _files = lock_rule_files()?;
     if name_taken(&target) {
         return Err(format!("Rule file '{filename}' already exists"));
     }
@@ -445,7 +488,20 @@ pub async fn rule_import_url(
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_rule_yaml;
+    use super::{sanitize_rule_yaml, update_rule_file};
+
+    #[test]
+    fn stale_rule_save_preserves_the_newer_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rules.prism.yaml");
+        let first = "rules:\n  $append: ['DOMAIN,a.com,DIRECT']\n";
+        let newer = "rules:\n  $append: ['DOMAIN,b.com,Proxy']\n";
+        std::fs::write(&path, first).unwrap();
+        update_rule_file(&path, newer, Some(first)).unwrap();
+        let error = update_rule_file(&path, first, Some(first)).unwrap_err();
+        assert!(error.starts_with("RULE_FILE_CHANGED:"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), newer);
+    }
 
     #[test]
     fn sanitize_strips_dangerous_keys() {
