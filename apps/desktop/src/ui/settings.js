@@ -45,8 +45,8 @@ import { checkConsoleWidthNotification } from './console-width.js';
 import { invalidateSettingsCache } from './cache.js';
 import { postRestartRecovery, restartedProfile, withPageBusy } from './lifecycle.js';
 import { currentProfile } from './active-profile.js';
-import { loadedToggleState, portPatchError, saveSettingChecked, saveSettingsChecked } from './settings-helpers.js';
-import { applyCoreToggle, noteCoreToggleApplied, noteCoreTogglePersisted, coreToggleApplied, pauseCoreToggles, coreToggleMark, coreToggleChangedSince, coreToggleShownBeforeHeld, coreToggleClickedDuringReset } from './settings/core-toggle.js';
+import { inSettingsSaveQueue, loadedToggleState, portPatchError, saveSettingChecked, saveSettingsChecked } from './settings-helpers.js';
+import { applyCoreToggle, noteCoreToggleApplied, noteCoreToggleUnconfirmed, noteCoreTogglePersisted, coreToggleApplied, pauseCoreToggles, coreToggleMark, coreToggleChangedSince, coreToggleShownBeforeHeld, coreToggleClickedDuringReset } from './settings/core-toggle.js';
 import { initNetworkOptim } from './network-optim.js';
 import { noNetworkChangeSince } from './network-change.js';
 import {
@@ -56,9 +56,7 @@ import {
     getDnsConfig,
     buildDnsRewritePayload,
     applyDnsRewrite,
-    dnsShownAfterFailure,
-    forgetUnsavedDnsChoice,
-    rememberUnsavedDnsChoice,
+    resetDnsDefaults,
     initDnsRewriteToggle,
 } from './dns-shared.js';
 import { toError } from '../types/guards.js';
@@ -91,16 +89,20 @@ import { updateModeUI } from './modes.js';
 
 // Settings submodules
 import { initThemeSettings } from './settings/theme.js';
+import { initSpeedSettings, afterSpeedSettingsReset, speedSettingsResetToken } from './settings/speed-settings.js';
 import { initTunnelSettings } from './settings/tunnels.js';
 import { applyFailover, applySmart, applyAutoTest, readSmartState, readAutoTestEnabled, shownFailover, queueSmartConfigWrite, smartEnabledOf } from './settings/auto-switch.js';
 import { initSubscriptionSettings, keepFallbackProfile } from './settings/subscriptions.js';
-import { withResetChanges } from './settings/reset-merge.js';
+import { resetChangesPatch } from './settings/reset-merge.js';
 import { selectSegment } from './seg-control.js';
 import { openUpdateDialog, showPendingUpdateNote } from './update-dialog.js';
 import { createClientVersionFetcher, DEFAULT_MAX_ATTEMPTS, isValidClientVersions } from './settings/client-version-fetch.js';
 import { uaTripleFromBackendUA, createUaEditTracker, trimLikeRust } from './settings/ua-triple.js';
 import { configUpdateOutcome, updateConfigThenSync } from './config-update.js';
 import { readRunningProfile } from './running-profile.js';
+
+/** The privacy policy (Settings › About). */
+export const PRIVACY_POLICY_URL = 'https://github.com/Juwan-Hwang/Zephyr/blob/main/PRIVACY.md';
 
 /** @type {ReturnType<typeof initCustomDropdown> | null} */
 let __langDropdown = null;
@@ -978,7 +980,7 @@ export function initCopyEnvSettings() {
         closeMenu();
         formatBtn?.focus();
         // Saves go out one after another, so the last pick is the one that ends up saved.
-        const save = formatSaveChain.then(() => invoke(COMMANDS.PATCH_SETTINGS, { patch: { copy_env_format: key } }));
+        const save = saveSettingsChecked({ copy_env_format: key });
         formatSaveChain = save.catch(() => {});
         try {
             await save;
@@ -1084,6 +1086,11 @@ export function initUwpExemption() {
 }
 
 // ---------------------------------------------------------------------------
+let logSettingsResetEpoch = 0;
+/** @type {Map<string, number>} */
+const logFieldSequences = new Map();
+/** @type {Map<string, boolean>} */
+const pendingLogToggles = new Map();
 function initLogSettingsModal() {
     const settingsBtn = document.getElementById('log-settings-btn');
     const exportBtn = document.getElementById('log-export-btn');
@@ -1096,8 +1103,8 @@ function initLogSettingsModal() {
         dropOpenModal('log-settings-modal');
 
         const t = getT();
-        const logAppEnabled = Boolean(appStore.get('logAppEnabled'));
-        const logCoreEnabled = Boolean(appStore.get('logCoreEnabled'));
+        const logAppEnabled = pendingLogToggles.get('log_app_enabled') ?? Boolean(appStore.get('logAppEnabled'));
+        const logCoreEnabled = pendingLogToggles.get('log_core_enabled') ?? Boolean(appStore.get('logCoreEnabled'));
         const rawRetention = Number(appStore.get('logRetentionDays'));
         const retentionDays = Number.isInteger(rawRetention) && rawRetention >= 1 && rawRetention <= 30 ? rawRetention : 3;
         const rawMaxFileMb = Number(appStore.get('logMaxFileMb'));
@@ -1201,8 +1208,6 @@ function initLogSettingsModal() {
         const retentionInput = /** @type {HTMLInputElement} */ (modal.querySelector('#log-retention-days'));
         const maxFileInput = /** @type {HTMLInputElement} */ (modal.querySelector('#log-max-file-mb'));
         const limits = modal.querySelector('#log-limits');
-        retentionInput?.addEventListener('input', () => saveSettings());
-        maxFileInput?.addEventListener('input', () => saveSettings());
 
         // Toggle handlers. Retention and size apply to both files; they are dimmed when neither is saved.
         const appToggle = /** @type {HTMLInputElement} */ (modal.querySelector('#log-app-toggle'));
@@ -1215,40 +1220,73 @@ function initLogSettingsModal() {
         };
         syncLimits();
 
-        appToggle?.addEventListener('change', () => {
-            appStore.set('logAppEnabled', appToggle.checked);
-            syncLimits();
-            saveSettings();
-        });
-        coreToggle?.addEventListener('change', () => {
-            appStore.set('logCoreEnabled', coreToggle.checked);
-            syncLimits();
-            saveSettings();
-        });
-
-        // Save settings via patch_settings
-        const saveSettings = debounce(async () => {
-            try {
-                let retention = parseInt(retentionInput?.value || '3', 10);
-                if (isNaN(retention) || retention < 1) retention = 3;
-                if (retention > 30) retention = 30;
-                let maxMb = parseInt(maxFileInput?.value || '50', 10);
-                if (isNaN(maxMb) || maxMb < 1) maxMb = 50;
-                if (maxMb > 500) maxMb = 500;
-                appStore.set('logRetentionDays', retention);
-                appStore.set('logMaxFileMb', maxMb);
-                await invoke('patch_settings', {
-                    patch: {
-                        log_app_enabled: appToggle?.checked ?? false,
-                        log_core_enabled: coreToggle?.checked ?? false,
-                        log_retention_days: retention,
-                        log_max_file_mb: maxMb,
+        /** @param {HTMLInputElement} toggle @param {string} field @param {'logAppEnabled'|'logCoreEnabled'} storeKey */
+        const bindLogToggle = (toggle, field, storeKey) => {
+            toggle.addEventListener('change', async () => {
+                const current = (logFieldSequences.get(field) ?? 0) + 1;
+                logFieldSequences.set(field, current);
+                const wanted = toggle.checked;
+                pendingLogToggles.set(field, wanted);
+                syncLimits();
+                try {
+                    await saveSettingsChecked({ [field]: wanted });
+                    // Keep the shared saved value equal to the last accepted write;
+                    // pending choices are tracked separately across dialog instances.
+                    appStore.set(storeKey, wanted);
+                } catch (error) {
+                    settingsLogger.error('[log-settings] Failed to save:', error);
+                    showNotification(getT().saveFailed || 'Save failed', 'error');
+                } finally {
+                    if (current === logFieldSequences.get(field)) {
+                        pendingLogToggles.delete(field);
+                        const activeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById(toggle.id));
+                        if (activeToggle) {
+                            activeToggle.checked = Boolean(appStore.get(storeKey));
+                            activeToggle.dispatchEvent(new Event('log-toggle-saved'));
+                        }
                     }
-                });
-            } catch (err) {
-                settingsLogger.error('[log-settings] Failed to save:', err);
-            }
-        }, 500);
+                }
+            });
+            toggle.addEventListener('log-toggle-saved', syncLimits);
+        };
+        bindLogToggle(appToggle, 'log_app_enabled', 'logAppEnabled');
+        bindLogToggle(coreToggle, 'log_core_enabled', 'logCoreEnabled');
+
+        // Patch only the field actually edited, including after this dialog closes.
+        /** @param {HTMLInputElement} input @param {string} field @param {'logRetentionDays'|'logMaxFileMb'} storeKey @param {number} fallback @param {number} max */
+        const bindLogLimit = (input, field, storeKey, fallback, max) => {
+            const save = debounce(async (/** @type {number} */ scheduledAt, /** @type {number} */ sequence) => {
+                if (scheduledAt !== logSettingsResetEpoch) return;
+                const text = input.value;
+                let value = input.valueAsNumber;
+                if (!Number.isFinite(value) || value < 1) value = fallback;
+                value = Math.min(max, Math.floor(value));
+                try {
+                    await saveSettingsChecked({ [field]: value }, () => scheduledAt === logSettingsResetEpoch);
+                    if (scheduledAt !== logSettingsResetEpoch) return;
+                    appStore.set(storeKey, value);
+                    if (sequence === logFieldSequences.get(field)) {
+                        if (input.value === text) input.value = String(value);
+                        const activeInput = /** @type {HTMLInputElement|null} */ (document.getElementById(input.id));
+                        if (activeInput) activeInput.value = String(value);
+                    }
+                } catch (err) {
+                    settingsLogger.error('[log-settings] Failed to save:', err);
+                    showNotification(getT().saveFailed || 'Save failed', 'error');
+                    if (scheduledAt === logSettingsResetEpoch && sequence === logFieldSequences.get(field)) {
+                        const activeInput = /** @type {HTMLInputElement|null} */ (document.getElementById(input.id));
+                        if (activeInput) activeInput.value = String(appStore.get(storeKey) ?? fallback);
+                    }
+                }
+            }, 500);
+            input.addEventListener('input', () => {
+                const sequence = (logFieldSequences.get(field) ?? 0) + 1;
+                logFieldSequences.set(field, sequence);
+                save(logSettingsResetEpoch, sequence);
+            });
+        };
+        bindLogLimit(retentionInput, 'log_retention_days', 'logRetentionDays', 3, 30);
+        bindLogLimit(maxFileInput, 'log_max_file_mb', 'logMaxFileMb', 50, 500);
     });
 
     // --- Export Modal (export button) ---
@@ -2116,6 +2154,13 @@ export async function initSettings() {
         };
     }
 
+    const privacyBtn = document.getElementById('view-privacy-btn');
+    if (privacyBtn) {
+        privacyBtn.onclick = () => {
+            openUrl(PRIVACY_POLICY_URL).catch(err => settingsLogger.warn('Failed to open the privacy policy', err));
+        };
+    }
+
     const gotoGithubBtn = document.getElementById('btn-goto-github');
     if (gotoGithubBtn) {
         gotoGithubBtn.onclick = (e) => {
@@ -2330,6 +2375,9 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
         });
     });
 
+    // ---- Latency test address + download speed test (settings/speed-settings.js) ----
+    registerCleanup(initSpeedSettings());
+
     // ---- Theme + Opacity (delegated to settings/theme.js) ----
     const _themeApi = initThemeSettings({
         savedTheme: settings.theme,
@@ -2371,7 +2419,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     danger: true,
                     confirmText: t.restoreDefaultsBtn || 'Restore defaults',
                     points: [
-                        { tone: 'danger', label: t.restoreDefaultsResetsLabel || 'Resets: ', text: t.restoreDefaultsResetsList || '' },
+                        { tone: 'danger', label: t.restoreDefaultsResetsLabel || 'Resets: ', text: [t.restoreDefaultsResetsList, t.latencyTestUrl, t.speedTestFile, t.speedTestMaxSecs, t.showExitIp].filter(Boolean).join(', ') },
                         { tone: 'success', label: t.restoreDefaultsKeepsLabel || 'Keeps: ', text: t.restoreDefaultsKeepsList || '' },
                     ],
                 }
@@ -2537,33 +2585,15 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     [unifiedDelayToggle, true], [ipv6Toggle, false], [allowLanToggle, false],
                 ])) {
                     if (!toggle) continue;
-                    // Every save of the switch has finished (the pause waited
-                    // for them): it shows what the core runs, unless it was
-                    // clicked since the reset began (that click is held).
+                    // Keep a display fallback for a failed reset. An earlier
+                    // unanswered save can still leave the running value unknown;
+                    // the fallback must not become a confirmed applied record.
                     const before = coreToggleShownBeforeHeld(toggle);
-                    noteCoreToggleApplied(toggle, before);
                     // A click held since the reset began is saved once the
                     // reset is done: the switch keeps the user's choice.
                     const held = coreToggleClickedDuringReset(toggle);
                     if (!held) toggle.checked = value;
                     coreTogglesBefore.push([toggle, before, coreToggleMark(toggle).clicks, held, coreToggleApplied(toggle)]);
-                }
-
-                const dnsToggle = /** @type {HTMLInputElement} */ (document.getElementById('dns-rewrite-toggle'));
-                if (dnsToggle) {
-                    dnsToggle.checked = true;
-                    resetTo('dns_rewrite_enabled', true);
-                    // The default servers: the saved custom ones are reset below
-                    // and only saved at the end, after this has been applied.
-                    if (!await trackResult('dnsRewrite', async () => {
-                        await applyDnsRewrite(DEFAULT_DNS_CONFIG);
-                    })) {
-                        // Refused by the core: show and save what is in effect,
-                        // as the switch itself does when this fails.
-                        const shown = await dnsShownAfterFailure(true, resetBase.dns_rewrite_enabled !== false);
-                        dnsToggle.checked = shown;
-                        settings.dns_rewrite_enabled = shown;
-                    }
                 }
 
                 if (opacitySlider) {
@@ -2578,8 +2608,10 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     successItems.push('opacity');
                 }
 
-                /** What the core config reset returned: the profile holds the defaults on true or 'restart'. @type {boolean|'restart'|'partial'} */
+                /** What the core config reset returned: the profile holds the defaults on true or 'restart'. @type {boolean|'restart'|'partial'|'unconfirmed'} */
                 let coreResetResult = false;
+                let coreResetProfileSaved = false;
+                let coreResetUnconfirmed = false;
                 await trackResult('coreConfig', async () => {
                     // After the tunnel saves already started, with new ones
                     // waiting until this one is done.
@@ -2596,12 +2628,13 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                             ipv6: false,
                             'allow-lan': false,
                             tunnels: [],
-                        }, resetProfile)), resetProfile);
+                        }, resetProfile, false, (saved) => { coreResetProfileSaved = saved; })), resetProfile);
                     // Empty the list only once the core took it; 'partial' (live, but the
                     // active profile still has the old values) also offers its retry row.
                     // A failed save leaves the list the core still runs.
                     if (tunnelApi.resetAfterSave(result)) currentTunnels = [];
                     coreResetResult = result;
+                    coreResetUnconfirmed = result === 'unconfirmed';
                     // The core runs the defaults now ('partial' too: live, only the
                     // profile kept the old values): a switch click held during the
                     // reset whose save fails goes back to them, not to the value
@@ -2612,6 +2645,10 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                         if (unifiedDelayToggle) noteCoreToggleApplied(unifiedDelayToggle, true);
                         if (ipv6Toggle) noteCoreToggleApplied(ipv6Toggle, false);
                         if (allowLanToggle) noteCoreToggleApplied(allowLanToggle, false);
+                    } else if (result === 'unconfirmed') {
+                        for (const toggle of [unifiedDelayToggle, ipv6Toggle, allowLanToggle]) {
+                            if (toggle) noteCoreToggleUnconfirmed(toggle);
+                        }
                     }
                     if (!result) {
                         // The core kept its values: the switches show them
@@ -2629,10 +2666,18 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                             }
                         }
                     }
-                    if (!result || result === 'partial') {
+                    if (!result || result === 'partial' || (result === 'unconfirmed' && !coreResetProfileSaved)) {
                         throw new Error(t.failedSaveSettings || 'Failed to save core settings');
                     }
                 });
+
+                const dnsToggle = /** @type {HTMLInputElement} */ (document.getElementById('dns-rewrite-toggle'));
+                if (dnsToggle) {
+                    // Apply after the core-config reload above, which replaces
+                    // runtime DNS. Commit DNS preferences in that same queue
+                    // entry so a later user toggle wins live and on disk.
+                    await trackResult('dnsRewrite', resetDnsDefaults);
+                }
 
                 const fakeClientToggle = /** @type {HTMLInputElement} */ (document.getElementById('setting-fake-client'));
                 if (fakeClientToggle) {
@@ -2756,8 +2801,6 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 resetTo('ipv6', null);
                 resetTo('allow_lan', null);
                 resetTo('unified_delay', null);
-                resetTo('dns_nameservers', null);
-                resetTo('dns_fallbacks', null);
 
                 localStorage.removeItem('appTheme');
                 appStore.set('currentTheme', DEFAULT_THEME);
@@ -2775,8 +2818,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 // settles first (its store value may be a click that is about
                 // to roll back), and a scale click saved meanwhile can't land
                 // between this save and the scale it applies.
-                // Saved even when the log-size patch after it fails: the home
-                // mode below follows the saved settings.
+                // The home mode below follows the saved settings.
                 let appSettingsSaved = false;
                 // The TUN item's restart ran, but some recovery step failed.
                 let recoveryFailed = false;
@@ -2786,35 +2828,51 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     // Items the reset used to skip (the confirm says "all settings"):
                     resetTo('ui_scale', 1);
                     resetTo('lightweight_mode', false);
-                    delete settings.copy_env_format;   // missing → backend default for this platform
-                    resetKeys.add('copy_env_format');
+                    resetTo('copy_env_format', '');
                     resetTo('log_retention_days', 3);
                     resetTo('log_max_file_mb', 50);
+                    // Latency test address, download test and the IP line (null: the default).
+                    resetTo('latency_test_url', null);
+                    resetTo('speed_test_url', null);
+                    resetTo('speed_test_max_secs', null);
+                    resetTo('show_exit_ip', false);
                     // Owned by the auto-switch switch: if it was turned on while the
                     // reset ran, this snapshot must not save it back off.
                     if (failoverToggle) resetTo('failover_enabled', !!appStore.get('failoverEnabled'));
-                    // Onto what is stored now: a save that landed while the
-                    // reset ran (a proxy choice, a subscription update) stays.
+                    // Patch only what this reset changed. Other settings keep
+                    // concurrent writes made by the frontend or backend.
                     const forced = [...resetKeys];
-                    /** @type {any} */
-                    // Unread, the snapshot alone would put back everything
-                    // saved while the reset ran: the item fails instead.
-                    const now = await invoke(COMMANDS.GET_SETTINGS);
-                    if (!now || typeof now !== 'object') throw new Error('Settings could not be read before saving the reset');
-                    const stored = withResetChanges(now, resetBase, settings, forced);
-                    await invoke(COMMANDS.SAVE_SETTINGS, { settings: stored });
+                    // In the settings write queue: a switch saved just before
+                    // (the IP line) lands first and is reset; one saved after
+                    // lands after the reset.
+                    const speedResetToken = speedSettingsResetToken();
+                    await inSettingsSaveQueue(async () => {
+                        const patch = resetChangesPatch(resetBase, settings, forced);
+                        // The DNS queue already committed these independently.
+                        delete patch.dns_rewrite_enabled;
+                        delete patch.dns_nameservers;
+                        delete patch.dns_fallbacks;
+                        await invoke(COMMANDS.PATCH_SETTINGS, { patch });
+                        invalidateSettingsCache();
+                        logSettingsResetEpoch++;
+                        const retention = /** @type {HTMLInputElement|null} */ (document.getElementById('log-retention-days'));
+                        const maxSize = /** @type {HTMLInputElement|null} */ (document.getElementById('log-max-file-mb'));
+                        if (retention) retention.value = '3';
+                        if (maxSize) maxSize.value = '50';
+                        // Before the queue advances, discard editor saves that
+                        // captured values from before this successful reset.
+                        afterSpeedSettingsReset(speedResetToken);
+                    });
                     appSettingsSaved = true;
                     // The switches' preferences are cleared: a core started from
                     // now on runs what the profile holds, the defaults once the
                     // reset wrote them there, else a value not known here.
-                    const profileHoldsDefaults = coreResetResult === true || coreResetResult === 'restart';
+                    const profileHoldsDefaults = coreResetProfileSaved || coreResetResult === true || coreResetResult === 'restart';
                     for (const [toggle, value] of /** @type {Array<[HTMLInputElement|null, boolean]>} */ ([
                         [unifiedDelayToggle, true], [ipv6Toggle, false], [allowLanToggle, false],
                     ])) {
                         if (toggle) noteCoreTogglePersisted(toggle, profileHoldsDefaults ? value : undefined);
                     }
-                    // The DNS rewrite choice is in the saved settings now.
-                    forgetUnsavedDnsChoice();
                     _homeModeWrites += 1;
                     _lastSavedHomeMode = 'minimal';
                     resetHomeWrite = _homeModeWrites;
@@ -2823,15 +2881,9 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     if (lightweightModeToggle) lightweightModeToggle.checked = false;
                     appStore.set('logRetentionDays', 3);
                     appStore.set('logMaxFileMb', 50);
-                    // The running log writers take a new size limit only through a patch.
-                    await invoke(COMMANDS.PATCH_SETTINGS, { patch: { log_max_file_mb: 50 } });
+                    // The atomic patch also updates the running log writers.
                 })));
                 invalidateSettingsCache();
-                // The core runs the reset DNS choice (or what it kept after a
-                // refusal) but the settings still hold the old one: re-applies
-                // after a restart follow the core's, as after a failed toggle save.
-                const resetDnsToggle = /** @type {HTMLInputElement | null} */ (document.getElementById('dns-rewrite-toggle'));
-                if (!appSettingsSaved && resetDnsToggle) rememberUnsavedDnsChoice(resetDnsToggle.checked);
                 // Runs after the snapshot above is saved: a TUN-off restart
                 // rebuilds run_config.yaml from settings.json, so it must see
                 // the reset ports/IPv6/LAN preferences, not the old ones.
@@ -2915,6 +2967,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                                 // the reset snapshot is saved only when its save
                                 // above succeeded.
                                 const coreResult = await restartCore(configName, afterDisable?.custom_args || []);
+                                coreResetUnconfirmed = false;
                                 // The core can fall back to another profile, or to
                                 // the minimal config: say so, save the one it runs
                                 // (the next launch must not retry the rejected
@@ -2964,6 +3017,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 if (proxyContainer) proxyContainer.replaceChildren();
                 Bus.emit(Events.CONFIG_UPDATED);
 
+                if (coreResetUnconfirmed && !errors.some((error) => error.startsWith('coreConfig:'))) errors.push('coreConfig');
                 if (errors.length > 0) {
                     showNotification(`${t.partialRestore || 'Some settings failed to restore'}: ${errors.join(', ')}`, "warning");
                 } else if (!recoveryFailed) {
@@ -3112,14 +3166,17 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
      * @param {Record<string, any>} patch
      * @param {string|null} [expectProfile] the profile the patch was made for ('' for the
      *   minimal config); the backend refuses it once the core runs another one
-     * @returns {Promise<boolean|'restart'|'partial'>} true when hot-reloaded and saved
+     * @param {boolean} [restoreDns] false when Restore Defaults applies its own DNS next
+     * @param {(saved: boolean) => void} [onProfileSaved] preserves persistence separately from runtime confirmation
+     * @returns {Promise<boolean|'restart'|'partial'|'unconfirmed'>} true when hot-reloaded and saved
      *   everywhere; 'restart' when every file was saved and the core applies it after the
      *   restart notice already shown; 'partial' when the run config took the change but the
      *   active profile did not (warning already shown): the change is not kept in the
-     *   profile, so callers must not treat it as saved; false when it failed (also when
+     *   profile, so callers must not treat it as saved; 'unconfirmed' when the core
+     *   has not confirmed the change; false when it failed (also when
      *   neither the profile nor the core took it)
      */
-    async function saveConfigToCore(patch, expectProfile = null) {
+    async function saveConfigToCore(patch, expectProfile = null, restoreDns = true, onProfileSaved = undefined) {
         try {
             /** @type {any} */
             const result = await updateConfigThenSync(patch, {
@@ -3132,6 +3189,17 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
 
             // No result object (an old backend): treat as applied, as before.
             const outcome = result ? configUpdateOutcome(result) : 'applied';
+            onProfileSaved?.(result?.profile_saved === true || result?.files_saved === true);
+            if (result?.hot_reload_success || result?.reload_unconfirmed) {
+                // Every full settings reload replaces the runtime DNS overlay.
+                // Schedule restoration after confirmed reloads; do not await its
+                // preference write while a settings save queue may be held here.
+                Bus.emit(Events.CONFIG_UPDATED, {
+                    reloaded: result.hot_reload_success === true,
+                    restoreRuntime: result.reload_unconfirmed === true,
+                    restoreDns,
+                });
+            }
             if (outcome === 'failed') {
                 // Neither live nor kept in the profile: a failure, not a partial save.
                 /** @type {any} */
@@ -3139,14 +3207,15 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 showNotification(result?.message || t2.failedSaveSettings || 'Failed to save settings to core', 'error');
                 return false;
             }
-            if (outcome === 'partial') {
-                // The profile did not take the change. The run config did, and
-                // the core runs it unless the reload went unconfirmed (then it
-                // may not); either way it is lost when the profile is loaded again.
+            if (outcome === 'partial' || outcome === 'unconfirmed') {
+                // A partial save is live but missing from the profile. An
+                // unconfirmed reload may still apply; do not record it as live.
                 /** @type {any} */
                 const t2 = /** @type {any} */ (translations)[appStore.get('currentLang')];
-                showNotification(result?.message || t2.failedSaveSettings || 'Failed to save settings to core', 'warning');
-                return 'partial';
+                const message = result?.message || t2.failedSaveSettings || 'Failed to save settings to core';
+                const recovery = result?.reload_unconfirmed ? t2.diagnosticsPausedRestart : '';
+                showNotification([message, recovery].filter(Boolean).join('\n'), 'warning');
+                return outcome;
             }
             if (outcome === 'restart') {
                 /** @type {any} */
@@ -3405,7 +3474,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     await loadSettingsFromCore();
                     // 'partial': the active profile did not take the ports (redir and
                     // TProxy live only there). Keep the dialog open so Save can retry.
-                    if (persisted && ok !== 'partial') closePortModal();
+                    if (persisted && ok !== 'partial' && ok !== 'unconfirmed') closePortModal();
                 }
             } finally {
                 portSaveBtn.classList.remove('opacity-50', 'pointer-events-none');

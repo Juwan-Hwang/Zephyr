@@ -39,14 +39,14 @@ describe('TUN status labels', () => {
         el.className = 'text-2xs text-[var(--text-muted)]';
 
         renderTunStatus(el, true);
-        expect(el.textContent).toBe('TUN 已启用');
-        expect(el.dataset.i18n).toBe('tunActive');
+        expect(el.textContent).toBe('已打开');
+        expect(el.dataset.i18n).toBe('stateOn');
         expect(el.classList.contains('text-accent')).toBe(true);
         expect(el.classList.contains('text-[var(--text-muted)]')).toBe(false);
 
         renderTunStatus(el, false);
-        expect(el.textContent).toBe('TUN 已关闭');
-        expect(el.dataset.i18n).toBe('tunInactive');
+        expect(el.textContent).toBe('已关闭');
+        expect(el.dataset.i18n).toBe('stateOff');
         expect(el.classList.contains('text-accent')).toBe(false);
         expect(el.classList.contains('text-[var(--text-muted)]')).toBe(true);
     });
@@ -57,7 +57,7 @@ describe('TUN status labels', () => {
         const el = /** @type {HTMLElement} */ (document.getElementById('tun-status-text'));
         renderTunStatus(el, true);
         setLanguage('ja');
-        expect(el.textContent).toBe(all.ja.tunActive);
+        expect(el.textContent).toBe(all.ja.stateOn);
         document.body.innerHTML = '';
     });
 
@@ -81,17 +81,16 @@ describe('TUN status labels', () => {
         expect(proxies).toMatch(/renderTunStatus\(/);
     });
 
-    it('TUN card uses the same two rows as the mode card: header, then a 36px status row', () => {
+    it('TUN sits in the home switch strip with its status under the title', () => {
         const doc = parseIndex();
         const status = /** @type {HTMLElement} */ (doc.getElementById('tun-status-text'));
         expect(status).toBeTruthy();
-        expect(status.dataset.i18n).toBe('tunInactive');
-        const title = /** @type {HTMLElement} */ (doc.querySelector('[data-i18n="tunMode"]'));
-        const card = title.closest('.glass-card');
-        expect(card?.contains(status)).toBe(true);
-        // The status sits in its own control row, the counterpart of #mode-selector-container.
+        expect(status.dataset.i18n).toBe('stateOff');
+        const strip = doc.getElementById('home-strip');
+        expect(strip?.contains(status)).toBe(true);
+        expect(strip?.contains(doc.getElementById('tun-proxy-toggle'))).toBe(true);
+        expect(strip?.contains(doc.getElementById('mode-selector-container'))).toBe(true);
         expect(status.closest('.home-tun-status')).toBeTruthy();
-        expect(card?.contains(doc.getElementById('tun-proxy-toggle'))).toBe(true);
     });
 });
 

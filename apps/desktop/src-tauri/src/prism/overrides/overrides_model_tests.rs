@@ -19,7 +19,7 @@
     clippy::panic
 )]
 mod tests {
-    use super::super::{OverrideExt, OverrideItem, OverrideType};
+    use super::super::{OverrideExt, OverrideItem, OverrideLog, OverrideType};
 
     fn make_item(id: &str, ext: OverrideExt) -> OverrideItem {
         OverrideItem {
@@ -53,5 +53,28 @@ mod tests {
         insta::assert_snapshot!("yaml_content", item.content_filename());
         insta::assert_snapshot!("yaml_log", item.log_filename());
         insta::assert_snapshot!("yaml_patch", item.patch_filename());
+    }
+
+    #[test]
+    fn reload_outcome_preserves_legacy_logs_and_explicit_skips() {
+        let legacy = serde_json::json!({
+            "scriptId": "script",
+            "scriptName": "Script",
+            "executedAt": 0,
+            "durationUs": 0,
+            "success": true,
+            "configModified": true,
+            "error": null,
+            "logs": []
+        });
+        let mut log: OverrideLog = serde_json::from_value(legacy).unwrap();
+        assert_eq!(log.reloaded, None);
+        assert_eq!(log.reload_uncertain, None);
+        log.reloaded = Some(false);
+        log.reload_uncertain = Some(true);
+        let saved = serde_json::to_value(&log).unwrap();
+        assert_eq!(saved["reloaded"], false);
+        assert_eq!(saved["reloadUncertain"], true);
+        assert_eq!(saved["success"], true);
     }
 }

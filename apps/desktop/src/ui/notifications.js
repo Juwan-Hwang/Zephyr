@@ -241,7 +241,7 @@ function releaseModal() {
     _releaseModal();
 }
 
-export function showModal(/** @type {string} */ title, placeholder = '', defaultValue = '', isCustomContent = false, customHtml = '', /** @type {((contentArea: HTMLElement, close: (val: string|HTMLElement|null) => void) => void)|undefined} */ onReady = undefined) {
+export function showModal(/** @type {string} */ title, placeholder = '', defaultValue = '', isCustomContent = false, customHtml = '', /** @type {((contentArea: HTMLElement, close: (val: string|HTMLElement|null) => void) => void)|undefined} */ onReady = undefined, /** @type {() => boolean} */ canClose = () => true) {
     if (_modalOpen) return Promise.resolve(null);
     claimModal();
     // A throw while building the dialog must not leave the shared modal claimed forever.
@@ -301,7 +301,7 @@ export function showModal(/** @type {string} */ title, placeholder = '', default
 
         let closed = false;
         const close = (/** @type {string|HTMLElement|null} */ val) => {
-            if (closed) return;
+            if (closed || !canClose()) return;
             closed = true;
             bg.classList.add('opacity-0');
             container.classList.add('scale-95');

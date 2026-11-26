@@ -4,7 +4,7 @@
  * Extracted from ui.js for modularity.
  */
 
-import { patchConfig, closeAllConnections, invoke, restartCore, setSecret, getConfig, getCurrentWindow, whileCoreReplaced } from '../api.js';
+import { closeAllConnections, invoke, restartCore, setSecret, getConfig, getCurrentWindow, whileCoreReplaced, coreReplacements } from '../api.js';
 import { tunLogger } from '../utils/logger.js';
 import { setWsSecret } from '../websocket.js';
 import { showNotification, showConfirmModal } from './notifications.js';
@@ -14,6 +14,7 @@ import { COMMANDS } from '@zephyr/shared';
 import { postRestartRecovery, restartedProfile } from './lifecycle.js';
 import { currentProfile } from './active-profile.js';
 import { renderTunStatus } from './tun-status.js';
+import { Bus, Events } from './events.js';
 
 /**
  * The backend's answer when the user stopped the core before a root restart
@@ -60,11 +61,12 @@ export function mirrorTunToggle(toggle) {
     const home = () => /** @type {HTMLInputElement|null} */ (document.getElementById('tun-proxy-toggle'));
     const sync = () => {
         toggle.checked = !!appStore.get('isTunEnabled');
+        toggle.indeterminate = home()?.indeterminate === true;
     };
     const unsubs = [
         // A store change carries the new state (tray, Restore Defaults) even
         // before the home toggle has caught up.
-        appStore.subscribe('isTunEnabled', (/** @type {boolean} */ on) => { toggle.checked = !!on; }),
+        appStore.subscribe('isTunEnabled', (/** @type {boolean} */ on) => { toggle.checked = !!on; toggle.indeterminate = home()?.indeterminate === true; }),
         // No second click while a switch is in flight; re-read when it settles.
         appStore.subscribe('isNetworkUpdating', (/** @type {boolean} */ busy) => {
             toggle.disabled = !!busy;
@@ -218,8 +220,20 @@ export function initTunToggle() {
         }
 
         const enable = toggle.checked;
+        const wasUnknown = toggle.dataset.tunUnknown === '1';
+        const priorValue = Boolean(appStore.get('isTunEnabled'));
         /** @type {Record<string, string>} */
         const t = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]);
+        const showUnknown = () => {
+            toggle.checked = Boolean(appStore.get('isTunEnabled'));
+            toggle.indeterminate = true;
+            toggle.dataset.tunUnknown = '1';
+            if (statusText) {
+                statusText.textContent = t.unknown || 'Unknown';
+                statusText.dataset.i18n = 'unknown';
+                statusText.classList.remove('text-accent');
+            }
+        };
         const isMac = navigator.platform.toLowerCase().includes('mac');
         appStore.set('isNetworkUpdating', true);
 
@@ -251,6 +265,9 @@ export function initTunToggle() {
                             setSecret(result);
                             setWsSecret(result);
                         }
+                        // This privileged replacement bypasses restartCore's
+                        // event. Restore runtime overlays using the new secret.
+                        Bus.emit(Events.CORE_RESTARTED);
                     } catch (authErr) {
                         // A stop of the user's during the restart is no failure.
                         if (authErr !== CORE_STOPPED_BEFORE_START && authErr !== CORE_STOPPED_MEANWHILE) {
@@ -345,8 +362,8 @@ export function initTunToggle() {
                     }
                 }
             } else {
-                // Non-macOS: use API to update config
-                await patchConfig({ tun: { enable } });
+                // Share the native config lock with full DNS overlay reloads.
+                await invoke(COMMANDS.APPLY_RUNTIME_TUN, { enable });
 
                 const _coreConfig = await invoke(COMMANDS.READ_CONFIG).catch(() => null);
                 const config = await getConfig();
@@ -391,13 +408,48 @@ export function initTunToggle() {
                 showNotification(enable ? t.tunEnabled : t.tunDisabled, 'success');
             }
 
+            toggle.indeterminate = false;
+            delete toggle.dataset.tunUnknown;
             renderTunStatus(statusText, enable);
         } catch (err) {
             // The prompts below replace this error with their own message: keep it in the log.
             tunLogger.error(`TUN ${enable ? 'enable' : 'disable'} failed`, err);
-            toggle.checked = !enable;
-            appStore.set('isTunEnabled', !enable);
-            renderTunStatus(statusText, !enable);
+            const reason = String(err);
+            if (reason.includes('TUN_UPDATE_UNCONFIRMED')) {
+                // A write may have landed on the previous core. Display the
+                // current core's observation, or unknown, without guessing.
+                const coreAtRead = coreReplacements();
+                const actual = /** @type {any} */ (await getConfig().catch(() => null))?.tun?.enable;
+                if (coreReplacements() !== coreAtRead) {
+                    if (statusText?.dataset.i18n === 'configuringTun') showUnknown();
+                    return;
+                }
+                toggle.indeterminate = typeof actual !== 'boolean';
+                if (typeof actual === 'boolean') {
+                    delete toggle.dataset.tunUnknown;
+                    toggle.checked = actual;
+                    appStore.set('isTunEnabled', actual);
+                    renderTunStatus(statusText, actual);
+                } else showUnknown();
+                showNotification(reason, 'warning');
+                return;
+            }
+            if (reason.includes('TUN_UPDATE_BUSY')) {
+                if (wasUnknown) showUnknown();
+                else {
+                    toggle.checked = priorValue;
+                    toggle.indeterminate = false;
+                    renderTunStatus(statusText, priorValue);
+                }
+                showNotification(reason, 'warning');
+                return;
+            }
+            if (wasUnknown) showUnknown();
+            else {
+                toggle.checked = !enable;
+                appStore.set('isTunEnabled', !enable);
+                renderTunStatus(statusText, !enable);
+            }
             // The prompts below keep the switch busy; show the rollback now.
             syncTunMirrors();
 
@@ -435,7 +487,7 @@ export function initTunToggle() {
                             //
                             // The restart regenerates `run_config.yaml` from the
                             // stored preference, and `prepare_runtime_config`
-                            // lets `tun_enabled` override whatever `patchConfig`
+                            // lets `tun_enabled` override whatever the live patch
                             // wrote. So with this write failed, restarting would
                             // set `tun.enable: false` and bring the core up
                             // without TUN — the restart would undo the change it
@@ -475,6 +527,8 @@ export function initTunToggle() {
 
                             appStore.set('isTunEnabled', true);
                             toggle.checked = true;
+                            toggle.indeterminate = false;
+                            delete toggle.dataset.tunUnknown;
                             renderTunStatus(statusText, true);
                             showNotification(t.tunEnabled, 'success');
                             return;

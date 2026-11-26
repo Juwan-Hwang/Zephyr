@@ -11,7 +11,7 @@ const api = {
 vi.mock('../api.js', () => api);
 const notify = vi.fn();
 vi.mock('./notifications.js', () => ({ showNotification: notify }));
-vi.mock('./prism.js', () => ({ rebuild: vi.fn(async () => {}), overrideApplyAll: vi.fn(async () => []) }));
+vi.mock('./prism.js', () => ({ rebuild: vi.fn(async () => ({ hot_reload_success: true })), overrideApplyAll: vi.fn(async () => []) }));
 vi.mock('./proxy-memory.js', () => ({
     restoreProxySelection: vi.fn(async () => {}),
     restoreProxySelectionResult: vi.fn(async () => 'restored'),
@@ -40,7 +40,8 @@ describe('switchToConfig', () => {
         expect(result.actualConfig).toBe('b.yaml');
         expect(notify).toHaveBeenCalledWith(expect.any(String), 'warning');
         // The recovery still runs for the profile the core switched to.
-        expect(prism.overrideApplyAll).toHaveBeenCalled();
+        expect(prism.rebuild).toHaveBeenCalledWith(undefined, { withOverrides: true });
+        expect(prism.overrideApplyAll).not.toHaveBeenCalled();
         expect(memory.restoreProxySelectionResult).toHaveBeenCalledWith('b.yaml');
     });
 

@@ -33,6 +33,8 @@ let originalConfigRules = [];
  * @type {string|null}
  */
 let rulesProfile = null;
+/** @type {number|null} Core generation owning the page's current draft. */
+let rulesCore = null;
 
 /** Bumped on each read of the rules: a save started before it owns no baseline. */
 let rulesLoads = 0;
@@ -50,7 +52,7 @@ let profileBehindCore = false;
  * Rules a partial save made live that their profile file did not take,
  * with that profile: the page shows them (still unsaved) when it is read
  * again while that profile runs, not the file's older rules.
- * @type {{ profile: string, rules: any[], core: number } | null}
+ * @type {{ profile: string, rules: any[], fileRules: string, core: number, conflicted?: boolean } | null}
  */
 let unsavedLiveRules = null;
 /**
@@ -186,6 +188,7 @@ async function loadRules(editsAtStart = rulesEdits) {
             originalConfigRules = [];
             loadedRules = [];
             rulesProfile = null;
+            rulesCore = null;
             void renderRulesList();
             // Nothing to save: a Save left from the page's earlier rules goes.
             updateSaveRulesBtnVisibility();
@@ -210,9 +213,15 @@ async function loadRules(editsAtStart = rulesEdits) {
         // its file: those are shown, with Save kept for the retry.
         /** @type {any[]} */
         let readRules = fileRules;
+        const fileBaselineChanged = unsavedLiveRules?.profile === configName
+            && unsavedLiveRules.fileRules !== JSON.stringify(fileRules);
+        const replacingConflict = unsavedLiveRules?.conflicted === true || fileBaselineChanged;
+        const pageUsesFileBaseline = JSON.stringify(loadedRules) === JSON.stringify(fileRules)
+            && JSON.stringify(originalConfigRules) === JSON.stringify(fileRules);
         // Only while the core that took them still runs: a restart (another
         // profile, the minimal config, or the same one again) loads the file.
-        if (unsavedLiveRules && unsavedLiveRules.core !== coreReplacements()) unsavedLiveRules = null;
+        if (unsavedLiveRules && (unsavedLiveRules.conflicted || unsavedLiveRules.core !== coreReplacements()
+            || fileBaselineChanged)) unsavedLiveRules = null;
         profileBehindCore = false;
         if (unsavedLiveRules && rulesProfile && unsavedLiveRules.profile === rulesProfile) {
             readRules = unsavedLiveRules.rules;
@@ -220,14 +229,18 @@ async function loadRules(editsAtStart = rulesEdits) {
         } else if (rulesProfile !== null) {
             unsavedLiveRules = null;
         }
-        originalConfigRules = [...fileRules];
-        loadedRules = [...readRules];
         // Edited while this read ran (a read again after a save, say): the
         // edits to the same profile's list stay on the page, unsaved, rather
         // than the list read in their place. Another profile's rules replace
         // them: the edits could not be saved there.
-        const keepEdits = rulesEdits !== editsAtStart && rulesProfile !== null && ownerBefore === rulesProfile;
-        if (!keepEdits) currentConfigRules = [...readRules];
+        const keepEdits = rulesCore === coreReplacements() && (!replacingConflict || pageUsesFileBaseline) && rulesEdits !== editsAtStart
+            && rulesProfile !== null && ownerBefore === rulesProfile;
+        if (!keepEdits) {
+            currentConfigRules = [...readRules];
+            originalConfigRules = [...fileRules];
+            loadedRules = [...readRules];
+            rulesCore = coreReplacements();
+        }
         void renderRulesList();
         updateSaveRulesBtnVisibility();
     } catch (err) {
@@ -491,6 +504,12 @@ async function saveRules() {
         // unsaved (Save stays visible) when it ends.
         const savingRules = [...currentConfigRules];
         const ownerAtSave = rulesProfile;
+        const fileRulesAtSave = JSON.stringify(originalConfigRules);
+        const retryAtSave = unsavedLiveRules?.profile === ownerAtSave ? unsavedLiveRules : null;
+        if (retryAtSave?.conflicted) {
+            await loadRules();
+            return;
+        }
         const loadAtSave = rulesLoads;
         // The profile these rules are checked against; a switch while the
         // check runs would otherwise save them into a profile never checked.
@@ -520,6 +539,23 @@ async function saveRules() {
                 rulesLogger.warn('Reading the profile for the rules check failed:', readErr);
                 return null;
             });
+
+        if (retryAtSave && !profileConfig) {
+            showNotification(/** @type {any} */ (translations)[currentLang].rulesProfileUnreadableRetry
+                || 'Could not read the profile. Your pending rules are retained; try saving again.', 'warning');
+            return;
+        }
+        const expectedFileRules = retryAtSave?.fileRules ?? fileRulesAtSave;
+        if (profileConfig && expectedFileRules !== JSON.stringify(/** @type {any} */ (profileConfig).rules || [])) {
+            // Another editor changed the profile since this pending snapshot.
+            // Do not retry the old whole-list write over that newer version.
+            unsavedLiveRules = { profile: /** @type {string} */ (profileBefore), rules: savingRules,
+                fileRules: expectedFileRules, core: coreReplacements(), conflicted: true };
+            showNotification(/** @type {any} */ (translations)[currentLang].rulesChangedBeforeRetry
+                || 'The profile rules changed. Review the current rules before saving again.', 'warning');
+            await loadRules();
+            return;
+        }
 
         // Validate before applying: the whole running config with the new
         // rules, since rules name its groups and providers (rules alone
@@ -569,12 +605,18 @@ async function saveRules() {
             return;
         }
         const outcome = configUpdateOutcome(/** @type {any} */ (result));
+        const needsRetry = outcome === 'partial' || outcome === 'unconfirmed';
         if (outcome !== 'failed') rulesSaves += 1;
         // Kept across page reads too: the core runs these rules, the
         // profile file still has the older ones. Recorded before any await,
         // so a read of the page while connections close shows them.
-        if (outcome === 'partial' && ownerAtSave) {
-            unsavedLiveRules = { profile: ownerAtSave, rules: savingRules, core: coreAtSave };
+        const profileSaved = result?.profile_saved === true || result?.files_saved === true;
+        if (needsRetry && ownerAtSave) {
+            // If this read failed, retain the last file baseline shown on the
+            // page. A later read must still match it before Retry can overwrite.
+            const fileRules = profileSaved ? JSON.stringify(savingRules)
+                : expectedFileRules;
+            unsavedLiveRules = { profile: ownerAtSave, rules: savingRules, fileRules, core: coreAtSave };
         } else if (outcome !== 'failed' && unsavedLiveRules?.profile === ownerAtSave) {
             unsavedLiveRules = null;
         }
@@ -591,12 +633,18 @@ async function saveRules() {
         // not hold, whatever the page shows now.
         if (outcome !== 'failed' && loadAtSave !== rulesLoads && ownerAtSave
             && rulesProfile === ownerAtSave && coreReplacements() === coreAtSave) {
-            if (JSON.stringify(currentConfigRules) === JSON.stringify(loadedRules)) {
+            // A concurrent read of a different file version is newer evidence
+            // than an incomplete write. Do not cover it with this saved draft.
+            const checkedFileRules = profileConfig ? JSON.stringify((/** @type {any} */ (profileConfig).rules || [])) : fileRulesAtSave;
+            const readNewerFile = needsRetry && JSON.stringify(originalConfigRules) !== checkedFileRules
+                && JSON.stringify(originalConfigRules) !== JSON.stringify(savingRules);
+            if (readNewerFile && unsavedLiveRules?.profile === ownerAtSave) unsavedLiveRules.conflicted = true;
+            if (!readNewerFile && JSON.stringify(currentConfigRules) === JSON.stringify(loadedRules)) {
                 currentConfigRules = [...savingRules];
                 loadedRules = [...savingRules];
                 void renderRulesList();
             }
-            if (outcome === 'partial') {
+            if (needsRetry) {
                 profileBehindCore = true;
             } else {
                 originalConfigRules = [...savingRules];
@@ -619,7 +667,7 @@ async function saveRules() {
         if (loadAtSave === rulesLoads) {
             // A partial save left the active profile without the rules: keep
             // them marked unsaved so Save stays available for a retry.
-            if (outcome === 'partial') {
+            if (needsRetry) {
                 profileBehindCore = true;
             } else if (outcome !== 'failed') {
                 originalConfigRules = savingRules;
@@ -633,8 +681,8 @@ async function saveRules() {
         } else if (outcome === 'failed') {
             // Neither the core nor the active profile took the rules.
             showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesParseFailed, 'error');
-        } else if (outcome === 'partial') {
-            // Live now, but the active profile did not take the rules.
+        } else if (needsRetry) {
+            // The profile did not take the rules; the core may need recovery too.
             showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'warning');
         } else {
             showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'info');
