@@ -273,12 +273,19 @@ pub fn is_machine_key_persisted() -> bool {
 /// Returns base64-encoded ciphertext with version prefix and nonce prepended.
 /// Format: "v2:" + nonce (12 bytes) + ciphertext + auth tag (16 bytes)
 pub(super) fn obfuscate_string(s: &str) -> Result<String, String> {
+    let key_bytes = get_machine_key();
+    encrypt_persistent_string(s, &key_bytes, MACHINE_KEY_PERSISTED.load(Ordering::SeqCst))
+}
+
+fn encrypt_persistent_string(s: &str, key_bytes: &[u8], persisted: bool) -> Result<String, String> {
     use aes_gcm::{
         aead::{Aead as _, KeyInit as _},
         Aes256Gcm, Nonce,
     };
 
-    let key_bytes = get_machine_key();
+    if !persisted {
+        return Err("Cannot encrypt persistent data with a session-only machine key".to_owned());
+    }
 
     if key_bytes.len() != 32 {
         return Err(format!(
@@ -287,7 +294,7 @@ pub(super) fn obfuscate_string(s: &str) -> Result<String, String> {
         ));
     }
 
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+    let cipher = Aes256Gcm::new_from_slice(key_bytes)
         .map_err(|e| format!("Failed to initialize AES cipher: {e}"))?;
 
     let nonce_bytes: [u8; 12] = rand::rng().random();
@@ -934,8 +941,8 @@ pub(super) fn save_metadata(paths: &AppPaths, meta: &ProfilesMetadata) -> Result
         obf_meta.configs.insert(
             k.clone(),
             ConfigMetadata {
-                url: v.url.as_ref().and_then(|s| obfuscate_string(s).ok()),
-                sub_info: v.sub_info.as_ref().and_then(|s| obfuscate_string(s).ok()),
+                url: v.url.as_deref().map(obfuscate_string).transpose()?,
+                sub_info: v.sub_info.as_deref().map(obfuscate_string).transpose()?,
                 last_updated: v.last_updated,
                 auto_update_interval: v.auto_update_interval,
                 // user_agent is not sensitive — store as-is (no obfuscation)
@@ -1310,6 +1317,14 @@ mod tests {
 
     fn random_test_key() -> [u8; 32] {
         rand::rng().random()
+    }
+
+    #[test]
+    fn persistent_encryption_rejects_a_session_only_key() {
+        let key = random_test_key();
+        assert!(super::encrypt_persistent_string("subscription", &key, false).is_err());
+        let encrypted = super::encrypt_persistent_string("subscription", &key, true).unwrap();
+        assert_eq!(deobfuscate_with_key(&encrypted, &key), "subscription");
     }
 
     /// Whether `dir` tells apart filenames that differ only by case.

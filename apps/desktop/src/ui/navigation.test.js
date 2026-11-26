@@ -145,6 +145,16 @@ describe('initNavigation', () => {
         expect(calls).toEqual(['onLogs']);
     });
 
+    it('replays a deferred current-page entry only when requested', () => {
+        const { cbs, calls } = makeCallbacks();
+        nav.initNavigation(cbs);
+        nav.navigateTo('connections');
+        calls.length = 0;
+        nav.navigateTo('connections', { reenter: true });
+        nav.navigateTo('connections');
+        expect(calls).toEqual(['onConnections']);
+    });
+
     it('treats the initially visible page as current', () => {
         const { cbs } = makeCallbacks();
         nav.initNavigation(cbs);

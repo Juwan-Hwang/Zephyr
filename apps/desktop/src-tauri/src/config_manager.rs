@@ -38,6 +38,9 @@ impl ConfigIo for RealConfigIo {
     }
 
     fn write_file(&self, path: &Path, content: &str) -> Result<(), String> {
+        // Check the fully merged candidate before any runtime/profile write.
+        // A settings port edit bypasses the startup injector's collision check.
+        crate::speed_test::validate_diagnostic_ports(content)?;
         crate::core_manager::write_file_secure(path, content)
     }
 
@@ -46,12 +49,22 @@ impl ConfigIo for RealConfigIo {
     }
 }
 
+fn update_runtime_config(path: &Path, patch: &JsonValue) -> Result<(YamlValue, String), String> {
+    let saved = update_config_core(&RealConfigIo, path, patch)?;
+    // Insertion republishes the dependency's whole compiled configuration,
+    // which no longer contains the just-saved settings.
+    crate::prism::host::invalidate_rule_insert_cache();
+    Ok(saved)
+}
+
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub fn read_config(app: AppHandle) -> Result<JsonValue, String> {
     let paths = ensure_app_storage(&app)?;
     let run_config_path = paths.core_dir.join("run_config.yaml");
-    read_config_with_io(&RealConfigIo, &run_config_path)
+    let mut config = read_config_with_io(&RealConfigIo, &run_config_path)?;
+    crate::speed_test::remove_private_listeners_from_response(&mut config);
+    Ok(config)
 }
 
 /// What happened to the original profile when a patch was saved.
@@ -78,7 +91,7 @@ pub struct ConfigUpdateResult {
     /// Whether every file that should take the patch was written: the run
     /// config and, when one is active, the original profile.
     pub files_saved: bool,
-    /// Whether the run config was written (always true on `Ok`).
+    /// Whether the run config was written; false when the core retired first.
     pub run_config_saved: bool,
     /// Whether the original profile took the patch (true when none needed it).
     pub profile_saved: bool,
@@ -308,6 +321,28 @@ pub fn config_update_result(
     }
 }
 
+fn stopped_config_update_result(profile_save: &ProfileSave) -> ConfigUpdateResult {
+    let mut result = config_update_result(profile_save, false, "Core stopped before publication");
+    result.run_config_saved = false;
+    result.message = match profile_save {
+        ProfileSave::Saved => {
+            "Profile saved; the core stopped before runtime publication. Start the core to apply it."
+                .to_owned()
+        }
+        ProfileSave::NotNeeded => {
+            result.files_saved = false;
+            result.profile_saved = false;
+            "The core stopped before runtime publication; no active profile could retain the edit."
+                .to_owned()
+        }
+        ProfileSave::Failed { .. } => format!(
+            "The core stopped before runtime publication; profile save failed: {}",
+            result.profile_error.as_deref().unwrap_or("unknown error")
+        ),
+    };
+    result
+}
+
 /// YAML merge key: mihomo folds a `<<` source into the mapping holding it.
 const YAML_MERGE_KEY: &str = "<<";
 
@@ -513,7 +548,7 @@ const _: () = assert!(
 
 /// Take the run-config lock, waiting at most `wait` ([`RUN_CONFIG_BUSY`]
 /// after that). Blocking: call it on the blocking pool.
-fn lock_run_config_within(
+pub(crate) fn lock_run_config_within(
     wait: std::time::Duration,
 ) -> Result<std::sync::MutexGuard<'static, ()>, String> {
     let deadline = std::time::Instant::now() + wait;
@@ -640,6 +675,9 @@ pub async fn update_config(
     patch: JsonValue,
     expect_profile: Option<String>,
 ) -> Result<ConfigUpdateResult, String> {
+    if !patch.is_object() {
+        return Err("Config patch must be an object of config keys".to_owned());
+    }
     let paths = ensure_app_storage(&app)?;
     let run_config_path = paths.core_dir.join("run_config.yaml");
     // Built before anything is written: once the run config changed, an
@@ -666,12 +704,10 @@ pub async fn update_config(
     // so no start can land between this check and the writes.
     // Recovered when poisoned, as in step 5: a panic elsewhere does not
     // block every later save.
-    let recorded_profile = state
-        .0
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .last_config_path()
-        .map(String::from);
+    let (recorded_profile, checked_instance) = {
+        let core = crate::backend_event::lock_best_effort(&state.0);
+        (core.last_config_path().map(String::from), core.started_at())
+    };
     if profile_changed_meanwhile(expect_profile.as_deref(), recorded_profile.as_deref()) {
         return Err(PROFILE_CHANGED_MEANWHILE.to_owned());
     }
@@ -692,12 +728,36 @@ pub async fn update_config(
     let blocking_patch = patch.clone();
     let profiles_dir = paths.profiles_dir.clone();
     let profile_at_check = recorded_profile.clone();
-    let (current_yaml, profile_save, port, secret) = tokio::task::spawn_blocking(move || {
+    let saved = tokio::task::spawn_blocking(move || {
         let _run_config = lock_run_config_within(RUN_CONFIG_WAIT)?;
+        // Block other runtime writers until this exact candidate has finished
+        // reloading and its diagnostic listener has been reconciled.
+        let config_guard = crate::prism::pipeline::CoreStartGuard::acquire();
 
+        let cleanup = crate::core_manager::core::core_process::RUN_CONFIG_CLEANUP_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let core_state = tauri::Manager::state::<MihomoState>(&blocking_app);
+        let current_instance = crate::backend_event::lock_best_effort(&core_state.0).started_at();
+        let previous_rules = fs::read_to_string(&blocking_run_config_path)
+            .ok()
+            .and_then(|content| serde_yaml::from_str(&content).ok())
+            .and_then(|yaml| crate::prism::host::effective_runtime_rules(&yaml).ok());
         // Steps 1-4: Read, merge, secure, write (testable core)
-        let (current_yaml, _port_from_core) =
-            update_config_core(&RealConfigIo, &blocking_run_config_path, &blocking_patch)?;
+        let current_yaml = if same_core_instance(checked_instance, current_instance) {
+            Some(update_runtime_config(&blocking_run_config_path, &blocking_patch)?.0)
+        } else {
+            None
+        };
+        drop(cleanup);
+        // Settings can change rules without recompiling Prism. Invalidate the
+        // old source snapshot before this candidate can reach the live core.
+        if let Some(candidate) = current_yaml.as_ref() {
+            let current_rules = crate::prism::host::effective_runtime_rules(candidate).ok();
+            if previous_rules.is_none() || previous_rules != current_rules {
+                crate::prism::host::set_rule_annotations_confirmed(false);
+            }
+        }
 
         // 5. Update the original profile too
         let (last_config_path, port, secret) = {
@@ -748,10 +808,16 @@ pub async fn update_config(
                 &blocking_patch,
             )?,
         };
-        Ok::<_, String>((current_yaml, profile_save, port, secret))
+        Ok::<_, String>((current_yaml, profile_save, port, secret, config_guard))
     })
     .await
     .map_err(|e| format!("Config update task failed: {e}"))??;
+    let (current_yaml, profile_save, port, secret, config_guard) = saved;
+    let Some(current_yaml) = current_yaml else {
+        drop(config_guard);
+        drop(start_guard);
+        return Ok(stopped_config_update_result(&profile_save));
+    };
 
     // 6. Request Core Reload
     let actual_port = if let Some(ext_ctrl) = current_yaml
@@ -806,6 +872,33 @@ pub async fn update_config(
     };
 
     let sent = req.send().await;
+    let reloaded = sent
+        .as_ref()
+        .is_ok_and(|response| response.status().is_success());
+    if reloaded {
+        let candidate = crate::speed_test::injected_route(&current_yaml);
+        let app_for_confirmation = app.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::speed_test::confirm_listener(&app_for_confirmation, candidate);
+        })
+        .await;
+    }
+    let unknown = sent.as_ref().is_err_and(reload_may_still_land);
+    if unknown {
+        let candidate = crate::speed_test::injected_route(&current_yaml);
+        let app_for_confirmation = app.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::speed_test::reconcile_unknown_listener(
+                &app_for_confirmation,
+                candidate.group_owned,
+            );
+        })
+        .await;
+    }
+    drop(config_guard);
+    if reloaded || unknown {
+        crate::speed_test::notify_reloaded(&app);
+    }
     // The core has answered the reload (or the request ended): a start may
     // go ahead. The lock is held through the reload, bounded by
     // CONFIG_RELOAD_TIMEOUT, so no start replaces the core while it loads
@@ -819,14 +912,11 @@ pub async fn update_config(
             if status.is_success() {
                 hot_reload_success = true;
                 // The listener the core reports after the reload: the run
-                // config may have changed again since this update wrote it
-                // (a Prism write once the run-config lock was let go), and
-                // the reload loaded that newer file. A core busy right after
-                // the reload is asked again: only its answer says what it
-                // loaded. When it never answers, the file this update wrote
-                // is the fallback. The file on disk is not: a Prism write
-                // that saves without a reload may have changed it after the
-                // core loaded it, and nothing tells the two apart.
+                // config can change after the transition guard is released
+                // above. A core busy right after the reload is asked again:
+                // only its answer says what it loaded. When it never answers,
+                // this update's candidate is the fallback, since a later
+                // save-only Prism write may already have changed the disk.
                 let endpoint = if let Some(endpoint) =
                     core_reported_endpoint_retrying(actual_port, &secret).await
                 {
@@ -882,6 +972,53 @@ pub async fn update_config(
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stopped_save_reports_profile_persistence_without_runtime_publication() {
+        let saved = stopped_config_update_result(&ProfileSave::Saved);
+        assert!(saved.files_saved && saved.profile_saved);
+        assert!(!saved.run_config_saved && !saved.hot_reload_success && !saved.reload_unconfirmed);
+        let absent = stopped_config_update_result(&ProfileSave::NotNeeded);
+        assert!(!absent.files_saved && !absent.profile_saved && !absent.run_config_saved);
+        let failed = stopped_config_update_result(&ProfileSave::Failed {
+            profile: "profile.yaml".to_owned(),
+            reason: "write failed".to_owned(),
+        });
+        assert!(!failed.files_saved && !failed.profile_saved && !failed.run_config_saved);
+        assert_eq!(failed.profile_error.as_deref(), Some("write failed"));
+    }
+
+    #[test]
+    fn a_settings_save_blocks_insertion_from_the_previous_compilation() {
+        let _guard = crate::prism::pipeline::RUN_CONFIG_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("run_config.yaml");
+        let mut config: YamlValue = serde_yaml::from_str("mixed-port: 7890\n").unwrap();
+        crate::speed_test::inject(&mut config, 4567).unwrap();
+        let original = serde_yaml::to_string(&config).unwrap();
+        fs::write(&path, &original).unwrap();
+        crate::prism::host::mark_rule_insert_cache_current();
+        crate::prism::host::set_rule_annotations_confirmed(true);
+        assert!(crate::prism::host::require_current_rule_insert_cache().is_ok());
+        assert!(update_runtime_config(&path, &serde_json::json!([])).is_err());
+        assert!(crate::prism::host::require_current_rule_insert_cache().is_ok());
+        let rejected = update_runtime_config(&path, &serde_json::json!({"mixed-port": 4567}));
+        assert!(rejected.unwrap_err().contains("diagnostic listener port"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert!(crate::prism::host::require_current_rule_insert_cache().is_ok());
+        update_runtime_config(&path, &serde_json::json!({"mixed-port": 7891})).unwrap();
+        let error = crate::prism::host::require_current_rule_insert_cache().unwrap_err();
+        assert!(error.contains("Reapply rules or edit the rule file instead"));
+        let current = read_config_with_io(&RealConfigIo, &path).unwrap();
+        assert_eq!(current["mixed-port"], 7891);
+        crate::prism::host::mark_rule_insert_cache_current();
+        assert!(crate::prism::host::require_current_rule_insert_cache().is_ok());
+        crate::prism::host::set_rule_annotations_confirmed(false);
+        assert!(crate::prism::host::require_current_rule_insert_cache().is_err());
+        crate::prism::host::set_rule_annotations_confirmed(true);
+    }
 
     #[test]
     fn a_stop_during_a_config_update_does_not_skip_the_profile_save() {

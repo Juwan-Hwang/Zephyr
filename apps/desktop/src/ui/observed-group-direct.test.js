@@ -5,7 +5,7 @@ vi.mock('../api.js', () => ({
     isCoreReachable: vi.fn(() => true),
     SPECIAL_PROXY_NAMES: Object.freeze(new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'COMPATIBLE', 'PASS', 'PASS-RULE'])),
 }));
-vi.mock('./cache.js', () => ({ getProxiesCached: vi.fn() }));
+vi.mock('./cache.js', () => ({ getProxiesCached: vi.fn(), invalidateProxiesCache: vi.fn() }));
 
 const { computeObservedGroup } = await import('./observed-group.js');
 

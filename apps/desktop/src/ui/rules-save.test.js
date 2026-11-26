@@ -77,6 +77,7 @@ describe('saving rules', () => {
     beforeEach(async () => {
         vi.clearAllMocks();
         await freshModules();
+        vi.mocked(getActiveConfigContent).mockReset().mockResolvedValue({ configName: 'a.yaml', content: 'rules' });
         vi.mocked(validateConfig).mockImplementation(async () => true);
         runningConfig = { rules: ['DOMAIN,a.example.com,DIRECT'] };
         globalThis.jsyaml = {
@@ -183,11 +184,14 @@ describe('saving rules', () => {
         expect(save.classList.contains('hidden')).toBe(false);
     });
 
-    it('shows the live rules as unsaved when the page is read again after a partial save', async () => {
+    it.each([false, true])('keeps the draft available for retry after an incomplete save (unconfirmed=%s)', async (unconfirmed) => {
         await addRuleAndSave({
             files_saved: false, run_config_saved: true, profile_saved: false,
-            hot_reload_success: true, message: 'Rules are live but the profile was not saved',
+            hot_reload_success: !unconfirmed, reload_unconfirmed: unconfirmed,
+            message: 'The profile was not saved',
         });
+        expect(showNotification).toHaveBeenCalledWith('The profile was not saved', 'warning');
+        if (unconfirmed) expect(api.closeAllConnections).not.toHaveBeenCalled();
         // Read again: the profile file still has only the old rule.
         await initRulesPage();
         const save = /** @type {HTMLElement} */ (document.getElementById('save-rules-btn'));
@@ -205,6 +209,228 @@ describe('saving rules', () => {
         await vi.waitFor(() => expect(showNotification).toHaveBeenCalled());
         await initRulesPage();
         expect(save.classList.contains('hidden')).toBe(true);
+    });
+
+    it.each([false, true])('does not restore or retry an obsolete unconfirmed snapshot after another profile edit (reread=%s)', async (reread) => {
+        let profile = { rules: ['DOMAIN,a.example.com,DIRECT'] };
+        let writes = 0;
+        globalThis.jsyaml = { load: (text) => JSON.parse(text), dump: (value) => JSON.stringify(value) };
+        const save = await saveWith(async (command, args) => {
+            if (command === 'update_config') {
+                writes++;
+                profile = { rules: args.patch.rules };
+                return { files_saved: true, profile_saved: true, hot_reload_success: false, reload_unconfirmed: true, message: 'Not confirmed' };
+            }
+            if (command === 'get_settings') return { last_config: 'a.yaml' };
+            if (command === 'read_config') return runningConfig;
+            return JSON.stringify(profile);
+        });
+        profile = { rules: ['DOMAIN,newer.example.com,DIRECT'] };
+        if (reread) await initRulesPage();
+        else {
+            vi.mocked(showNotification).mockClear();
+            save.click();
+            await vi.waitFor(() => expect(showNotification).toHaveBeenCalledWith(expect.stringContaining('profile rules changed'), 'warning'));
+        }
+        await vi.waitFor(() => expect(document.getElementById('rules-list').textContent).toContain('newer.example.com'));
+        expect(document.getElementById('rules-list').textContent).not.toContain('b.example.com');
+        expect(writes).toBe(1);
+    });
+
+    it('keeps a detected retry conflict blocked when the replacement load fails', async () => {
+        const save = await addRuleAndSave({ files_saved: false, profile_saved: false, hot_reload_success: false, reload_unconfirmed: true, message: 'Not confirmed' });
+        let profile = { rules: ['DOMAIN,newer.example.com,DIRECT'] };
+        globalThis.jsyaml = { load: (text) => text === 'rules' ? profile : JSON.parse(text), dump: (value) => JSON.stringify(value) };
+        const previous = api.invoke.getMockImplementation();
+        let profileReads = 0;
+        api.invoke.mockImplementation(async (command, args) => {
+            if (command !== 'read_config_file') return previous(command, args);
+            // The save sees a conflict; its subsequent reconciliation read
+            // fails both directly and through the fallback below.
+            if (++profileReads === 2) throw new Error('Direct profile read failed');
+            return JSON.stringify(profile);
+        });
+        getActiveConfigContent.mockRejectedValueOnce(new Error('Read failed'));
+        showNotification.mockClear();
+        save.click();
+        await vi.waitFor(() => expect(showNotification).toHaveBeenCalledWith(expect.stringContaining('profile rules changed'), 'warning'));
+        await vi.waitFor(() => expect(save.disabled).toBe(false));
+        expect(profileReads).toBe(2);
+        expect(getActiveConfigContent).toHaveBeenCalledOnce();
+        expect(document.getElementById('rules-list').textContent).toContain('b.example.com');
+        const writes = api.invoke.mock.calls.filter(([command]) => command === 'update_config').length;
+        // Even a later return to the old baseline cannot clear the known
+        // conflict through the write path: the draft must be replaced by a read.
+        profile = { rules: ['DOMAIN,a.example.com,DIRECT'] };
+        save.click();
+        await vi.waitFor(() => expect(save.classList.contains('hidden')).toBe(true));
+        expect(api.invoke.mock.calls.filter(([command]) => command === 'update_config')).toHaveLength(writes);
+        expect(document.getElementById('rules-list').textContent).not.toContain('b.example.com');
+    });
+
+    it.each([false, true])('keeps concurrent edits only while the pending file baseline still matches (changed=%s)', async (changed) => {
+        await addRuleAndSave({ files_saved: false, profile_saved: false, hot_reload_success: false, reload_unconfirmed: true, message: 'Not confirmed' });
+        const previous = api.invoke.getMockImplementation();
+        let finish;
+        api.invoke.mockImplementation(async (command, args) => command === 'read_config_file'
+            ? new Promise((resolve) => { finish = resolve; }) : previous(command, args));
+        globalThis.jsyaml = { load: (text) => JSON.parse(text), dump: (value) => JSON.stringify(value) };
+        const load = initRulesPage();
+        await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+        document.getElementById('new-rule-value').value = 'concurrent.example.com';
+        document.getElementById('confirm-add-rule-btn').click();
+        finish(JSON.stringify({ rules: [`DOMAIN,${changed ? 'newer' : 'a'}.example.com,DIRECT`] }));
+        await load;
+        await vi.waitFor(() => expect(document.getElementById('rules-list').textContent.includes('concurrent.example.com')).toBe(!changed));
+        expect(document.getElementById('rules-list').textContent.includes('b.example.com')).toBe(!changed);
+        expect(document.getElementById('save-rules-btn').classList.contains('hidden')).toBe(changed);
+    });
+
+    it.each([false, true])('retains edits after a save dispatched to a replacement core (unconfirmed=%s)', async (unconfirmed) => {
+        vi.mocked(validateConfig).mockImplementationOnce(async () => {
+            api.coreReplacements.mockReturnValue(1);
+            return true;
+        });
+        let finish;
+        try {
+            await addRuleAndSave({
+                files_saved: false, run_config_saved: true, profile_saved: false,
+                hot_reload_success: !unconfirmed, reload_unconfirmed: unconfirmed,
+                message: 'The profile was not saved',
+            });
+            const previous = api.invoke.getMockImplementation();
+            api.invoke.mockImplementation(async (command, args) => command === 'read_config_file'
+                ? new Promise((resolve) => { finish = resolve; }) : previous(command, args));
+            const load = initRulesPage();
+            await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+            document.getElementById('new-rule-value').value = 'concurrent.example.com';
+            document.getElementById('confirm-add-rule-btn').click();
+            finish('rules');
+            await load;
+            await vi.waitFor(() => {
+                expect(document.getElementById('rules-list').textContent).toContain('concurrent.example.com');
+                expect(document.getElementById('rules-list').textContent).toContain('b.example.com');
+            });
+            expect(document.getElementById('save-rules-btn').classList.contains('hidden')).toBe(false);
+        } finally {
+            finish?.('rules');
+            api.coreReplacements.mockReturnValue(0);
+        }
+    });
+
+    it('does not retain an old pending snapshot after the core is replaced during a reread', async () => {
+        await addRuleAndSave({ files_saved: false, profile_saved: false, hot_reload_success: false, reload_unconfirmed: true, message: 'Not confirmed' });
+        const previous = api.invoke.getMockImplementation();
+        let finish;
+        api.invoke.mockImplementation(async (command, args) => command === 'read_config_file'
+            ? new Promise((resolve) => { finish = resolve; }) : previous(command, args));
+        const load = initRulesPage();
+        await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+        document.getElementById('new-rule-value').value = 'concurrent.example.com';
+        document.getElementById('confirm-add-rule-btn').click();
+        api.coreReplacements.mockReturnValue(1);
+        try {
+            finish('rules');
+            await load;
+            expect(document.getElementById('rules-list').textContent).not.toContain('b.example.com');
+            expect(document.getElementById('rules-list').textContent).not.toContain('concurrent.example.com');
+            expect(document.getElementById('save-rules-btn').classList.contains('hidden')).toBe(true);
+        } finally { api.coreReplacements.mockReturnValue(0); }
+    });
+
+    it('retains the original save baseline for edits preserved during a newer-file reread without a pending save', async () => {
+        let profile = { rules: ['DOMAIN,a.example.com,DIRECT'] };
+        let finish;
+        let held = false;
+        globalThis.jsyaml = { load: (text) => JSON.parse(text), dump: (value) => JSON.stringify(value) };
+        api.invoke.mockImplementation(async (command) => {
+            if (command === 'get_settings') return { last_config: 'a.yaml' };
+            if (command === 'read_config') return runningConfig;
+            if (command === 'read_config_file' && held) return new Promise((resolve) => { finish = resolve; });
+            if (command === 'update_config') return SAVED;
+            return JSON.stringify(profile);
+        });
+        await initRulesPage();
+        held = true;
+        const load = initRulesPage();
+        await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+        document.getElementById('new-rule-value').value = 'concurrent.example.com';
+        document.getElementById('confirm-add-rule-btn').click();
+        profile = { rules: ['DOMAIN,newer.example.com,DIRECT'] };
+        held = false;
+        finish(JSON.stringify(profile));
+        await load;
+        expect(document.getElementById('rules-list').textContent).toContain('concurrent.example.com');
+        document.getElementById('save-rules-btn').click();
+        await vi.waitFor(() => expect(showNotification).toHaveBeenCalledWith(expect.stringContaining('profile rules changed'), 'warning'));
+        expect(api.invoke.mock.calls.some(([command]) => command === 'update_config')).toBe(false);
+    });
+
+    it('does not adopt a newer profile baseline for an older unsaved draft', async () => {
+        let profile = { rules: ['DOMAIN,a.example.com,DIRECT'] };
+        globalThis.jsyaml = { load: (text) => text === 'rules' ? profile : JSON.parse(text), dump: (value) => JSON.stringify(value) };
+        api.invoke.mockImplementation(async (command) => {
+            if (command === 'get_settings') return { last_config: 'a.yaml' };
+            if (command === 'read_config') return runningConfig;
+            if (command === 'update_config') return { files_saved: false, profile_saved: false, hot_reload_success: true };
+            return JSON.stringify(profile);
+        });
+        await initRulesPage();
+        document.getElementById('new-rule-value').value = 'draft.example.com';
+        document.getElementById('confirm-add-rule-btn').click();
+        profile = { rules: ['DOMAIN,newer.example.com,DIRECT'] };
+        document.getElementById('save-rules-btn').click();
+        await vi.waitFor(() => expect(showNotification).toHaveBeenCalledWith(expect.stringContaining('profile rules changed'), 'warning'));
+        await vi.waitFor(() => expect(document.getElementById('rules-list').textContent).toContain('newer.example.com'));
+        expect(api.invoke.mock.calls.some(([command]) => command === 'update_config')).toBe(false);
+        expect(document.getElementById('rules-list').textContent).not.toContain('draft.example.com');
+    });
+
+    it('keeps the pending rules when a retry cannot read its profile', async () => {
+        const save = await addRuleAndSave({ files_saved: false, profile_saved: false, hot_reload_success: false, reload_unconfirmed: true, message: 'Not confirmed' });
+        const originalInvoke = api.invoke.getMockImplementation();
+        api.invoke.mockImplementation((command, args) => command === 'read_config_file' ? Promise.reject(new Error('temporarily unreadable')) : originalInvoke(command, args));
+        vi.mocked(showNotification).mockClear();
+        const writes = api.invoke.mock.calls.filter(([command]) => command === 'update_config').length;
+        save.click();
+        await vi.waitFor(() => expect(showNotification).toHaveBeenCalledWith(expect.stringContaining('pending rules are retained'), 'warning'));
+        expect(save.classList.contains('hidden')).toBe(false);
+        expect(document.getElementById('rules-list').textContent).toContain('b.example.com');
+        expect(api.invoke.mock.calls.filter(([command]) => command === 'update_config').length).toBe(writes);
+    });
+
+    it.each([false, true])('retains a partial-save draft when the save-time profile read failed (changed=%s)', async (changed) => {
+        let unreadable = true;
+        let profileReads = 0;
+        let writes = 0;
+        let profile = { rules: ['DOMAIN,a.example.com,DIRECT'] };
+        globalThis.jsyaml = { load: (text) => text === 'rules' ? profile : JSON.parse(text), dump: (value) => JSON.stringify(value) };
+        const save = await saveWith(async (command) => {
+            if (command === 'read_config_file') {
+                // Load the baseline successfully, then fail the save-time read.
+                if (++profileReads > 1 && unreadable) throw new Error('Profile unavailable');
+                return JSON.stringify(profile);
+            }
+            if (command === 'update_config') {
+                writes++;
+                return writes === 1
+                    ? { files_saved: false, profile_saved: false, run_config_saved: true, hot_reload_success: true, message: 'Profile not saved' }
+                    : SAVED;
+            }
+            if (command === 'get_settings') return { last_config: 'a.yaml' };
+            if (command === 'read_config') return runningConfig;
+            return 'rules';
+        });
+        unreadable = false;
+        await initRulesPage();
+        expect(save.classList.contains('hidden')).toBe(false);
+        expect(document.getElementById('rules-list').textContent).toContain('b.example.com');
+        if (changed) profile = { rules: ['DOMAIN,newer.example.com,DIRECT'] };
+        showNotification.mockClear();
+        save.click();
+        await vi.waitFor(() => expect(showNotification).toHaveBeenCalled());
+        expect(writes).toBe(changed ? 1 : 2);
+        if (changed) expect(showNotification).toHaveBeenCalledWith(expect.stringContaining('profile rules changed'), 'warning');
     });
 
     it('shows the saved rules when a read of the same profile finished while the save ran', async () => {
@@ -229,6 +455,43 @@ describe('saving rules', () => {
         await vi.waitFor(() => expect(showNotification).toHaveBeenCalled());
         expect(document.getElementById('rules-list')?.textContent).toContain('b.example.com');
         expect(save.classList.contains('hidden')).toBe(true);
+    });
+
+    it.each([false, true])('keeps a newer same-profile read visible after an incomplete save (unconfirmed=%s)', async (unconfirmed) => {
+        let profile = { rules: ['DOMAIN,a.example.com,DIRECT'] };
+        let complete;
+        globalThis.jsyaml = { load: (text) => text === 'rules' ? profile : JSON.parse(text), dump: (value) => JSON.stringify(value) };
+        api.invoke.mockImplementation(async (command) => {
+            if (command === 'update_config') return new Promise((resolve) => { complete = resolve; });
+            if (command === 'get_settings') return { last_config: 'a.yaml' };
+            if (command === 'read_config') return runningConfig;
+            return JSON.stringify(profile);
+        });
+        await initRulesPage();
+        const save = document.getElementById('save-rules-btn');
+        document.getElementById('new-rule-value').value = 'b.example.com';
+        document.getElementById('confirm-add-rule-btn').click();
+        save.click();
+        await vi.waitFor(() => expect(complete).toBeTypeOf('function'));
+        profile = { rules: ['DOMAIN,newer.example.com,DIRECT'] };
+        await initRulesPage();
+        complete({ files_saved: false, profile_saved: false, run_config_saved: true, hot_reload_success: !unconfirmed, reload_unconfirmed: unconfirmed, message: 'Not fully saved' });
+        await vi.waitFor(() => expect(showNotification).toHaveBeenCalled());
+        expect(document.getElementById('rules-list').textContent).toContain('newer.example.com');
+        expect(document.getElementById('rules-list').textContent).not.toContain('b.example.com');
+        expect(save.classList.contains('hidden')).toBe(false);
+        let finishRecovery;
+        const previous = api.invoke.getMockImplementation();
+        api.invoke.mockImplementation(async (command, args) => command === 'read_config_file'
+            ? new Promise((resolve) => { finishRecovery = resolve; }) : previous(command, args));
+        save.click();
+        await vi.waitFor(() => expect(finishRecovery).toBeTypeOf('function'));
+        document.getElementById('new-rule-value').value = 'fresh-edit.example.com';
+        document.getElementById('confirm-add-rule-btn').click();
+        finishRecovery(JSON.stringify(profile));
+        await vi.waitFor(() => expect(save.disabled).toBe(false));
+        expect(document.getElementById('rules-list').textContent).toContain('fresh-edit.example.com');
+        expect(document.getElementById('rules-list').textContent).toContain('newer.example.com');
     });
 
     it('shows the saved rules when a read during the save brought back rules a partial save left live', async () => {
