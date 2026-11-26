@@ -355,6 +355,29 @@ mod tests {
         }
 
         #[test]
+        fn inherited_rule_lists_and_operations_match_explicit_precedence() {
+            assert_eq!(
+                count_rules("defaults: &r {rules: ['MATCH,DIRECT']}\n<<: *r\n"),
+                1
+            );
+            assert_eq!(count_rules("<<: {rules: ['MATCH,DIRECT']}\nrules: []\n"), 0);
+            assert_eq!(
+                count_rules(
+                    "rules: {<<: {$append: ['MATCH,DIRECT'], $prepend: ['MATCH,REJECT']}, $append: []}"
+                ),
+                1
+            );
+        }
+
+        #[test]
+        fn root_sequences_do_not_count_nested_rule_lists() {
+            assert_eq!(
+                count_rules("- metadata:\n    rules:\n      - MATCH,DIRECT\n"),
+                0
+            );
+        }
+
+        #[test]
         fn rules_section_with_no_items_returns_zero() {
             let content = "rules:\nproxies:\n  - name: test\n";
             assert_eq!(count_rules(content), 0);
@@ -411,14 +434,17 @@ proxies:
         }
 
         #[test]
-        fn ignores_items_without_comma() {
+        fn counts_yaml_entries_without_validating_rule_strings() {
             let content = "\
 rules:
   - DOMAIN-SUFFIX,example.com,PROXY
   - some yaml mapping without comma
   - DOMAIN,github.com,PROXY
 ";
-            assert_eq!(count_rules(content), 2);
+            // Match the editor's YAML entry count. Rule validation belongs to
+            // compilation; a scalar without a comma is still a sequence entry.
+            assert_eq!(count_rules(content), 3);
+            assert_eq!(count_rules("rules: [not-a-valid-rule]"), 1);
         }
 
         #[test]
@@ -1336,7 +1362,7 @@ rules:
         }
 
         #[test]
-        fn count_rules_handles_multiline_yaml_block_scalar() {
+        fn count_rules_counts_top_level_structured_entries_once() {
             let content = "\
 rules:
   - DOMAIN-SUFFIX,example.com,PROXY
@@ -1345,7 +1371,11 @@ rules:
       - test.com
   - DOMAIN,github.com,PROXY
 ";
-            assert_eq!(count_rules(content), 2);
+            // The payload mapping is one top-level entry; its nested sequence
+            // does not add extra entries to the card or save-notice count.
+            assert_eq!(count_rules(content), 3);
+            let nested = "rules: [{payload: ['DOMAIN,nested.example,DIRECT', 'MATCH,DIRECT']}]";
+            assert_eq!(count_rules(nested), 1);
         }
 
         #[test]

@@ -10,8 +10,16 @@
  * @module ui/prism
  */
 
-import { invoke } from '../api.js';
+import { invoke, clearProviderCache } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
+import { Bus, Events } from './events.js';
+import { invalidateProxiesCache, invalidateConfigCache } from './cache.js';
+import { invalidateRunConfigCache } from './run-config-cache.js';
+import { t } from '../i18n.js';
+
+// A stuck settings read must not keep all later rule saves waiting forever.
+// This also leaves room for the DNS restore's five attempts and retry delays.
+const RESTORE_TIMEOUT_MS = 30_000;
 
 /** @type {string[]} Cached trace from the last apply() call. Updated automatically. */
 let _lastTrace = [];
@@ -265,9 +273,22 @@ export async function smartTrimHistory(maxRecords) {
 /** Apply all .prism.yaml patches and reload config. Options: { skipDisabled?: bool, validateOutput?: bool } */
 export async function apply(/** @type {object|undefined} */ options = undefined) {
     const result = await invoke(COMMANDS.PRISM.APPLY, { options: options ?? null });
-    // Cache trace for handleViewChanges — avoids recompilation on "View Impact".
-    if (Array.isArray(result?.trace)) {
-        _lastTrace = result.trace;
+    // The core reloaded the written config: what lives only in the running
+    // core (the DNS rewrite) is put back before this reports.
+    const reloaded = result?.status?.hot_reload_success ?? result?.hot_reload_success;
+    // A rejected candidate does not describe the configuration the core runs.
+    // Cache acceptance before DNS restoration, whose failure does not undo it.
+    if (reloaded === true && Array.isArray(result?.trace)) _lastTrace = result.trace;
+    const uncertain = result?.status?.hot_reload_uncertain ?? result?.hot_reload_uncertain;
+    if (reloaded !== true && uncertain === true) await restoreAfterReload(false);
+    if (result && reloaded === true && !(await restoreAfterReload())) {
+        return {
+            ...result,
+            core_reload_confirmed: true,
+            runtime_restore_success: false,
+            hot_reload_success: false,
+            ...(result.status && typeof result.status === 'object' ? { status: { ...result.status, hot_reload_success: false } } : {}),
+        };
     }
     return result;
 }
@@ -289,6 +310,13 @@ export async function stats() {
 /** List all rules grouped by source file. */
 export async function listRules() {
     return invoke(COMMANDS.PRISM.LIST_RULES);
+}
+
+/** The runtime rules and their editable annotations, read with writers excluded.
+ * @param {string | null} [sourceFile] include the selected source's file version
+ */
+export async function listRuleSnapshot(sourceFile = null) {
+    return invoke(COMMANDS.PRISM.LIST_RULES, { withRunningRules: true, sourceFile });
 }
 
 /** Preview rule changes for a specific patch. */
@@ -332,9 +360,73 @@ export async function toggleGroup(/** @type {string} */ groupId, /** @type {bool
 
 /** Rebuild: reset run_config.yaml to the original profile, then re-apply all patches.
  *  This produces a clean result — previously appended rules from disabled/skipped
- *  patches are properly removed. */
+ *  patches are properly removed. The lifecycle recovery caller restores caches
+ *  and DNS after its later override stage; restoring here would run too early. */
 export async function rebuild(/** @type {object|undefined} */ options = undefined) {
-    return invoke(COMMANDS.PRISM.REBUILD, { options: options ?? null });
+    /** @type {any} */
+    const result = await invoke(COMMANDS.PRISM.REBUILD, { options: options ?? null });
+    // View Impact describes the confirmed build, never a rejected candidate.
+    if ((result?.status?.hot_reload_success ?? result?.hot_reload_success) === true) _lastTrace = Array.isArray(result?.trace) ? result.trace : [];
+    return result;
+}
+
+/**
+ * Build the profile, rule files and enabled overrides in one backend turn,
+ * then reload once. No intermediate config is made active.
+ * @param {object|undefined} [options]
+ * @returns {Promise<any>} the rebuild result
+ */
+export async function rebuildWithOverrides(options = undefined) {
+    /** @type {any} */
+    const result = await invoke(COMMANDS.PRISM.REBUILD, { options: options ?? null, withOverrides: true });
+    if (!result) return result;
+    /** @param {any} r */
+    const notRunning = (r) => ({
+        ...r,
+        hot_reload_success: false,
+        ...(r.status && typeof r.status === 'object' ? { status: { ...r.status, hot_reload_success: false } } : {}),
+    });
+    // Nothing was rebuilt (no active profile): saved, but not running yet.
+    if (result.skipped) return notRunning(result);
+    const reloaded = result?.status?.hot_reload_success ?? result?.hot_reload_success;
+    if (reloaded !== true) {
+        if (result.hot_reload_uncertain === true) await restoreAfterReload(false);
+        return notRunning(result);
+    }
+    _lastTrace = Array.isArray(result?.trace) ? result.trace : [];
+    // The core reloaded the config: what lives only in the running core (the
+    // DNS rewrite) is put back, as after a restart, before this reports.
+    return await restoreAfterReload() ? result : {
+        ...notRunning(result), core_reload_confirmed: true, runtime_restore_success: false,
+    };
+}
+
+/**
+ * Tell the pages the running config was replaced, and wait for what they
+ * restore on it (the DNS rewrite). False when some of it could not be restored.
+ * @param {boolean} [confirmed] false when restoring after an uncertain reload
+ * @returns {Promise<boolean>}
+ */
+async function restoreAfterReload(confirmed = true) {
+    /** @type {Promise<unknown>[]} */
+    const restoring = [];
+    // Its groups, nodes and settings may have changed: no page may read the old ones.
+    invalidateProxiesCache();
+    invalidateConfigCache();
+    invalidateRunConfigCache();
+    clearProviderCache();
+    Bus.emit(Events.CONFIG_UPDATED, { reloaded: confirmed, restoreRuntime: true, waitFor: (/** @type {Promise<unknown>} */ p) => { restoring.push(p); } });
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer;
+    const expired = new Promise((resolve) => { timer = setTimeout(() => resolve(false), RESTORE_TIMEOUT_MS); });
+    try {
+        return await Promise.race([
+            Promise.allSettled(restoring).then((settled) => settled.every((r) => r.status === 'fulfilled' && r.value !== false)),
+            expired,
+        ]) === true;
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -516,6 +608,8 @@ export async function traceFilterBySource(source) {
  * @property {number} durationUs
  * @property {boolean} success
  * @property {boolean} configModified
+ * @property {boolean} [reloaded] false when saved with no running core
+ * @property {boolean} [reloadUncertain] a dispatched reload may be live without confirmation
  * @property {string|null} error
  * @property {{level: string, message: string}[]} logs
  */
@@ -570,7 +664,24 @@ export async function overrideGetContent(id) {
  *  @returns {Promise<OverrideLog>}
  */
 export async function overrideSetContent(id, content, dryRun = false, saveOnly = false) {
-    return invoke(COMMANDS.OVERRIDE.SET_CONTENT, saveOnly ? { id, content, dryRun, saveOnly } : { id, content, dryRun });
+    const result = await invoke(COMMANDS.OVERRIDE.SET_CONTENT, saveOnly ? { id, content, dryRun, saveOnly } : { id, content, dryRun });
+    return dryRun || saveOnly ? result : restoreAfterOverride(result);
+}
+
+/**
+ * A live single-override command only succeeds after its reload was accepted.
+ * Clear node diagnostics and restore running-only settings before reporting it.
+ * @param {OverrideLog} result
+ * @returns {Promise<OverrideLog>}
+ */
+async function restoreAfterOverride(result) {
+    if (result?.reloadUncertain === true) {
+        await restoreAfterReload(false);
+        return result;
+    }
+    if (!result?.success || !result.configModified || result.reloaded === false) return result;
+    if (await restoreAfterReload()) return result;
+    return { ...result, success: false, error: t('requireRestart') };
 }
 
 /** Reorder override items.
@@ -601,7 +712,7 @@ export async function overrideTest(id) {
  *  @returns {Promise<OverrideLog>}
  */
 export async function overrideRefreshRemote(id) {
-    return invoke(COMMANDS.OVERRIDE.REFRESH_REMOTE, { id });
+    return restoreAfterOverride(await invoke(COMMANDS.OVERRIDE.REFRESH_REMOTE, { id }));
 }
 
 /** Apply all enabled overrides.

@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Bus, Events } from './events.js';
+import { Bus, Events, currentRulesVersion } from './events.js';
+
+it('preserves rule attribution for a diagnostic-only selector failure', () => {
+    const before = currentRulesVersion();
+    Bus.emit(Events.DIAGNOSTICS_INVALIDATED, { rulesChanged: false });
+    expect(currentRulesVersion()).toEqual(before);
+    Bus.emit(Events.DIAGNOSTICS_INVALIDATED);
+    expect(currentRulesVersion().revision).toBe(before.revision + 1);
+});
 
 describe('Events constants', () => {
     it('is frozen', () => expect(Object.isFrozen(Events)).toBe(true));
