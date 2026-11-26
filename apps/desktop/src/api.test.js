@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
     ApiError,
+    stripSpeedTestGroup,
+    SPEED_TEST_GROUP,
     setBaseUrl,
     setSecret,
     isCoreReachable,
@@ -290,6 +292,77 @@ describe('API exports', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('getProxies', () => {
+    it.each([true, false])('keeps controller data when one native generation read fails (before=%s)', async (before) => {
+        let reads = 0;
+        const invokeSpy = vi.fn(async (command) => {
+            if (command === 'speed_test_group_owned') return false;
+            reads += 1;
+            if (reads === (before ? 1 : 2)) throw new Error('IPC unavailable');
+            return 7;
+        });
+        vi.stubGlobal('__TAURI_INTERNALS__', { invoke: invokeSpy, transformCallback: vi.fn() });
+        const request = vi.fn(async () => ({ ok: true, json: async () => ({ proxies: {
+            Proxy: { now: 'node' },
+            'ZEPHYR-SPEED-TEST': { type: 'Selector', all: ['node'] },
+        } }) }));
+        vi.stubGlobal('fetch', request);
+        vi.resetModules();
+        try {
+            const api = await import('./api.js');
+            expect(await api.getProxies()).toEqual({ proxies: { Proxy: { now: 'node' } } });
+            expect(request).toHaveBeenCalledOnce();
+        } finally { vi.unstubAllGlobals(); vi.resetModules(); }
+    });
+    it.each([false, true])('retries a failed read only across a reload (changed=%s)', async (changed) => {
+        const api = await import('./api.js');
+        const request = vi.fn().mockImplementationOnce(async () => {
+            if (changed) api.clearProviderCache();
+            return new Response('busy', { status: 503 });
+        }).mockResolvedValue(new Response('{"proxies":{}}'));
+        vi.stubGlobal('fetch', request);
+        try {
+            if (changed) await expect(api.getProxies()).resolves.toEqual({ proxies: {} });
+            else await expect(api.getProxies()).rejects.toMatchObject({ status: 503 });
+            expect(request).toHaveBeenCalledTimes(changed ? 2 : 1);
+        } finally { vi.unstubAllGlobals(); }
+    });
+    it('retries a native generation change when the reserved group is absent', async () => {
+        let nativeGeneration = 1;
+        let reads = 0;
+        vi.stubGlobal('__TAURI_INTERNALS__', {
+            invoke: vi.fn(async () => nativeGeneration),
+            transformCallback: vi.fn(),
+        });
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => {
+            reads += 1;
+            if (reads === 1) nativeGeneration += 1;
+            return { proxies: { Proxy: { now: reads === 1 ? 'old' : 'current' } } };
+        } })));
+        vi.resetModules();
+        try {
+            const api = await import('./api.js');
+            expect(await api.getProxies()).toEqual({ proxies: { Proxy: { now: 'current' } } });
+            expect(reads).toBe(2);
+        } finally {
+            vi.unstubAllGlobals();
+            vi.resetModules();
+        }
+    });
+    it('retries a response invalidated by a configuration reload', async () => {
+        let reads = 0;
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => {
+            reads += 1;
+            if (reads === 1) clearProviderCache();
+            return { proxies: { Proxy: { now: reads === 1 ? 'old' : 'current' } } };
+        } })));
+        try {
+            expect(await getProxies()).toEqual({ proxies: { Proxy: { now: 'current' } } });
+            expect(reads).toBe(2);
+        } finally {
+            resetLatencyTestController();
+            vi.unstubAllGlobals();
+        }
+    });
     it('returns parsed JSON on success', async () => {
         const mockData = { proxies: { 'GLOBAL': { name: 'GLOBAL', type: 'Selector' } } };
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -427,6 +500,43 @@ describe('switchProxy', () => {
 
         await expect(switchProxy('Proxy', 'Bad')).rejects.toThrow();
         vi.unstubAllGlobals();
+    });
+
+    it('skips only when the queued group read already selects the requested node', async () => {
+        const api = await import('./api.js');
+        vi.stubGlobal('fetch', vi.fn(async (_url, init) => init.method === 'PUT'
+            ? { ok: true }
+            : { ok: true, json: async () => ({ proxies: { Proxy: { now: 'node-a.example' } } }) }));
+        const first = await api.switchProxyResult('Proxy', 'node-a.example');
+        const beforeSend = vi.fn();
+        const result = await api.switchProxyResult('Proxy', 'node-a.example', { skipIfCurrent: true, beforeSend });
+        expect(result).toMatchObject({ ok: true, unchanged: true });
+        expect(beforeSend).not.toHaveBeenCalled();
+        expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
+        expect(api.isLatestSwitch('Proxy', first.seq)).toBe(true);
+    });
+
+    it('sends the requested selection when the queued group read reports another node', async () => {
+        const api = await import('./api.js');
+        vi.stubGlobal('fetch', vi.fn(async (_url, init) => init.method === 'PUT'
+            ? { ok: true }
+            : { ok: true, json: async () => ({ proxies: { Proxy: { now: 'node-b.example' } } }) }));
+        const beforeSend = vi.fn();
+        const result = await api.switchProxyResult('Proxy', 'node-a.example', { skipIfCurrent: true, beforeSend });
+        expect(result.ok).toBe(true);
+        expect(beforeSend).toHaveBeenCalledOnce();
+        expect(result.unchanged).not.toBe(true);
+        expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
+    });
+
+    it('still sends a switch if the optional current-selection read fails', async () => {
+        const api = await import('./api.js');
+        vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+            if (init.method === 'PUT') return { ok: true };
+            throw new Error('temporary read failure');
+        }));
+        await expect(api.switchProxyResult('Proxy', 'node-a.example', { skipIfCurrent: true })).resolves.toMatchObject({ ok: true });
+        expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
     });
 
     it('counts a switch as started and in flight until it is answered', async () => {
@@ -736,6 +846,54 @@ describe('switchProxy', () => {
         vi.unstubAllGlobals();
     });
 
+    it('records GLOBAL selection intent even when the UI permits no-op shortcuts', async () => {
+        const invokeSpy = vi.fn(async () => undefined);
+        const request = vi.fn(async () => ({ ok: true, json: async () => ({ proxies: { GLOBAL: { now: 'selected-node' } } }) }));
+        vi.stubGlobal('__TAURI_INTERNALS__', { invoke: invokeSpy, transformCallback: vi.fn() });
+        vi.stubGlobal('fetch', request);
+        vi.resetModules();
+        const api = await import('./api.js');
+        try {
+            expect(await api.switchProxyResult('GLOBAL', 'selected-node', { skipIfCurrent: true })).toMatchObject({ ok: true });
+            expect(invokeSpy).toHaveBeenCalledWith('switch_global_node', { name: 'selected-node' });
+            expect(request).not.toHaveBeenCalled();
+        } finally { vi.unstubAllGlobals(); }
+    });
+
+    it.each([true, false])('checks the native generation before an optional switch precheck (changed=%s)', async (changed) => {
+        let generation = 7;
+        const invokeSpy = vi.fn(async () => generation);
+        const request = vi.fn(async (_url, options) => {
+            if (options?.method === 'PUT') return { ok: true };
+            if (changed) generation = 8;
+            return { ok: true, json: async () => ({ proxies: { Proxy: { now: 'old-node' } } }) };
+        });
+        vi.stubGlobal('__TAURI_INTERNALS__', { invoke: invokeSpy, transformCallback: vi.fn() });
+        vi.stubGlobal('fetch', request);
+        vi.resetModules();
+        try {
+            const api = await import('./api.js');
+            const result = await api.switchProxyResult('Proxy', 'selected-node', { skipIfCurrent: true });
+            expect(result.ok).toBe(!changed);
+            if (changed) expect(result.reason).toBe(api.SWITCH_BUSY);
+            expect(request.mock.calls.filter(([, options]) => options?.method === 'PUT')).toHaveLength(changed ? 0 : 1);
+        } finally { vi.unstubAllGlobals(); vi.resetModules(); }
+    });
+
+    it('uses native generation and ownership admission for diagnostic selection', async () => {
+        const invokeSpy = vi.fn(async () => undefined);
+        const fetchSpy = vi.fn();
+        vi.stubGlobal('__TAURI_INTERNALS__', { invoke: invokeSpy, transformCallback: vi.fn() });
+        vi.stubGlobal('fetch', fetchSpy);
+        vi.resetModules();
+        const api = await import('./api.js');
+        try {
+            await api.selectSpeedTestNode('node-a', 17, 'run-a');
+            expect(invokeSpy).toHaveBeenCalledWith('speed_test_select_node', { name: 'node-a', generation: 17, run: 'run-a' });
+            expect(fetchSpy).not.toHaveBeenCalled();
+        } finally { vi.unstubAllGlobals(); }
+    });
+
     it('an older accepted switch stays outdated after many refused switches of the group', async () => {
         vi.resetModules();
         const api = await import('./api.js');
@@ -788,7 +946,7 @@ describe('switchProxy', () => {
         vi.unstubAllGlobals();
     });
 
-    it('drops a waiting switch when the backend replaced the core', async () => {
+    it.each(['restart', 'reload'])('drops a waiting switch after a backend %s', async (change) => {
         vi.resetModules();
         const api = await import('./api.js');
         /** @type {Array<(v: any) => void>} */
@@ -797,12 +955,30 @@ describe('switchProxy', () => {
         const first = api.switchProxyResult('Proxy', 'node-a.example');
         const waiting = api.switchProxyResult('Proxy', 'node-b.example');
         await vi.waitFor(() => expect(answers).toHaveLength(1));
-        api.noteCoreReplaced();
+        if (change === 'restart') api.noteCoreReplaced();
+        else api.clearProviderCache();
         answers[0]({ ok: true });
         expect((await first).ok).toBe(true);
         expect(await waiting).toMatchObject({ ok: false, reason: api.SWITCH_BUSY });
         expect(fetch).toHaveBeenCalledTimes(1);
         vi.unstubAllGlobals();
+    });
+
+    it.each(['before-reply', 'after-reply'])('does not persist a switch invalidated by a hot reload (%s)', async (when) => {
+        vi.resetModules();
+        const api = await import('./api.js');
+        let answer = (/** @type {any} */ _value) => {};
+        vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { answer = resolve; })));
+        try {
+            const pending = api.switchProxyResult('Proxy', 'old-node');
+            await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+            if (when === 'before-reply') api.clearProviderCache();
+            answer({ ok: true });
+            const result = await pending;
+            if (when === 'after-reply') api.clearProviderCache();
+            expect(result.ok).toBe(true);
+            expect(api.isLatestSwitch('Proxy', result.seq)).toBe(false);
+        } finally { vi.unstubAllGlobals(); }
     });
 });
 
@@ -972,6 +1148,45 @@ describe('abortLatencyTests', () => {
 });
 
 describe('testProxy', () => {
+    it('discards a body whose completion is followed by Stop', async () => {
+        const api = await import('./api.js');
+        api.resetLatencyTestController();
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => {
+            api.abortLatencyTests();
+            return { delay: 45 };
+        } })));
+        try { expect(await api.testProxy('node')).toBe(-1); }
+        finally { api.resetLatencyTestController(); vi.unstubAllGlobals(); }
+    });
+    it('does not discover providers after Stop aborts a missing-proxy response', async () => {
+        const api = await import('./api.js');
+        api.resetLatencyTestController();
+        const request = vi.fn(async () => ({
+            ok: false, status: 404, statusText: 'Not Found',
+            text: async () => { api.abortLatencyTests(); return ''; },
+        }));
+        vi.stubGlobal('fetch', request);
+        try {
+            expect(await api.testProxy('node')).toBe(-1);
+            expect(request).toHaveBeenCalledOnce();
+        } finally { api.resetLatencyTestController(); vi.unstubAllGlobals(); }
+    });
+    it('aborts the shared pass when a configuration reload invalidates its probe', async () => {
+        const api = await import('./api.js');
+        api.resetLatencyTestController();
+        const signal = api.getLatencyTestSignal();
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => {
+            api.clearProviderCache();
+            return { delay: 45 };
+        } })));
+        try {
+            expect(await api.testProxy('node')).toBe(-1);
+            expect(signal.aborted).toBe(true);
+        } finally {
+            api.resetLatencyTestController();
+            vi.unstubAllGlobals();
+        }
+    });
     it('returns delay on success', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
             ok: true,
@@ -1044,6 +1259,118 @@ describe('testProxy', () => {
         await expect(pending).resolves.toBe(-1);
         expect(seen.signal?.aborted).toBe(true);
         vi.unstubAllGlobals();
+    });
+});
+
+describe('proxy reads used by serialized actions', () => {
+    afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+    it.each(['body', 'discovery', 'provider'])('cancels a node record during %s without later fallback requests', async (stage) => {
+        const api = await import('./api.js');
+        api.clearProviderCache();
+        vi.useFakeTimers();
+        const controller = new AbortController();
+        let release = (/** @type {any} */ _value) => {};
+        const request = vi.fn(async (url, init) => {
+            const path = new URL(String(url)).pathname;
+            if (stage !== 'body' && path === '/proxies/node') return new Response('', { status: 404 });
+            if (path === '/providers/proxies') {
+                if (stage === 'discovery') return { ok: true, json: () => new Promise((resolve) => { release = resolve; }) };
+                return new Response(JSON.stringify({ providers: { remote: { proxies: [{ name: 'node' }] } } }));
+            }
+            return stalledBody(init.signal);
+        });
+        vi.stubGlobal('fetch', request);
+        const pending = api.getProxyRecord('node', controller.signal);
+        const cancelled = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+        try {
+            await vi.advanceTimersByTimeAsync(0);
+            expect(request).toHaveBeenCalledTimes(stage === 'body' ? 1 : stage === 'discovery' ? 2 : 3);
+            controller.abort();
+            await cancelled;
+            const calls = request.mock.calls.length;
+            release({ providers: { remote: { proxies: [{ name: 'node' }] } } });
+            await vi.advanceTimersByTimeAsync(0);
+            expect(request).toHaveBeenCalledTimes(calls);
+        } finally { release({ providers: {} }); }
+    });
+
+    /** @param {AbortSignal} signal */
+    function stalledBody(signal) {
+        return new Response(new ReadableStream({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode('{'));
+                signal.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')));
+            },
+        }));
+    }
+
+    it('aborts a stalled configuration body so startup can continue', async () => {
+        vi.useFakeTimers();
+        let bodySignal;
+        vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+            bodySignal = init.signal;
+            return stalledBody(init.signal);
+        }));
+        const failed = expect(getConfig()).rejects.toMatchObject({ name: 'ApiError', endpoint: '/configs' });
+        await vi.advanceTimersByTimeAsync(10_001);
+        await failed;
+        expect(bodySignal?.aborted).toBe(true);
+    });
+
+    it.each([false, true])('refreshes a cached provider route after a node moves (latency=%s)', async (latency) => {
+        const api = await import('./api.js');
+        api.clearProviderCache();
+        let owner = 'first';
+        let providerReads = 0;
+        vi.stubGlobal('fetch', vi.fn(async (url) => {
+            const path = new URL(String(url)).pathname;
+            if (path === '/providers/proxies') {
+                providerReads++;
+                return new Response(JSON.stringify({ providers: { [owner]: { proxies: [{ name: 'node' }] } } }));
+            }
+            if (path === `/providers/proxies/${owner}/node${latency ? '/healthcheck' : ''}`) {
+                return new Response(JSON.stringify(latency ? { delay: 42 } : { name: 'node', owner }));
+            }
+            return new Response('', { status: 404 });
+        }));
+        const read = () => latency ? api.testProxy('node') : api.getProxyRecord('node');
+        await read();
+        owner = 'second';
+        const result = await read();
+        if (latency) expect(result).toBe(42);
+        else expect(result).toMatchObject({ owner: 'second' });
+        expect(providerReads).toBe(2);
+    });
+
+    it('releases the switch queue when the optional proxy body stalls', async () => {
+        const api = await import('./api.js');
+        vi.useFakeTimers();
+        vi.stubGlobal('fetch', vi.fn(async (_url, init) => init.method === 'PUT'
+            ? new Response(null, { status: 204 }) : stalledBody(init.signal)));
+        const pending = api.switchProxyResult('Proxy', 'new-node', { skipIfCurrent: true });
+        await vi.advanceTimersByTimeAsync(10_001);
+        await expect(pending).resolves.toMatchObject({ ok: true });
+        expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true);
+    });
+
+    it.each([false, true])('aborts a stalled node-record body (provider=%s)', async (provider) => {
+        const api = await import('./api.js');
+        api.clearProviderCache();
+        vi.useFakeTimers();
+        let bodySignal;
+        vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+            const path = new URL(String(url)).pathname;
+            if (provider && path === '/proxies/node') return new Response('', { status: 404 });
+            if (path === '/providers/proxies') return new Response(JSON.stringify({ providers: { remote: { proxies: [{ name: 'node' }] } } }));
+            bodySignal = init.signal;
+            return stalledBody(init.signal);
+        }));
+        const pending = api.getProxyRecord('node');
+        const failed = expect(pending).rejects.toMatchObject({ name: 'ApiError' });
+        await vi.advanceTimersByTimeAsync(10_001);
+        await failed;
+        expect(bodySignal?.aborted).toBe(true);
     });
 });
 
@@ -1211,5 +1538,40 @@ describe('getProxiesMerged', () => {
         // Should return data with the original proxies (no crash).
         expect(result.proxies['GLOBAL']).toBeDefined();
         expect(result.proxies['missing-node']).toBeUndefined();
+    });
+});
+
+describe('stripSpeedTestGroup', () => {
+    it('withholds only the reserved entry when ownership is unknown', () => {
+        const data = { proxies: { [SPEED_TEST_GROUP]: { type: 'Selector', all: ['a'], hidden: true }, GLOBAL: { all: ['Proxy', SPEED_TEST_GROUP] }, Proxy: { all: ['a'] }, a: {} } };
+        stripSpeedTestGroup(data, null);
+        expect(Object.keys(data.proxies)).toEqual(['GLOBAL', 'Proxy', 'a']);
+        expect(data.proxies.GLOBAL.all).toEqual(['Proxy']);
+    });
+    it('drops the hidden speed-test group and its GLOBAL entry', () => {
+        const data = { proxies: { [SPEED_TEST_GROUP]: { all: ['a'], hidden: true }, GLOBAL: { all: ['Proxy', SPEED_TEST_GROUP] }, Proxy: { all: ['a'] }, a: {} } };
+        stripSpeedTestGroup(data, true);
+        expect(Object.keys(data.proxies)).toEqual(['GLOBAL', 'Proxy', 'a']);
+        expect(data.proxies.GLOBAL.all).toEqual(['Proxy']);
+    });
+    it.each([true, null])('keeps a profile-owned node or visible group (ownership=%s)', (owned) => {
+        const group = { proxies: { [SPEED_TEST_GROUP]: { all: ['a'], hidden: false }, GLOBAL: { all: [SPEED_TEST_GROUP] } } };
+        stripSpeedTestGroup(group, owned);
+        expect(group.proxies.GLOBAL.all).toEqual([SPEED_TEST_GROUP]);
+        expect(group.proxies[SPEED_TEST_GROUP]).toBeDefined();
+        const node = { proxies: { [SPEED_TEST_GROUP]: { type: 'Shadowsocks' }, GLOBAL: { all: [SPEED_TEST_GROUP] } } };
+        stripSpeedTestGroup(node, owned);
+        expect(node.proxies[SPEED_TEST_GROUP]).toBeDefined();
+    });
+    it('keeps a user-owned hidden group and its parent membership', () => {
+        const data = { proxies: { [SPEED_TEST_GROUP]: { type: 'URLTest', all: ['a'], hidden: true }, GLOBAL: { all: [SPEED_TEST_GROUP] } } };
+        stripSpeedTestGroup(data, false);
+        expect(data.proxies[SPEED_TEST_GROUP]).toBeDefined();
+        expect(data.proxies.GLOBAL.all).toEqual([SPEED_TEST_GROUP]);
+    });
+    it('leaves other bodies alone', () => {
+        const data = { proxies: { GLOBAL: { all: ['Proxy'] } } };
+        expect(stripSpeedTestGroup(data)).toBe(data);
+        expect(stripSpeedTestGroup(null)).toBeNull();
     });
 });

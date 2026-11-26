@@ -7,7 +7,7 @@ vi.mock('../api.js', () => ({
     getConfig,
     patchConfig,
     closeAllConnections: vi.fn(async () => {}),
-    invoke: vi.fn(async () => null),
+    invoke: vi.fn(async (command) => command === 'apply_runtime_dns' ? patchConfig() : null),
 }));
 const getSetting = vi.fn(async () => false);
 const saveSettingChecked = vi.fn(async () => true);
@@ -15,6 +15,7 @@ vi.mock('./settings-helpers.js', () => ({
     getSetting,
     saveSetting: vi.fn(async () => {}),
     saveSettingChecked,
+    saveSettingsChecked: vi.fn(async () => true),
 }));
 vi.mock('./notifications.js', () => ({ showNotification: vi.fn() }));
 
@@ -31,7 +32,7 @@ describe('DNS rewrite switch at startup', () => {
         getConfig.mockResolvedValue({ dns: { enable: true } });
         Bus.emit(Events.CORE_RESTARTED, {});
         await vi.waitFor(() => expect(toggle.disabled).toBe(false));
-        expect(toggle.checked).toBe(true);
+        expect(toggle.checked).toBe(false);
     });
 
     it('a failed startup read is retried on its own when no restart comes', async () => {
@@ -58,7 +59,7 @@ describe('DNS rewrite switch at startup', () => {
         }
     });
 
-    it('a failed startup re-apply of the saved rewrite is retried, then saved through the checked write', async () => {
+    it.each([false, true])('restores saved DNS even when the profile enables DNS (enabled=%s)', async (enabled) => {
         vi.resetModules();
         vi.useFakeTimers();
         try {
@@ -66,8 +67,9 @@ describe('DNS rewrite switch at startup', () => {
             const toggle = /** @type {HTMLInputElement} */ (document.getElementById('dns-rewrite-toggle'));
             const { initDnsRewriteToggle } = await import('./dns-shared.js');
             getConfig.mockReset();
-            getConfig.mockResolvedValue({ dns: { enable: false } });
+            getConfig.mockResolvedValue({ dns: { enable: enabled } });
             getSetting.mockImplementation(async (key, fallback) => (key === 'dns_rewrite_enabled' ? true : fallback));
+            patchConfig.mockClear();
             patchConfig.mockRejectedValueOnce(new Error('core not ready'));
             await initDnsRewriteToggle();
             expect(toggle.checked).toBe(false);
@@ -147,11 +149,11 @@ describe('DNS rewrite switch at startup', () => {
             vi.useRealTimers();
         }
     });
-    it('when the saved choice cannot be read, the switch shows what the core runs', async () => {
+    it('when the saved choice cannot be read, the switch keeps its known choice', async () => {
         vi.resetModules();
         vi.useFakeTimers();
         try {
-            document.body.innerHTML = '<input type="checkbox" id="dns-rewrite-toggle">';
+            document.body.innerHTML = '<input type="checkbox" id="dns-rewrite-toggle" checked>';
             const toggle = /** @type {HTMLInputElement} */ (document.getElementById('dns-rewrite-toggle'));
             const { initDnsRewriteToggle } = await import('./dns-shared.js');
             getConfig.mockReset();
@@ -164,6 +166,64 @@ describe('DNS rewrite switch at startup', () => {
         } finally {
             getSetting.mockImplementation(async () => false);
             vi.useRealTimers();
+        }
+    });
+
+    it('keeps a saved-off rewrite off when profile DNS is enabled and servers are edited', async () => {
+        vi.resetModules();
+        document.body.innerHTML = '<input type="checkbox" id="dns-rewrite-toggle">'
+            + '<textarea id="dns-nameservers-input">https://dns.example/dns-query</textarea>'
+            + '<textarea id="dns-fallbacks-input"></textarea><button id="dns-config-save"></button>';
+        const toggle = /** @type {HTMLInputElement} */ (document.getElementById('dns-rewrite-toggle'));
+        const { invoke } = await import('../api.js');
+        const { initDnsRewriteToggle } = await import('./dns-shared.js');
+        getConfig.mockReset();
+        getConfig.mockResolvedValue({ dns: { enable: true } });
+        getSetting.mockImplementation(async () => false);
+        vi.mocked(invoke).mockImplementation(async (command) => command === 'get_settings' ? {}
+            : command === 'apply_runtime_dns' ? patchConfig() : null);
+        try {
+            await initDnsRewriteToggle();
+            expect(toggle.checked).toBe(false);
+            // An outdated checkbox must not opt into the overlay on a server edit.
+            toggle.checked = true;
+            patchConfig.mockClear();
+            getSetting.mockClear();
+            document.getElementById('dns-config-save')?.click();
+            await vi.waitFor(() => expect(getSetting).toHaveBeenCalledWith('dns_rewrite_enabled', null));
+            expect(invoke).toHaveBeenCalledWith('save_settings', expect.objectContaining({ settings: expect.objectContaining({ dns_nameservers: ['https://dns.example/dns-query'] }) }));
+            expect(patchConfig).not.toHaveBeenCalled();
+        } finally {
+            vi.mocked(invoke).mockImplementation(async (command) => command === 'apply_runtime_dns' ? patchConfig() : null);
+        }
+    });
+
+    it('defers DNS restoration after an uncertain reload until a confirmed reload', async () => {
+        vi.resetModules();
+        document.body.innerHTML = '<input type="checkbox" id="dns-rewrite-toggle">';
+        const { initDnsRewriteToggle } = await import('./dns-shared.js');
+        const { Bus, Events } = await import('./events.js');
+        const { showNotification } = await import('./notifications.js');
+        getConfig.mockReset();
+        getConfig.mockResolvedValue({ dns: { enable: true } });
+        getSetting.mockImplementation(async (key, fallback) => key === 'dns_rewrite_enabled' ? true : fallback);
+        try {
+            await initDnsRewriteToggle();
+            patchConfig.mockClear();
+            vi.mocked(showNotification).mockClear();
+            /** @type {Promise<unknown>[]} */
+            const waits = [];
+            const waitFor = (/** @type {Promise<unknown>} */ done) => { waits.push(done); };
+            Bus.emit(Events.CONFIG_UPDATED, { reloaded: false, restoreRuntime: true, waitFor });
+            await Promise.all(waits);
+            expect(patchConfig).not.toHaveBeenCalled();
+            expect(showNotification).toHaveBeenCalledWith(expect.any(String), 'warning');
+            waits.length = 0;
+            Bus.emit(Events.CONFIG_UPDATED, { reloaded: true, waitFor });
+            await Promise.all(waits);
+            expect(patchConfig).toHaveBeenCalledOnce();
+        } finally {
+            getSetting.mockImplementation(async () => false);
         }
     });
 
