@@ -22,11 +22,13 @@ export function parseRulesFromYaml(yamlContent) {
             if (parsed && Array.isArray(parsed.rules)) {
                 return parsed.rules.map(String);
             }
-            // Handle Prism DSL: rules: { $append: [...] } or { $prepend: [...] }
+            // Handle Prism DSL: rules: { $append: [...] } and/or { $prepend: [...] }
+            // (both: the $prepend rules first, as they apply).
             if (parsed && parsed.rules && typeof parsed.rules === 'object' && !Array.isArray(parsed.rules)) {
-                const dslRules = parsed.rules.$append || parsed.rules.$prepend;
-                if (Array.isArray(dslRules)) {
-                    return dslRules.map(String);
+                const before = parsed.rules.$prepend;
+                const after = parsed.rules.$append;
+                if (Array.isArray(before) || Array.isArray(after)) {
+                    return [...(Array.isArray(before) ? before : []), ...(Array.isArray(after) ? after : [])].map(String);
                 }
             }
         } catch {
@@ -421,6 +423,34 @@ function buildFallbackPrismYaml(rules, originalContent = '') {
 }
 
 /**
+ * The `rules` value for `rules`, keeping the DSL operator of `oldRules`. A
+ * file with both lists keeps both (the editor shows `$prepend` then
+ * `$append`): a rule from either list stays in it, and a new or edited one
+ * joins the list of the rule before it (`$prepend` at the top).
+ * @param {any} oldRules
+ * @param {string[]} rules
+ * @returns {Record<string, string[]>}
+ */
+function dslRulesFor(oldRules, rules) {
+    if (!oldRules || typeof oldRules !== 'object' || Array.isArray(oldRules)) return { $append: rules };
+    const hasBefore = oldRules.$prepend !== undefined;
+    if (hasBefore && Array.isArray(oldRules.$append)) {
+        const before = new Set(Array.isArray(oldRules.$prepend) ? oldRules.$prepend.map(String) : []);
+        const after = new Set(oldRules.$append.map(String));
+        /** @type {{ $prepend: string[], $append: string[] }} */
+        const out = { $prepend: [], $append: [] };
+        let inAfter = false;
+        for (const r of rules) {
+            if (after.has(r) && !before.has(r)) inAfter = true;
+            else if (before.has(r)) inAfter = false;
+            out[inAfter ? '$append' : '$prepend'].push(r);
+        }
+        return out.$append.length ? out : { $prepend: out.$prepend };
+    }
+    return { [hasBefore ? '$prepend' : '$append']: rules };
+}
+
+/**
  * Rebuild YAML content with new rules, preserving metadata from original.
  * @param {string} originalContent
  * @param {string[]} rules
@@ -437,14 +467,9 @@ export function rebuildYamlWithRules(originalContent, rules) {
                 const oldRules = parsed.rules;
                 delete newObj.rules;
 
-                // Preserve the original DSL operator ($prepend/$append) if present
-                if (oldRules && typeof oldRules === 'object' && !Array.isArray(oldRules)) {
-                    const op = oldRules.$prepend !== undefined ? '$prepend' : '$append';
-                    newObj.rules = { [op]: rules };
-                } else {
-                    // Plain array or no rules -- default to $append
-                    newObj.rules = { $append: rules };
-                }
+                // Preserve the original DSL operator(s); a plain array or no
+                // rules defaults to $append.
+                newObj.rules = dslRulesFor(oldRules, rules);
                 return jsyaml.dump(newObj, { lineWidth: -1, quotingType: "'", forceQuotes: false });
             }
         } catch {
@@ -474,14 +499,7 @@ export function wrapRulesAsPrismYaml(rawRulesText, originalYaml) {
             const parsed = jsyaml.load(originalYaml);
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
                 // Preserve metadata, keep original DSL operator if present
-                const oldRules = parsed.rules;
-                let newRules;
-                if (oldRules && typeof oldRules === 'object' && !Array.isArray(oldRules)) {
-                    const op = oldRules.$prepend !== undefined ? '$prepend' : '$append';
-                    newRules = { [op]: rules };
-                } else {
-                    newRules = { $append: rules };
-                }
+                const newRules = dslRulesFor(parsed.rules, rules);
                 const result = { ...parsed, rules: newRules };
                 return jsyaml.dump(result, { lineWidth: -1, quotingType: "'", forceQuotes: false });
             }
