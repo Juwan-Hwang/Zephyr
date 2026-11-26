@@ -473,6 +473,12 @@ impl PrismHost for ZephyrPrismHost {
                     lock.last_port()
                         .map(|port| (port, lock.last_secret().to_owned()))
                 };
+                if endpoint.is_some() {
+                    // The script's output normally keeps the speed-test group
+                    // and listener from the running config it started from;
+                    // put them back if it dropped them (a no-op otherwise).
+                    crate::speed_test::inject_for_runtime(target);
+                }
                 if let Some((port, secret)) = &endpoint {
                     if let serde_yaml::Value::Mapping(map) = target {
                         map.insert(
@@ -758,6 +764,13 @@ None => "Config saved. Failed to apply via core REST API (connection or response
                 // Collect all non-special proxy group names
                 let names: Vec<String> = groups
                     .iter()
+                    // Zephyr's hidden download-test group is never a routing
+                    // target; a profile's own visible group of that name is.
+                    .filter(|g| {
+                        !(g.get("name").and_then(|n| n.as_str())
+                            == Some(crate::speed_test::SPEED_TEST_GROUP)
+                            && g.get("hidden").and_then(serde_yaml::Value::as_bool) == Some(true))
+                    })
                     .filter_map(|g| g.get("name").and_then(|n| n.as_str()).map(String::from))
                     .filter(|n| {
                         // Skip internal/special groups

@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 
-vi.mock('../api.js', () => ({ getConnections: vi.fn(), getProxiesMerged: vi.fn() }));
-vi.mock('./cache.js', () => ({ getProxiesCached: vi.fn() }));
+vi.mock('../api.js', () => ({ getConnections: vi.fn(), getProxiesMerged: vi.fn(), lookupExitIp: vi.fn() }));
+vi.mock('./cache.js', () => ({ getProxiesCached: vi.fn(), getSettingsCached: vi.fn(async () => ({})) }));
+vi.mock('./exit-ip.js', () => ({ exitIpFor: vi.fn(async () => null), resetExitIp: vi.fn(), onExitIpRefreshed: vi.fn(() => () => {}) }));
+vi.mock('./node-details.js', () => ({ exitIpSummary: vi.fn(), openNodeDetails: vi.fn(), closeNodeDetails: vi.fn() }));
 
-const { splitBytes, resolveLeaf, displayedLeaf, initHomeStats } = await import('./home-stats.js');
+const { splitBytes, resolveLeaf, displayedLeaf, initHomeStats, splitFlag, lastDelay, lowerLatencyNodes } = await import('./home-stats.js');
 const api = await import('../api.js');
 const cache = await import('./cache.js');
 const { appStore } = await import('./state.js');
@@ -70,7 +72,7 @@ describe('home stats helpers', () => {
 
     it('reads the proxy map for latency only every fifth poll unless the node changes', async () => {
         vi.useFakeTimers();
-        document.body.innerHTML = '<div data-page="home"><div id="home-stats"></div><span id="current-node-name" data-group="HK">HK</span><span id="home-stat-lat"></span></div>';
+        document.body.innerHTML = '<div data-page="home"><div id="home-node"><span id="current-node-name" data-group="HK">HK</span><span id="home-node-name"></span><span id="home-node-sub"></span></div></div>';
         vi.mocked(api.getConnections).mockResolvedValue({ connections: [] });
         vi.mocked(cache.getProxiesCached).mockResolvedValue({ HK: { name: 'HK', history: [{ delay: 30 }] } });
         const stop = initHomeStats();
@@ -93,5 +95,32 @@ describe('home stats helpers', () => {
         stop();
         vi.useRealTimers();
         document.body.innerHTML = '';
+    });
+
+    it('splits a leading flag off a node name', () => {
+        expect(splitFlag('🇭🇰 香港 03')).toEqual({ flag: '🇭🇰', label: '香港 03' });
+        expect(splitFlag('Tokyo 01')).toEqual({ flag: '', label: 'Tokyo 01' });
+    });
+
+    it('reads the newest delay and treats timeouts as none', () => {
+        expect(lastDelay({ history: [{ delay: 40 }, { delay: 22 }] })).toBe(22);
+        expect(lastDelay({ history: [{ delay: 0 }] })).toBeNull();
+        expect(lastDelay({})).toBeNull();
+    });
+
+    it('offers the group\'s fastest real nodes, current one and groups left out', () => {
+        const proxies = {
+            Select: { all: ['Auto', 'DIRECT', 'A', 'B', 'C', 'D'] },
+            Auto: { all: ['A'], history: [{ delay: 5 }] },
+            DIRECT: { type: 'Direct', history: [{ delay: 1 }] },
+            A: { history: [{ delay: 60 }] },
+            B: { history: [{ delay: 20 }] },
+            C: { history: [{ delay: 0 }] },
+            D: { history: [{ delay: 40 }] },
+        };
+        expect(lowerLatencyNodes(proxies, 'Select', 'B')).toEqual([]);
+        expect(lowerLatencyNodes(proxies, 'Select', 'A')).toEqual([{ name: 'B', delay: 20 }, { name: 'D', delay: 40 }]);
+        expect(lowerLatencyNodes(proxies, 'Select', 'X', 1)).toEqual([{ name: 'B', delay: 20 }]);
+        expect(lowerLatencyNodes(proxies, 'missing', 'X')).toEqual([]);
     });
 });

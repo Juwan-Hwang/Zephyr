@@ -592,7 +592,8 @@ fn write_running_config(
     // not fail the write (scripts run with the core stopped, and the
     // no-reload paths promise not to reload). A start in progress
     // still refuses, like the re-check below.
-    if let Some((port, secret)) = running_core_endpoint(&state.app)? {
+    let endpoint = running_core_endpoint(&state.app)?;
+    if let Some((port, secret)) = &endpoint {
         if let Some(obj) = stripped.as_object_mut() {
             obj.insert(
                 "external-controller".to_owned(),
@@ -601,7 +602,16 @@ fn write_running_config(
             obj.insert("secret".to_owned(), serde_json::json!(secret));
         }
     }
-    let yaml_str = serde_yaml::to_string(&stripped)
+    let mut yaml_val = serde_yaml::to_value(&stripped)
+        .map_err(|e| format!("Failed to serialize config to YAML: {e}"))?;
+    // A script that rewrote `proxy-groups` or `listeners` may have dropped
+    // the speed-test group or listener: put back the missing one while a
+    // core runs (a no-op when both are there), so the reload is not refused
+    // for a listener pointing at a group that is gone.
+    if endpoint.is_some() {
+        crate::speed_test::inject_for_runtime(&mut yaml_val);
+    }
+    let yaml_str = serde_yaml::to_string(&yaml_val)
         .map_err(|e| format!("Failed to serialize config to YAML: {e}"))?;
     // Re-check immediately before the write: a start that began during
     // the strip/serialize above would have its fresh credentials

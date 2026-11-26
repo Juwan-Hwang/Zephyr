@@ -539,7 +539,7 @@ async function handleToggleFile(file, enabled, input) {
         const changed = await prism.toggleGroup(file.filename, enabled);
         if (changed === false) throw new Error(`${file.filename}: ${t.ruleLibraryToggleFailed || 'could not change state'}`);
         // Rebuild from the profile so a disabled file's rules are actually removed.
-        try { await prism.rebuild(); } catch (e) {
+        try { await prism.rebuildWithOverrides(); } catch (e) {
             rulesLogger.warn('[prism] rebuild failed, falling back to apply:', e);
             // Apply only adds patches: a disabled file's rules stay until a rebuild works, so say so.
             if (!enabled) showNotification(String(e), 'error');
@@ -1243,7 +1243,7 @@ async function handleDeleteRule(filename, enabled = true) {
         }
         showNotification(`${t.ruleLibraryDeleteRule}: ${filename}`, 'success');
         // Rebuild so the deleted file's rules leave the running config (apply only adds).
-        try { await prism.rebuild(); } catch (e) {
+        try { await prism.rebuildWithOverrides(); } catch (e) {
             rulesLogger.warn('[prism] rebuild failed, falling back to apply:', e);
             showNotification(String(e), 'error');
             try { await prism.apply(); } catch (error_) { rulesLogger.warn('[prism] apply failed:', error_); }
