@@ -64,6 +64,7 @@ import { testProxy, getLatencyTestSignal, resetLatencyTestController } from '../
 import { appStore } from './state.js';
 import { showNotification } from './notifications.js';
 import { t } from '../i18n.js';
+import * as speedTest from './speed-test.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -578,6 +579,38 @@ describe('Console Dashboard Width Threshold and Notification', () => {
             expect(cancelled).not.toHaveBeenCalled();
         });
 
+        it.each([false, true])('waits for the stopped download route before retrying (cancelled=%s)', async (cancelled) => {
+            /** @type {() => void} */
+            let changed = () => {};
+            /** @type {() => void} */
+            let release = () => {};
+            const running = vi.spyOn(speedTest, 'isSpeedTestBusy').mockReturnValue(true);
+            const listen = vi.spyOn(speedTest, 'onSpeedTestChange').mockImplementation((callback) => {
+                changed = callback;
+                return () => {};
+            });
+            const barrier = vi.spyOn(speedTest, 'withSpeedTestGroup').mockImplementation(() => new Promise((resolve) => {
+                release = () => resolve(undefined);
+            }));
+            try {
+                const run = vi.fn();
+                const stop = scheduleLatencyRetry(run);
+                running.mockReturnValue(false);
+                changed();
+                await Promise.resolve();
+                expect(run).not.toHaveBeenCalled();
+                if (cancelled) stop();
+                release();
+                await Promise.resolve(); await Promise.resolve();
+                expect(run).toHaveBeenCalledTimes(cancelled ? 0 : 1);
+                stop();
+            } finally {
+                running.mockRestore();
+                listen.mockRestore();
+                barrier.mockRestore();
+            }
+        });
+
         it('keeps a usable delay even if a stop lands right after it', async () => {
             const stop = new AbortController();
             vi.mocked(getLatencyTestSignal).mockReturnValue(stop.signal);
@@ -589,6 +622,15 @@ describe('Console Dashboard Width Threshold and Notification', () => {
             vi.mocked(getLatencyTestSignal).mockReturnValue(new AbortController().signal);
             vi.mocked(testProxy).mockResolvedValueOnce(999999);
             expect(await measureLatency('JP')).toEqual({ delay: -1, cancelled: false });
+        });
+
+        it('discards a positive delay when a newer pass replaced its controller', async () => {
+            vi.mocked(getLatencyTestSignal).mockReturnValue(new AbortController().signal);
+            vi.mocked(testProxy).mockImplementationOnce(async () => {
+                vi.mocked(getLatencyTestSignal).mockReturnValue(new AbortController().signal);
+                return 42;
+            });
+            expect(await measureLatency('JP')).toEqual({ delay: -1, cancelled: true });
         });
     });
 });

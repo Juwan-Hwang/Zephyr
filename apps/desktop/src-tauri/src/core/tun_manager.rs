@@ -2197,13 +2197,43 @@ pub async fn restart_core_as_root_cmd(
         return Err(super::core_process::CORE_STOPPED_BEFORE_START.to_owned());
     }
     let user_stopped = || super::core_process::user_stop_begins() != stops_before;
+    // Adopt from the same runtime file the privileged launch reads. Set the
+    // start guard under the writers' lock, then retain it through adoption so
+    // a no-reload Prism write cannot replace that file while authorization waits.
+    let _config_start = tokio::task::spawn_blocking(|| {
+        let _config = crate::prism::pipeline::RUN_CONFIG_LOCK
+            .lock()
+            .map_err(|error| format!("Run config lock poisoned: {error}"))?;
+        Ok::<_, String>(crate::prism::pipeline::CoreStartGuard::acquire())
+    })
+    .await
+    .map_err(|error| format!("Start guard task failed: {error}"))??;
+    if user_stopped() {
+        return Err(super::core_process::CORE_STOPPED_BEFORE_START.to_owned());
+    }
+    let launch_config = resolve_app_paths(&app)?.core_dir.join("run_config.yaml");
+    let launch_read = tokio::fs::read_to_string(launch_config).await;
+    if user_stopped() {
+        return Err(super::core_process::CORE_STOPPED_MEANWHILE.to_owned());
+    }
+    let launch_content =
+        launch_read.map_err(|error| format!("Failed to read the launch configuration: {error}"))?;
     let restarted = restart_core_as_root(&app, enable_tun).await;
+    if restarted.as_ref().is_err_and(RootStartError::script_ran) {
+        // The helper may have replaced the tracked child before failing.
+        // Its old diagnostic route is no longer evidence of a live listener.
+        // Recovery/adoption will confirm a surviving or restarted core.
+        let state = app.state::<super::MihomoState>();
+        let mut core = crate::backend_event::lock_best_effort(&state.0);
+        core.set_speed_test_listener(None);
+        core.set_speed_test_group_owned(None);
+    }
     // The user stopped the core while the authorization waited: a failed
     // restart is not recovered (that would start the core they stopped),
     // and a root core it brought up is adopted only to be stopped again.
     if user_stopped() {
         if let Ok(secret) = &restarted {
-            adopt_toggled_root_core(&app, secret).await;
+            adopt_toggled_root_core(&app, secret, &launch_content).await;
             return stop_root_core_after_user_stop(&app, secret).await;
         }
         return Err(super::core_process::CORE_STOPPED_MEANWHILE.to_owned());
@@ -2220,7 +2250,7 @@ pub async fn restart_core_as_root_cmd(
             e.to_string()
         }
     })?;
-    adopt_toggled_root_core(&app, &secret).await;
+    adopt_toggled_root_core(&app, &secret, &launch_content).await;
     // A stop that ran while the adoption awaited the old child's exit found
     // no root core to stop yet, and the adoption then marked it running:
     // stop it now, as when the stop came during the authorization.
@@ -2271,12 +2301,12 @@ async fn stop_root_core_after_user_stop(app: &AppHandle, secret: &str) -> Result
 ///
 /// The privileged script killed the tracked unprivileged child and started a
 /// root core on `run_config.yaml`. The controller port and proxy endpoint are
-/// re-read from that file rather than kept: a core that crashed before the
+/// taken from the launch snapshot rather than kept: a core that crashed before the
 /// toggle has had them cleared, and without them status reports the core as
 /// stopped, the next non-forced start cannot reuse the root core (and prompts
 /// for administrator rights again), and the system proxy has no endpoint.
 #[cfg(target_os = "macos")]
-async fn adopt_toggled_root_core(app: &AppHandle, secret: &str) {
+async fn adopt_toggled_root_core(app: &AppHandle, secret: &str, launch_content: &str) {
     let tracked = {
         let state = app.state::<super::MihomoState>();
         let mut guard = crate::backend_event::lock_best_effort(&state.0);
@@ -2290,24 +2320,26 @@ async fn adopt_toggled_root_core(app: &AppHandle, secret: &str) {
         })
         .await;
     }
-    let run_config = resolve_app_paths(app)
-        .ok()
-        .and_then(|p| std::fs::read_to_string(p.core_dir.join("run_config.yaml")).ok());
-    let state = app.state::<super::MihomoState>();
-    let mut guard = crate::backend_event::lock_best_effort(&state.0);
-    if let Some(content) = run_config {
+    let listener = crate::speed_test::route_from_config(launch_content);
+    {
+        let state = app.state::<super::MihomoState>();
+        let mut guard = crate::backend_event::lock_best_effort(&state.0);
         guard.set_last_proxy_endpoint(super::core_process::extract_configured_proxy_endpoint(
-            &content,
+            launch_content,
         ));
         guard.set_last_port(Some(zephyr_core::process::parse_external_controller_port(
-            content,
+            launch_content.to_owned(),
         )));
+        guard.set_last_secret(secret.to_owned());
+        guard.set_last_custom_args(None);
+        guard.set_last_log_path(Some(get_tun_log_path()));
+        guard.set_started_at(Some(std::time::Instant::now()));
     }
-    guard.set_last_secret(secret.to_owned());
-    guard.set_last_custom_args(None);
-    guard.set_last_log_path(Some(get_tun_log_path()));
-    guard.set_started_at(Some(std::time::Instant::now()));
-    drop(guard);
+    let app_for_listener = app.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        crate::speed_test::confirm_listener(&app_for_listener, listener);
+    })
+    .await;
 }
 
 /// On non-macOS platforms, this is a no-op

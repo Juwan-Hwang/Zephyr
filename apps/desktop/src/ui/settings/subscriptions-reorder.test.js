@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as yaml from '../../js-yaml.min.js';
 
 const settings = { last_config: 'a.yaml', config_order: ['a.yaml', 'b.yaml', 'c.yaml'], custom_args: [] };
 const configs = [{ name: 'a.yaml' }, { name: 'b.yaml' }, { name: 'c.yaml' }];
@@ -68,6 +69,51 @@ describe('subscription card reorder', () => {
         a.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true }));
         expect(names(list)).toEqual(['a.yaml', 'b.yaml', 'c.yaml']);
         ctl.destroy();
+    });
+});
+
+describe('subscription rule binding conflicts', () => {
+    it.each([false, true])('reloads a conflicting binding before enabling its checkbox (readFails=%s)', async (readFails) => {
+        vi.stubGlobal('jsyaml', yaml);
+        document.body.replaceChildren();
+        let reads = 0;
+        vi.mocked(invoke).mockImplementation(async (command) => {
+            if (command === COMMANDS.RULE_LIST) return [{ filename: 'mine.prism.yaml', rule_count: 1 }];
+            if (command === COMMANDS.RULE_GROUP_LIST) return { groups: [] };
+            if (command === COMMANDS.LIST_CONFIGS) return configs;
+            if (command === COMMANDS.RULE_READ) {
+                reads++;
+                if (reads >= 3 && readFails) throw new Error('read failed');
+                return reads >= 3 ? '# changed by another editor\n__when__: { profile: [a, b] }\nrules: []\n' : '__when__: { profile: [a] }\nrules: []\n';
+            }
+            if (command === COMMANDS.RULE_UPDATE) throw new Error('RULE_FILE_CHANGED: Reopen and retry.');
+            if (String(command).includes('settings')) return { ...settings };
+            return null;
+        });
+        const list = document.createElement('div');
+        document.body.appendChild(list);
+        const ctl = initSubscriptionSettings({ subAddBtn: null, updateAllSubBtn: null, configsList: list });
+        try {
+            await ctl.renderConfigs(true);
+            list.querySelector('[data-config-name="a.yaml"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+            await vi.waitFor(() => expect(document.querySelector('input[data-filename="mine.prism.yaml"]')?.disabled).toBe(false));
+            const checkbox = document.querySelector('input[data-filename="mine.prism.yaml"]');
+            expect(checkbox.checked).toBe(true);
+            checkbox.checked = false;
+            checkbox.dispatchEvent(new Event('change'));
+            await vi.waitFor(() => expect(reads).toBe(3));
+            if (readFails) {
+                await vi.waitFor(() => expect(document.querySelector('button[aria-label*="mine.prism"]')?.classList.contains('hidden')).toBe(false));
+                expect(checkbox.disabled).toBe(true);
+            } else {
+                await vi.waitFor(() => expect(checkbox.disabled).toBe(false));
+                expect(checkbox.checked).toBe(true);
+            }
+        } finally {
+            ctl.destroy();
+            vi.unstubAllGlobals();
+            document.body.replaceChildren();
+        }
     });
 });
 
