@@ -1,7 +1,6 @@
 /**
- * Restore Defaults saves the whole settings object, seconds after it read it
- * (the reset first runs its live steps). These helpers keep that save from
- * undoing a save that landed meanwhile.
+ * Restore Defaults first runs its live steps, then patches only the fields it
+ * changed. Concurrent writes to all other settings remain intact.
  */
 
 /**
@@ -12,24 +11,18 @@
 const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 /**
- * The settings the reset saves: `stored` (read just before the save) with
- * what the reset changed in its snapshot — every key that differs between
- * `before` (the snapshot as first read) and `reset` (the snapshot now), and
- * every key in `forced`, as `reset` has it (a key missing there is removed).
- * Keys the reset left alone keep their stored value.
- * @param {Record<string, unknown>} stored
+ * Only the fields reset by this operation. Sending them as an atomic patch
+ * preserves concurrent writes to every other field, including backend writes.
  * @param {Record<string, unknown>} before
  * @param {Record<string, unknown>} reset
  * @param {string[]} [forced]
  * @returns {Record<string, unknown>}
  */
-export function withResetChanges(stored, before, reset, forced = []) {
-    const out = { ...stored };
-    const keys = new Set([...Object.keys(before), ...Object.keys(reset), ...forced]);
-    for (const key of keys) {
-        if (!forced.includes(key) && sameValue(before[key], reset[key])) continue;
-        if (Object.prototype.hasOwnProperty.call(reset, key)) out[key] = reset[key];
-        else delete out[key];
+export function resetChangesPatch(before, reset, forced = []) {
+    /** @type {Record<string, unknown>} */
+    const patch = {};
+    for (const key of new Set([...Object.keys(before), ...Object.keys(reset), ...forced])) {
+        if (forced.includes(key) || !sameValue(before[key], reset[key])) patch[key] = reset[key] ?? null;
     }
-    return out;
+    return patch;
 }

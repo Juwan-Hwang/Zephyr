@@ -54,11 +54,68 @@ pub fn prism_status(state: State<PrismState>) -> Result<serde_json::Value, Strin
 }
 
 #[tauri::command]
-pub fn prism_list_rules(state: State<PrismState>) -> Result<serde_json::Value, String> {
-    state.with_ext(|ext| {
-        let rules = ext.list_rules()?;
-        serde_json::to_value(rules).map_err(|e| format!("Serialize failed: {e}"))
+pub async fn prism_list_rules(
+    state: State<'_, PrismState>,
+    with_running_rules: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let inner = std::sync::Arc::clone(&state.inner);
+    let app = state.app.clone();
+    tokio::task::spawn_blocking(move || {
+        // Config lock precedes the extension lock, just as on apply/rebuild.
+        let _config = if with_running_rules.unwrap_or(false) {
+            Some(
+                crate::prism::pipeline::RUN_CONFIG_LOCK
+                    .lock()
+                    .map_err(|error| format!("Run config lock poisoned: {error}"))?,
+            )
+        } else {
+            None
+        };
+        let lock = lock_critical(&inner, BackendModule::Prism, codes::PRISM_LOCK_FAILED)?;
+        let ext = lock.extension.as_ref().ok_or("Prism not initialized")?;
+        let groups = ext.list_rules()?;
+        drop(lock);
+        if !with_running_rules.unwrap_or(false) {
+            return serde_json::to_value(groups).map_err(|e| format!("Serialize failed: {e}"));
+        }
+        if crate::prism::pipeline::core_start_in_progress() {
+            return Err("Rule details unavailable while the core is starting".to_owned());
+        }
+        let endpoint = {
+            let mihomo = tauri::Manager::state::<crate::core_manager::MihomoState>(&app);
+            let core = lock_critical(&mihomo.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
+            (
+                core.last_port().ok_or("Core is stopped")?,
+                core.last_secret().to_owned(),
+            )
+        };
+        let active: serde_json::Value = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .no_proxy()
+            .build()
+            .map_err(|error| error.to_string())?
+            .get(format!("http://127.0.0.1:{}/rules", endpoint.0))
+            .bearer_auth(endpoint.1)
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .and_then(reqwest::blocking::Response::json)
+            .map_err(|error| format!("Active rule details unavailable: {error}"))?;
+        let paths = crate::core_manager::ensure_app_storage(&app)?;
+        let content = std::fs::read_to_string(paths.core_dir.join("run_config.yaml"))
+            .map_err(|error| format!("Failed to read rule details: {error}"))?;
+        let mut config: serde_yaml::Value = serde_yaml::from_str(&content)
+            .map_err(|error| format!("Failed to parse rule details: {error}"))?;
+        config
+            .apply_merge()
+            .map_err(|error| format!("Invalid YAML merge: {error}"))?;
+        Ok(serde_json::json!({
+            "groups": groups,
+            "rules": config.get("rules"),
+            "activeRules": active.get("rules"),
+        }))
     })
+    .await
+    .map_err(|error| format!("Rule details task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -233,8 +290,10 @@ pub fn prism_read_raw_profile(
 pub async fn prism_rebuild(
     state: State<'_, PrismState>,
     options: Option<ApplyOptions>,
+    with_overrides: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let opts = options.unwrap_or_default();
+    let combined = with_overrides.unwrap_or(false);
     let inner = std::sync::Arc::clone(&state.inner);
     let app = state.app.clone();
 
@@ -254,6 +313,12 @@ pub async fn prism_rebuild(
         if crate::prism::pipeline::core_start_in_progress() {
             return Err("Hot reload refused: a core start is in progress".to_owned());
         }
+        let mut rollback = if combined {
+            Some(crate::prism::pipeline::PreparedConfigRollback::new(&app)?)
+        } else {
+            None
+        };
+        let deferred = combined.then(super::host::DeferredReloadGuard::enter);
         // Read the original profile config here, under the lock and after
         // the start check — not before entering spawn_blocking: a start
         // that finished while waiting for the lock would otherwise leave
@@ -293,10 +358,10 @@ pub async fn prism_rebuild(
         // re-reads the endpoint just before injecting it; the lock order
         // here — run-config lock, then the core-state lock — matches that
         // path.)
-        let current_secret = {
+        let (current_secret, core_running) = {
             let mihomo = tauri::Manager::state::<crate::core_manager::MihomoState>(&app);
             let lock = lock_critical(&mihomo.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
-            lock.last_secret().to_owned()
+            (lock.last_secret().to_owned(), lock.last_port().is_some())
         };
         // Captures the core's answer to the reload `ext.apply` triggers
         // (set by `ZephyrPrismHost::apply_config` on this thread).
@@ -309,12 +374,21 @@ pub async fn prism_rebuild(
 
             // Use prepare_runtime_config to inject secret + external-controller
             // into the raw profile, just like start_core does.
-            let (prepared, _api_port, _proxy_port) = core_process::prepare_runtime_config(
-                &raw_profile,
-                &current_secret,
-                global_prefs.as_ref(),
-            )
-            .ok_or_else(|| "Failed to prepare runtime config".to_owned())?;
+            // The running core keeps its speed-test listener where it is:
+            // a reload that fails must not leave this file naming a port
+            // the core never opened.
+            let held_port = core_running
+                .then(|| crate::speed_test::held_port(&app))
+                .flatten();
+            let (prepared, _api_port, _proxy_port) =
+                crate::speed_test::with_running_port(held_port, || {
+                    core_process::prepare_runtime_config(
+                        &raw_profile,
+                        &current_secret,
+                        global_prefs.as_ref(),
+                    )
+                })
+                .ok_or_else(|| "Failed to prepare runtime config".to_owned())?;
             // Atomic: an override dry run (`override_test`) reads this file
             // without the run-config lock and must not see it half written.
             crate::core_manager::core::secure_io::write_file_secure_atomic(
@@ -323,6 +397,14 @@ pub async fn prism_rebuild(
             )?;
         }
 
+        // Synchronize enabled overrides before the only Prism compilation:
+        // recompiling its output would append the same rules twice.
+        let scripts = if combined {
+            let state = tauri::Manager::state::<PrismState>(&app);
+            Some(super::overrides::prepare_rebuild_overrides_locked(&state)?)
+        } else {
+            None
+        };
         // Step 2: Apply all patches on the clean base
         let lock = lock_critical(&inner, BackendModule::Prism, codes::PRISM_LOCK_FAILED)?;
         let ext = lock
@@ -332,19 +414,44 @@ pub async fn prism_rebuild(
         let result = ext.apply(opts)?;
         drop(lock);
 
+        if let Some(prepared_scripts) = scripts {
+            let state = tauri::Manager::state::<PrismState>(&app);
+            super::overrides::apply_js_after_rebuild_locked(&state, &prepared_scripts)?;
+        }
+        drop(deferred);
+
         let mut value =
             serde_json::to_value(result).map_err(|e| format!("Serialize failed: {e}"))?;
         // Whether the core took the rebuilt config: true / false (refused or
         // did not answer), or null when no reload was sent. `ApplyResult` does not
         // carry it, so a caller could not tell a rejected reload from success.
-        let hot_reload_success = status_guard
+        let mut hot_reload_success = status_guard
             .take()
             .map(crate::network_coordinator::is_http_success);
+        if combined {
+            // Assembly completed: keep this whole candidate even if the PUT
+            // times out, since the core may have applied it without replying.
+            if let Some(saved_config) = rollback.as_mut() {
+                saved_config.disarm();
+            }
+            hot_reload_success = Some(crate::prism::pipeline::reload_prepared_locked(&app)?);
+        }
         if let Some(obj) = value.as_object_mut() {
             obj.insert(
                 "hot_reload_success".to_owned(),
                 serde_json::json!(hot_reload_success),
             );
+            if combined {
+                if let Some(status) = obj
+                    .get_mut("status")
+                    .and_then(serde_json::Value::as_object_mut)
+                {
+                    status.insert(
+                        "hot_reload_success".to_owned(),
+                        serde_json::json!(hot_reload_success),
+                    );
+                }
+            }
         }
         Ok(value)
     })

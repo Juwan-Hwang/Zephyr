@@ -7,7 +7,8 @@
 //  Fatal/Error events trigger immediate Toast notifications.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { listen } from '../api.js';
+import { listen, clearProviderCache } from '../api.js';
+import { Bus, Events } from '../ui/events.js';
 import { showNotification } from '../ui/notifications.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -26,6 +27,8 @@ let _prismEventUnlisten = null;
 
 /** @type {(() => Promise<void>) | null} */
 let _backendEventUnlisten = null;
+/** @type {(() => Promise<void>) | null} */
+let _diagnosticsUnlisten = null;
 
 /** @type {Set<(entry: { type: string, message: string, timestamp: string, source?: string, data?: any }) => void>} */
 const _eventSubscribers = new Set();
@@ -286,7 +289,7 @@ export function clearExtLogEvents() {
  */
 export async function initBackendEventListeners() {
     // Already initialized
-    if (_backendEventUnlisten && _prismEventUnlisten) return;
+    if (_backendEventUnlisten && _prismEventUnlisten && _diagnosticsUnlisten) return;
 
     // backend-event listener — registered FIRST and awaited directly.
     //
@@ -311,6 +314,16 @@ export async function initBackendEventListeners() {
             // Tauri event API not available (e.g. browser dev mode)
         }
     }
+    if (!_diagnosticsUnlisten) {
+        try {
+            _diagnosticsUnlisten = await listen('diagnostics-invalidated', () => {
+                clearProviderCache();
+                Bus.emit(Events.DIAGNOSTICS_INVALIDATED);
+            });
+        } catch (error) {
+            logger.warn('Diagnostic reload listener could not be registered', error);
+        }
+    }
 }
 
 /**
@@ -318,11 +331,12 @@ export async function initBackendEventListeners() {
  * @returns {void}
  */
 export function cleanupBackendEventListeners() {
-    for (const unlisten of [_prismEventUnlisten, _backendEventUnlisten]) {
+    for (const unlisten of [_prismEventUnlisten, _backendEventUnlisten, _diagnosticsUnlisten]) {
         unlisten?.().catch((/** @type {unknown} */ err) => {
             logger.warn('unlisten failed:', err);
         });
     }
     _prismEventUnlisten = null;
     _backendEventUnlisten = null;
+    _diagnosticsUnlisten = null;
 }

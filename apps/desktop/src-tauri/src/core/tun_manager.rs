@@ -2197,6 +2197,20 @@ pub async fn restart_core_as_root_cmd(
         return Err(super::core_process::CORE_STOPPED_BEFORE_START.to_owned());
     }
     let user_stopped = || super::core_process::user_stop_begins() != stops_before;
+    // Adopt from the same runtime file the privileged launch reads. Set the
+    // start guard under the writers' lock, then retain it through adoption so
+    // a no-reload Prism write cannot replace that file while authorization waits.
+    let _config_start = tokio::task::spawn_blocking(|| {
+        let _config = crate::prism::pipeline::RUN_CONFIG_LOCK
+            .lock()
+            .map_err(|error| format!("Run config lock poisoned: {error}"))?;
+        Ok::<_, String>(crate::prism::pipeline::CoreStartGuard::acquire())
+    })
+    .await
+    .map_err(|error| format!("Start guard task failed: {error}"))??;
+    if user_stopped() {
+        return Err(super::core_process::CORE_STOPPED_BEFORE_START.to_owned());
+    }
     let restarted = restart_core_as_root(&app, enable_tun).await;
     // The user stopped the core while the authorization waited: a failed
     // restart is not recovered (that would start the core they stopped),
@@ -2293,21 +2307,30 @@ async fn adopt_toggled_root_core(app: &AppHandle, secret: &str) {
     let run_config = resolve_app_paths(app)
         .ok()
         .and_then(|p| std::fs::read_to_string(p.core_dir.join("run_config.yaml")).ok());
-    let state = app.state::<super::MihomoState>();
-    let mut guard = crate::backend_event::lock_best_effort(&state.0);
-    if let Some(content) = run_config {
-        guard.set_last_proxy_endpoint(super::core_process::extract_configured_proxy_endpoint(
-            &content,
-        ));
-        guard.set_last_port(Some(zephyr_core::process::parse_external_controller_port(
-            content,
-        )));
+    let listener = run_config
+        .as_deref()
+        .and_then(crate::speed_test::listener_from_config);
+    {
+        let state = app.state::<super::MihomoState>();
+        let mut guard = crate::backend_event::lock_best_effort(&state.0);
+        if let Some(content) = run_config {
+            guard.set_last_proxy_endpoint(super::core_process::extract_configured_proxy_endpoint(
+                &content,
+            ));
+            guard.set_last_port(Some(zephyr_core::process::parse_external_controller_port(
+                content,
+            )));
+        }
+        guard.set_last_secret(secret.to_owned());
+        guard.set_last_custom_args(None);
+        guard.set_last_log_path(Some(get_tun_log_path()));
+        guard.set_started_at(Some(std::time::Instant::now()));
     }
-    guard.set_last_secret(secret.to_owned());
-    guard.set_last_custom_args(None);
-    guard.set_last_log_path(Some(get_tun_log_path()));
-    guard.set_started_at(Some(std::time::Instant::now()));
-    drop(guard);
+    let app_for_listener = app.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        crate::speed_test::confirm_listener(&app_for_listener, listener);
+    })
+    .await;
 }
 
 /// On non-macOS platforms, this is a no-op

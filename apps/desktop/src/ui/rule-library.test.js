@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as yaml from '../js-yaml.min.js';
 
 const invokeMock = vi.fn();
 vi.mock('../api.js', () => ({ invoke: (...a) => invokeMock(...a) }));
@@ -12,6 +13,7 @@ const prismMock = {
     insertRuleStr: vi.fn(async () => 0),
     apply: vi.fn(async () => ({})),
     rebuild: vi.fn(async () => ({})),
+    rebuildWithOverrides: vi.fn(async () => ({})),
     toggleGroup: vi.fn(async () => true),
     traceReportText: vi.fn(async () => 'trace body'),
 };
@@ -49,6 +51,7 @@ const frames = () => new Promise((r) => setTimeout(r, 40));
 Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return 600; } });
 
 describe('rule library page', () => {
+    afterEach(() => vi.unstubAllGlobals());
     beforeEach(() => {
         vi.resetModules();
         setupDom();
@@ -81,7 +84,7 @@ describe('rule library page', () => {
         toggle.dispatchEvent(new Event('change'));
         await flush();
         expect(prismMock.toggleGroup).toHaveBeenCalledWith('ads.prism.yaml', true);
-        expect(prismMock.rebuild).toHaveBeenCalled();
+        expect(prismMock.rebuildWithOverrides).toHaveBeenCalled();
     });
 
     it('editor: Add rule keeps the list and inserts on ✓; rows edit in place', async () => {
@@ -120,6 +123,112 @@ describe('rule library page', () => {
         expect(update?.[1].content).toContain('DOMAIN-SUFFIX,gemini.google.com,OpenAI');
         expect(update?.[1].content).toContain('DOMAIN-SUFFIX,chatgpt.com,OpenAI');
         await new Promise((r) => setTimeout(r, 350));
+    });
+
+    it('shows the rebuild error after deleting a file and does not reapply stale rules', async () => {
+        prismMock.rebuildWithOverrides.mockRejectedValueOnce(new Error('Invalid target: missing-group'));
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        /** @type {HTMLElement} */ (document.querySelector('.rl-file-more')).click();
+        const actions = [...document.querySelectorAll('.ctx-menu-root button')];
+        /** @type {HTMLElement} */ (actions.at(-1)).click();
+        await flush();
+        /** @type {HTMLElement} */ (document.getElementById('modal-confirm')).click();
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        await flush();
+        expect(invokeMock).toHaveBeenCalledWith('rule_delete', { filename: 'ai.prism.yaml' });
+        expect(notify).toHaveBeenCalledWith(expect.stringContaining('Invalid target: missing-group'), 'warning');
+        expect(prismMock.apply).not.toHaveBeenCalled();
+    });
+
+    it.each([0, 1])('keeps the other duplicate in its list after deleting row %i', async (deleted) => {
+        vi.stubGlobal('jsyaml', yaml);
+        const duplicate = 'DOMAIN,a.com,DIRECT';
+        const content = yaml.dump({ rules: { $prepend: [duplicate], $append: [duplicate] } });
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation(async (command, args) => command === 'rule_read' ? content : previous(command, args));
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        document.querySelector('.rl-file-edit').click();
+        await flush();
+        await frames();
+        document.querySelectorAll('.btn-rl-rule-del')[deleted].click();
+        document.getElementById('rl-editor-save').click();
+        await flush();
+        const saved = invokeMock.mock.calls.find(([command]) => command === 'rule_update')?.[1].content;
+        expect(yaml.load(saved).rules).toEqual({
+            $prepend: deleted === 0 ? [] : [duplicate],
+            $append: deleted === 1 ? [] : [duplicate],
+        });
+        await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+
+    it('preserves mixed-list identity when an edited rule becomes the other list\'s duplicate', async () => {
+        vi.stubGlobal('jsyaml', yaml);
+        const content = yaml.dump({ rules: { $prepend: ['DOMAIN,a.com,DIRECT'], $append: ['DOMAIN,b.com,DIRECT'] } });
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation(async (command, args) => command === 'rule_read' ? content : previous(command, args));
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        document.querySelector('.rl-file-edit').click();
+        await flush();
+        await frames();
+        document.querySelector('#rl-vs-lines .rl-rule-row').click();
+        await frames();
+        const value = document.getElementById('rl-edit-value');
+        value.value = 'b.com';
+        value.dispatchEvent(new Event('input'));
+        document.getElementById('rl-edit-ok').click();
+        document.getElementById('rl-editor-save').click();
+        await flush();
+        const saved = invokeMock.mock.calls.find(([command]) => command === 'rule_update')?.[1].content;
+        expect(yaml.load(saved).rules).toEqual({ $prepend: ['DOMAIN,b.com,DIRECT'], $append: ['DOMAIN,b.com,DIRECT'] });
+        await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+
+    it('opens structured rules as YAML and disables the lossy visual editor', async () => {
+        vi.stubGlobal('jsyaml', yaml);
+        const content = yaml.dump({ rules: { $prepend: [{ type: 'DOMAIN', payload: 'a.com', proxy: 'DIRECT' }] } });
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation(async (command, args) => command === 'rule_read' ? content : previous(command, args));
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        document.querySelector('.rl-file-edit').click();
+        await flush();
+        expect(document.querySelector('[data-rl-mode="visual"]').disabled).toBe(true);
+        expect(document.getElementById('rl-editor-text').classList.contains('hidden')).toBe(false);
+        const { createEditor } = await import('./editor/prism-editor.js');
+        expect(createEditor).toHaveBeenCalledWith(expect.objectContaining({ content }));
+        document.getElementById('rl-editor-cancel').click();
+        await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+
+    it('rejects a stale full-document save and reopens the current file', async () => {
+        const latest = 'rules:\n  $append:\n    - DOMAIN,newer.com,DIRECT\n';
+        let file = FILE_CONTENT;
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation(async (command, args) => {
+            if (command === 'rule_read') return file;
+            if (command === 'rule_update') {
+                expect(args.expectedContent).toBe(FILE_CONTENT);
+                file = latest;
+                throw new Error('RULE_FILE_CHANGED: Reopen and retry.');
+            }
+            return previous(command, args);
+        });
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        document.querySelector('.rl-file-edit').click();
+        await flush();
+        await frames();
+        document.getElementById('rl-editor-save').click();
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        await flush();
+        await frames();
+        expect(document.querySelector('#rl-vs-lines').textContent).toContain('newer.com');
+        expect(prismMock.rebuildWithOverrides).not.toHaveBeenCalled();
+        document.getElementById('rl-editor-cancel').click();
+        await new Promise((resolve) => setTimeout(resolve, 350));
     });
 
     it('insert dialog: one form with visible positions', async () => {

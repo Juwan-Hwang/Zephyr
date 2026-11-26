@@ -534,7 +534,7 @@ async function showEditPanel(configInfo) {
         autoUpdateOptions.push({ value: String(currentInterval), label: tr('autoUpdateEveryHours', { hours }) });
     }
     const intervalTabs = autoUpdateOptions.map(opt =>
-        `<button type="button" role="radio" class="seg-tab flex-1 justify-center${opt.value === String(currentInterval) ? ' active' : ''}" aria-checked="${opt.value === String(currentInterval) ? 'true' : 'false'}" data-value="${opt.value}">${escapeHtml(opt.label)}</button>`
+        `<button type="button" role="radio" class="choice-card choice-card-compact" aria-checked="${opt.value === String(currentInterval) ? 'true' : 'false'}" data-value="${opt.value}"><span class="choice-card-title">${escapeHtml(opt.label)}</span></button>`
     ).join('');
 
     // Determine which UA option is currently selected (prefix match for versioned values)
@@ -617,7 +617,7 @@ async function showEditPanel(configInfo) {
                 </div>
                 <div class="flex flex-col gap-1.5">
                     <span id="edit-auto-update-label" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</span>
-                    <div id="edit-auto-update" class="seg-tabs seg-tabs-lg w-full" role="radiogroup" aria-labelledby="edit-auto-update-label" data-value="${String(currentInterval)}">
+                    <div id="edit-auto-update" class="choice-grid w-full" role="radiogroup" aria-labelledby="edit-auto-update-label" data-value="${String(currentInterval)}">
                         ${intervalTabs}
                     </div>
                     <p id="edit-next-update" class="edit-field-hint"></p>
@@ -663,12 +663,13 @@ async function showEditPanel(configInfo) {
         /** @type {HTMLInputElement|null} */ (modal.querySelector('#edit-url'))?.focus();
     });
 
-    // Auto-update as a segmented control (the old dropdown was cut off by the window edge).
+    // Auto-update as choice cards: four or more single-choice options use
+    // cards, two or three use a segmented control.
     const intervalGroup = /** @type {HTMLElement|null} */ (modal.querySelector('#edit-auto-update'));
-    intervalGroup?.querySelectorAll('.seg-tab').forEach((tab) => {
+    intervalGroup?.style.setProperty('--choice-cols', String(autoUpdateOptions.length));
+    intervalGroup?.querySelectorAll('.choice-card').forEach((tab) => {
         tab.addEventListener('click', () => {
-            intervalGroup.querySelectorAll('.seg-tab').forEach((b) => {
-                b.classList.toggle('active', b === tab);
+            intervalGroup.querySelectorAll('.choice-card').forEach((b) => {
                 b.setAttribute('aria-checked', b === tab ? 'true' : 'false');
             });
             intervalGroup.dataset.value = /** @type {HTMLElement} */ (tab).dataset.value || '0';
@@ -1526,7 +1527,7 @@ export function initSubscriptionSettings({
                                 }
                             }
 
-                            await invoke(COMMANDS.RULE_UPDATE, { filename: file.filename, content: newContent });
+                            await invoke(COMMANDS.RULE_UPDATE, { filename: file.filename, content: newContent, expectedContent: currentContent });
                             rulesLogger.info(`[rule-toggle] newContent (first 500 chars):\n`, newContent.slice(0, 500));
                             rulesLogger.info(`[rule-toggle] RULE_UPDATE done, calling prism.rebuild() ...`);
                             // Use rebuild instead of apply to ensure a clean base config.
@@ -1536,7 +1537,7 @@ export function initSubscriptionSettings({
                             // base to the original subscription profile first, so skipped/
                             // disabled patches produce no residual rules.
                             /** @type {any} */
-                            const rebuildResult = await prism.rebuild();
+                            const rebuildResult = await prism.rebuildWithOverrides();
                             // Only update visual state after rebuild succeeds
                             checkbox.checked = targetChecked;
                             if (rebuildResult?.hot_reload_success === false) {
