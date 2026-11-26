@@ -95,7 +95,7 @@ function isValidAddress(addr) {
  * @param {any[]} opts.initialTunnels - The initial tunnel list from core config.
  * @param {boolean} [opts.initialKnown=true] - Whether initialTunnels is the list the
  *   core runs; when not, nothing is saved until setTunnels() brings that list.
- * @param {(patch: Record<string, any>, expectProfile?: string|null) => Promise<boolean|'restart'|'partial'>} opts.saveConfigToCore - Callback to save config patch to core;
+ * @param {(patch: Record<string, any>, expectProfile?: string|null) => Promise<boolean|'restart'|'partial'|'unconfirmed'>} opts.saveConfigToCore - Callback to save config patch to core;
  *   with `expectProfile`, the backend refuses it once the core runs another profile.
  * @param {(() => Promise<unknown>)|null} [opts.readFromCore] - Reads the core's list again
  *   (and publishes it with setTunnels) when the first read failed, or when
@@ -105,6 +105,7 @@ function isValidAddress(addr) {
  * @param {(() => number)|null} [opts.coreGeneration] - Counts core replacements: a list read
  *   from a core that was replaced since is read again before an edit, also
  *   for the same profile (the new core loaded the profile's own list).
+ * @param {((profile: string) => Promise<any[]|null>)|null} [opts.readResetBaseline] - Read the reset target's current list before writing it.
  */
 export function initTunnelSettings({
     addTunnelBtn,
@@ -116,6 +117,7 @@ export function initTunnelSettings({
     readFromCore = null,
     readProfile = null,
     coreGeneration = null,
+    readResetBaseline = null,
 }) {
     /** @type {any[]} */
     let currentTunnels = initialTunnels;
@@ -149,19 +151,27 @@ export function initTunnelSettings({
      * (a 'partial' save): it is lost when that profile is loaded again.
      */
     let profileUnsaved = false;
+    /** Last list awaiting a confirmed profile save, distinct from the live baseline.
+     * @type {any[] | null}
+     */
+    let pendingIntent = null;
+    let pendingUnconfirmed = false;
+    /** @type {{profile: string|null, core: number}|null} */
+    let pendingTarget = null;
     /** Saves started so far, numbered in start order. */
     let saveSeq = 0;
     /** The newest save the core took: a newer one that failed does not overrule it. */
     let appliedSeq = 0;
     /**
-     * The numbers of the resets whose own save was started and not yet
+     * The targets and numbers of resets whose own save was started and not yet
      * followed by resetAfterSave, oldest first: resets run (and end) in the
      * order they start, so each takes its own number back.
-     * @type {number[]}
+     * @type {{seq: number, profile: string|null, core: number}[]}
      */
     const resetSeqs = [];
     /** Saves (and resets) not finished yet. */
     let pending = 0;
+    let retrying = false;
     /**
      * Tunnel saves and the reset run one at a time, in the order they were
      * started: the backend lock keeps them apart but not in order, so an
@@ -178,12 +188,18 @@ export function initTunnelSettings({
      */
     function enqueue(task) {
         pending += 1;
+        const retry = tunnelsList?.querySelector('[data-tunnels-unsaved] button');
+        if (retry instanceof HTMLButtonElement) retry.disabled = true;
         // A save that throws took nothing: it reads as a failed one, so the
         // list goes back to what the core runs and no reset number is left.
         const run = queue.then(task).catch((err) => {
             settingsLogger.warn('Tunnel save failed', err);
             return /** @type {const} */ (false);
-        }).finally(() => { pending -= 1; });
+        }).finally(() => {
+            pending -= 1;
+            const currentRetry = tunnelsList?.querySelector('[data-tunnels-unsaved] button');
+            if (currentRetry instanceof HTMLButtonElement) currentRetry.disabled = pending > 0;
+        });
         queue = run.catch(() => {});
         return run;
     }
@@ -252,7 +268,7 @@ export function initTunnelSettings({
      * already runs it) but marks it unsaved, so the list offers a retry. A
      * newer save that failed took nothing, so it does not hide an older
      * partial save.
-     * @returns {Promise<boolean|'restart'|'partial'>}
+     * @returns {Promise<boolean|'restart'|'partial'|'unconfirmed'>}
      */
     async function saveTunnels() {
         const seq = ++saveSeq;
@@ -272,7 +288,7 @@ export function initTunnelSettings({
             const result = await saveConfigToCore({ tunnels: list }, profile);
             // Saves run in start order: the latest one the core took sets the
             // list it runs, while the page still shows that profile's list.
-            if (result && listProfile === profile) confirmed = list;
+            if (result && result !== 'unconfirmed' && listProfile === profile) confirmed = list;
             return result;
         });
         // Not sent: the page reads the replacement core's list instead.
@@ -290,12 +306,15 @@ export function initTunnelSettings({
         if (listProfile !== profile) return ok;
         if (ok && seq > appliedSeq) {
             appliedSeq = seq;
-            profileUnsaved = ok === 'partial';
+            profileUnsaved = ok === 'partial' || ok === 'unconfirmed';
+            pendingIntent = profileUnsaved ? list.slice() : null;
+            pendingUnconfirmed = ok === 'unconfirmed';
+            pendingTarget = profileUnsaved ? { profile, core: coreAtSnapshot } : null;
         }
         if (!ok && !supersededSince(seq)) {
-            // The newest save failed: show what the core runs, which also
-            // brings back what an earlier failed save tried to change.
-            currentTunnels = confirmed.slice();
+            // A failed later edit cannot replace an earlier pending intent
+            // with the older confirmed list that Retry was meant to replace.
+            currentTunnels = (pendingIntent ?? confirmed).slice();
         }
         return ok;
     }
@@ -319,23 +338,22 @@ export function initTunnelSettings({
         retryBtn.type = 'button';
         retryBtn.className = 'btn-secondary text-xs px-2 py-1';
         retryBtn.textContent = t.retry || 'Retry';
+        retryBtn.disabled = pending > 0 || retrying;
         retryBtn.onclick = async () => {
-            // The retry is for the list of the profile shown now: when
-            // another profile's list replaces it during the read, that list
-            // is not what failed to save, and is not saved in its place.
-            const profileAtClick = listProfile;
-            await readIfUnknown();
-            if (editBlocked() || listProfile !== profileAtClick) {
-                renderTunnels();
-                return;
-            }
+            if (pending > 0 || retrying) return;
+            retrying = true;
             retryBtn.disabled = true;
             try {
+                // The retry belongs to the list shown when it was clicked.
+                const profileAtClick = listProfile;
+                await readIfUnknown();
+                if (pending > 0 || editBlocked() || listProfile !== profileAtClick || !profileUnsaved) return;
                 await saveTunnels();
             } finally {
+                retrying = false;
                 retryBtn.disabled = false;
+                renderTunnels();
             }
-            renderTunnels();
         };
         row.appendChild(label);
         row.appendChild(retryBtn);
@@ -512,6 +530,8 @@ export function initTunnelSettings({
                 };
                 /** @param {KeyboardEvent} e */
                 const onProtocolKey = (e) => {
+                    // The shared radio-group keys (ui/tablist-keys.js) already moved it.
+                    if (e.defaultPrevented) return;
                     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
                     const from = protocolButtons.indexOf(/** @type {HTMLElement} */ (e.currentTarget));
                     if (!step || from < 0) return;
@@ -637,6 +657,9 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
         resetTunnels() {
             currentTunnels = [];
             profileUnsaved = false;
+            pendingIntent = null;
+            pendingUnconfirmed = false;
+            pendingTarget = null;
             appliedSeq = ++saveSeq; // a save still in flight no longer sets the flag
             renderTunnels();
         },
@@ -651,7 +674,8 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
          * @returns {Promise<T | false>}
          */
         saveAfterPending(save, profile = null) {
-            resetSeqs.push(++saveSeq);
+            const reset = { seq: ++saveSeq, profile, core: listCore };
+            resetSeqs.push(reset);
             return enqueue(async () => {
                 // A save that throws counts as failed, so the caller always
                 // goes on to resetAfterSave, which releases the reset's
@@ -660,6 +684,20 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
                 // during the save loaded the profile on its own, so its list
                 // is not known from this reset.
                 const coreAtSave = coreGeneration ? coreGeneration() : 0;
+                reset.core = coreAtSave;
+                if (profile !== null && (listProfile !== profile || listCore !== coreAtSave) && readResetBaseline) {
+                    const baseline = await readResetBaseline(profile).catch(() => null);
+                    if (Array.isArray(baseline) && (!coreGeneration || coreGeneration() === coreAtSave)) {
+                        profileUnsaved = false;
+                        pendingIntent = null;
+                        pendingUnconfirmed = false;
+                        pendingTarget = null;
+                        confirmed = baseline.slice();
+                        listProfile = profile;
+                        listCore = coreAtSave;
+                        known = true;
+                    }
+                }
                 /** @type {T | false} */
                 const result = await save().catch((/** @type {unknown} */ err) => {
                     settingsLogger.warn('Restoring the default port forwards failed:', err);
@@ -670,7 +708,7 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
                 // the list of the profile the save was checked against; with
                 // none known, a save of it could reach any profile, so it is
                 // read again first.
-                if (result) {
+                if (result && result !== 'unconfirmed') {
                     confirmed = [];
                     listProfile = profile;
                     listCore = coreAtSave;
@@ -686,25 +724,50 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
          * profile did not ('partial'). A failed reset that no newer save
          * follows shows the list the core still runs, which also brings back
          * what a save that failed while the reset waited tried to change.
-         * @param {boolean|'restart'|'partial'} result
+         * @param {boolean|'restart'|'partial'|'unconfirmed'} result
          * @returns {boolean} whether the list was emptied
          */
         resetAfterSave(result) {
-            const seq = resetSeqs.shift() ?? ++saveSeq;
+            const reset = resetSeqs.shift() ?? { seq: ++saveSeq, profile: listProfile, core: listCore };
+            const { seq } = reset;
             if (!result) {
                 if (!supersededSince(seq)) {
-                    currentTunnels = confirmed.slice();
+                    if (pendingTarget !== null && (pendingTarget.profile !== listProfile
+                        || pendingTarget.core !== listCore
+                        || (coreGeneration && pendingTarget.core !== coreGeneration()))) {
+                        profileUnsaved = false;
+                        pendingIntent = null;
+                        pendingUnconfirmed = false;
+                        pendingTarget = null;
+                    }
+                    currentTunnels = (pendingIntent ?? confirmed).slice();
                     renderTunnels();
                 }
                 return false;
             }
             // A newer save already took over the list and its flag.
             if (seq < appliedSeq) return false;
+            if (result === 'unconfirmed' && readResetBaseline
+                && (listProfile !== reset.profile || listCore !== reset.core
+                    || (coreGeneration && coreGeneration() !== reset.core))) {
+                // No evidence for this target: do not attach its Retry to the
+                // previous profile's list or present that list as reset.
+                known = false;
+                profileUnsaved = false;
+                pendingIntent = null;
+                pendingUnconfirmed = false;
+                pendingTarget = null;
+                renderTunnels();
+                return false;
+            }
             // The core took the empty list; whether the profile did is the
             // flag until a newer save lands. One still to come decides it
             // then: when it fails, the profile still holds the old list.
             appliedSeq = seq;
-            profileUnsaved = result === 'partial';
+            profileUnsaved = result === 'partial' || result === 'unconfirmed';
+            pendingIntent = profileUnsaved ? [] : null;
+            pendingUnconfirmed = result === 'unconfirmed';
+            pendingTarget = profileUnsaved ? { profile: reset.profile, core: reset.core } : null;
             renderTunnels();
             if (supersededSince(seq)) return false;
             currentTunnels = [];
@@ -734,11 +797,27 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
             // The same list read back from the same profile is still the one
             // the profile did not take; another list, or one of another
             // profile (also an identical one), has nothing left to retry.
+            // A replaced core supplies a new baseline even for the same profile.
             const sameProfile = profile != null && profile === listProfile;
-            if (!sameProfile || stableJson(tunnels) !== stableJson(currentTunnels)) profileUnsaved = false;
+            const core = coreGeneration ? coreGeneration() : 0;
+            const sameTarget = pendingTarget !== null && profile != null && profile === pendingTarget.profile && core === pendingTarget.core;
+            const baselineOwnedByTarget = pendingTarget !== null
+                && listProfile === pendingTarget.profile && listCore === pendingTarget.core;
+            // A read of the pre-save baseline is expected after an unanswered
+            // write. A third list may contain someone else's newer changes:
+            // show it and retire Retry rather than overwrite it with our intent.
+            const matchesPendingOrBaseline = (baselineOwnedByTarget && stableJson(tunnels) === stableJson(confirmed))
+                || stableJson(tunnels) === stableJson(pendingIntent);
+            const keepPending = sameTarget && pendingUnconfirmed && pendingIntent !== null && matchesPendingOrBaseline;
+            if (!keepPending && (!sameProfile || (pendingTarget !== null && !sameTarget) || stableJson(tunnels) !== stableJson(currentTunnels))) {
+                profileUnsaved = false;
+                pendingIntent = null;
+                pendingUnconfirmed = false;
+                pendingTarget = null;
+            }
             listProfile = profile ?? null;
-            if (coreGeneration) listCore = coreGeneration();
-            currentTunnels = tunnels;
+            listCore = core;
+            currentTunnels = keepPending ? (pendingIntent?.slice() ?? tunnels) : tunnels;
             confirmed = tunnels.slice();
             known = true;
             listTaken += 1;

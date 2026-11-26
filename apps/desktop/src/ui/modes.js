@@ -147,7 +147,13 @@ async function carryNodeOver(nodeToInherit, mode, { revisionBefore, switchMark, 
     // A built-in selection (GLOBAL's default DIRECT, say) is not a node the
     // user picked, so there is nothing to carry over or to report as lost.
     if (!nodeToInherit || mode === 'direct'
-        || SPECIAL_PROXY_NAMES.has(String(nodeToInherit).toUpperCase())) return true;
+        || SPECIAL_PROXY_NAMES.has(String(nodeToInherit).toUpperCase())) {
+        if (mode === 'global' && appStore.get('currentOutboundMode') === mode
+            && appStore.get('uiGroupName') === groupBefore && coreReplacements() === coreBefore) {
+            appStore.set('uiGroupName', 'GLOBAL');
+        }
+        return true;
+    }
     try {
         const preferredGroupName = groupBefore || null;
         const resultAfter = await fetchProxyGroups({ preferredGroupName });

@@ -10,7 +10,7 @@ const api = {
 };
 vi.mock('../api.js', () => api);
 vi.mock('./notifications.js', () => ({ showNotification: vi.fn() }));
-vi.mock('./prism.js', () => ({ rebuild: vi.fn(async () => {}), overrideApplyAll: vi.fn(async () => []) }));
+vi.mock('./prism.js', () => ({ rebuild: vi.fn(async () => ({ hot_reload_success: true })), overrideApplyAll: vi.fn(async () => []) }));
 vi.mock('./proxy-memory.js', () => ({
     restoreProxySelection: vi.fn(async () => {}),
     restoreProxySelectionResult: vi.fn(async () => 'restored'),
