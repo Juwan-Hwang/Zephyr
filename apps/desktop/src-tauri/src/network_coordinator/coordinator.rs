@@ -806,7 +806,7 @@ async fn run_prism_apply_task(
         return ApplyOutcome::Failed;
     };
 
-    match tokio::time::timeout(APPLY_TIMEOUT, prism_state.apply_internal(None)).await {
+    match tokio::time::timeout(APPLY_TIMEOUT, prism_state.apply_internal(None, true)).await {
         Ok(Ok((outcome, _))) => {
             let apply_ok = verify_core_apply_success(&outcome);
 

@@ -26,6 +26,8 @@ pub struct RuleFileInfo {
     /// `false` when the file is parked as `<name>.prism.yaml.disabled`
     /// (see `prism_toggle_group`); `filename` is still the base name.
     pub enabled: bool,
+    /// Generated workspace file owned by an override, edited through that override only.
+    pub read_only: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -179,10 +181,31 @@ pub fn ensure_prism_ext(name: &str) -> String {
 }
 
 #[must_use]
-/// Count rule lines in a .prism.yaml content string.
-/// Rules are top-level sequence items under `rules:` that start with `- ` and
-/// contain a comma (the standard Clash/Surge rule format).
+/// Count rule entries in block or flow YAML, including structured rows.
+/// Match the editor's sequence and prepend/append/override counting contract.
+/// This is an entry count, not validation of individual rule values.
 pub fn count_rules(content: &str) -> usize {
+    if let Ok(document) = serde_yaml::from_str::<serde_yaml::Value>(content) {
+        if let Some(map) = document.as_mapping() {
+            let Some(rules) = map.get("rules") else {
+                return 0;
+            };
+            if let Some(sequence) = rules.as_sequence() {
+                return sequence.len();
+            }
+            if let Some(operations) = rules.as_mapping() {
+                return ["$prepend", "$append", "$override"]
+                    .iter()
+                    .filter_map(|key| {
+                        operations
+                            .get(*key)
+                            .and_then(serde_yaml::Value::as_sequence)
+                    })
+                    .map(Vec::len)
+                    .sum();
+            }
+        }
+    }
     let mut in_rules = false;
     let mut count = 0usize;
     for line in content.lines() {
@@ -432,6 +455,25 @@ pub fn write_prism_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rule_count_matches_flow_and_structured_editor_counts() {
+        assert_eq!(
+            count_rules("rules: {$prepend: ['DOMAIN,a.com,DIRECT'], $append: []}"),
+            1
+        );
+        assert_eq!(
+            count_rules(concat!(
+                "rules:\n",
+                "  $prepend: ['DOMAIN,a.com,DIRECT']\n",
+                "  $append: [{type: DOMAIN, value: b.com, policy: DIRECT}]\n",
+                "  $override: ['MATCH,REJECT']\n",
+            )),
+            3
+        );
+        assert_eq!(count_rules("rules: [{type: MATCH, policy: DIRECT}]"), 1);
+        assert_eq!(count_rules("metadata: ['not,a,rule']"), 0);
+    }
 
     #[test]
     fn test_validate_plugin_id_ok() {

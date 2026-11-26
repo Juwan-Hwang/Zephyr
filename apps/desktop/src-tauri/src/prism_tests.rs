@@ -411,14 +411,17 @@ proxies:
         }
 
         #[test]
-        fn ignores_items_without_comma() {
+        fn counts_yaml_entries_without_validating_rule_strings() {
             let content = "\
 rules:
   - DOMAIN-SUFFIX,example.com,PROXY
   - some yaml mapping without comma
   - DOMAIN,github.com,PROXY
 ";
-            assert_eq!(count_rules(content), 2);
+            // Match the editor's YAML entry count. Rule validation belongs to
+            // compilation; a scalar without a comma is still a sequence entry.
+            assert_eq!(count_rules(content), 3);
+            assert_eq!(count_rules("rules: [not-a-valid-rule]"), 1);
         }
 
         #[test]
@@ -1336,7 +1339,7 @@ rules:
         }
 
         #[test]
-        fn count_rules_handles_multiline_yaml_block_scalar() {
+        fn count_rules_counts_top_level_structured_entries_once() {
             let content = "\
 rules:
   - DOMAIN-SUFFIX,example.com,PROXY
@@ -1345,7 +1348,12 @@ rules:
       - test.com
   - DOMAIN,github.com,PROXY
 ";
-            assert_eq!(count_rules(content), 2);
+            // The payload mapping is one top-level entry; its nested sequence
+            // does not add extra entries to the card or save-notice count.
+            assert_eq!(count_rules(content), 3);
+            let nested =
+                "rules: [{payload: ['DOMAIN,nested.example,DIRECT', 'MATCH,DIRECT']}]";
+            assert_eq!(count_rules(nested), 1);
         }
 
         #[test]

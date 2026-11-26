@@ -192,6 +192,7 @@ impl PrismState {
     pub async fn apply_internal(
         &self,
         options: Option<clash_prism_extension::ApplyOptions>,
+        restore_runtime_dns: bool,
     ) -> Result<
         (
             crate::network_coordinator::CoreApplyResult,
@@ -201,6 +202,7 @@ impl PrismState {
     > {
         let opts = options.unwrap_or_default();
         let inner = Arc::clone(&self.inner);
+        let app = self.app.clone();
         tokio::task::spawn_blocking(move || {
             // RAII Scope Guard: Guarantees TLS is cleared before execution and on early exit/Drop
             let guard = host::HttpStatusGuard::enter();
@@ -215,7 +217,7 @@ impl PrismState {
             // `apply_config` — that runs under the inner lock, and the
             // mutex is not re-entrant, so taking it there would deadlock
             // on the callers that already hold it.
-            let _run_config = crate::prism::pipeline::RUN_CONFIG_LOCK
+            let run_config_guard = crate::prism::pipeline::RUN_CONFIG_LOCK
                 .lock()
                 .map_err(|e| format!("Run config lock poisoned: {e}"))?;
 
@@ -224,7 +226,9 @@ impl PrismState {
                 .extension
                 .as_ref()
                 .ok_or_else(|| "Prism not initialized".to_owned())?;
+            guard.capture_rule_sources(&app)?;
             let result = ext.apply(opts)?;
+            host::mark_rule_insert_cache_current();
             if let Ok(val) = serde_json::to_value(&result.trace) {
                 lock.last_trace = val.as_array().cloned().unwrap_or_default();
             }
@@ -235,7 +239,9 @@ impl PrismState {
             // derives hot_reload_success from the HTTP status code.  We use that
             // directly because ApplyResult (returned by ext.apply) does not contain
             // the ApplyStatus struct — only output_config, stats, trace, and annotations.
-            let (http_status, hot_reload_success) = reload_outcome(guard.take());
+            let recorded_status = guard.take();
+            let hot_reload_uncertain = recorded_status == Some(0);
+            let (http_status, hot_reload_success) = reload_outcome(recorded_status);
 
             let core_result = crate::network_coordinator::CoreApplyResult {
                 http_status,
@@ -247,6 +253,10 @@ impl PrismState {
             let mut val =
                 serde_json::to_value(result).map_err(|e| format!("Serialize failed: {e}"))?;
             if let Some(obj) = val.as_object_mut() {
+                obj.insert(
+                    "hot_reload_uncertain".to_owned(),
+                    serde_json::json!(hot_reload_uncertain),
+                );
                 let mut status_obj = serde_json::Map::new();
                 status_obj.insert(
                     "hot_reload_success".to_owned(),
@@ -261,6 +271,14 @@ impl PrismState {
                     Prism,
                     PRISM_APPLY_FAILED,
                     "ApplyResult serialized to non-object JSON, status fields omitted"
+                );
+            }
+            drop(run_config_guard);
+            if restore_runtime_dns && hot_reload_success == Some(true) {
+                use tauri::Emitter as _;
+                let _ = app.emit(
+                    "diagnostics-invalidated",
+                    serde_json::json!({ "restoreRuntime": true }),
                 );
             }
             Ok((core_result, val))

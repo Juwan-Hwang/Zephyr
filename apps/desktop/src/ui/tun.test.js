@@ -30,7 +30,8 @@ vi.mock('./lifecycle.js', () => ({
 }));
 vi.mock('./settings/subscriptions.js', () => ({ keepFallbackProfile: vi.fn().mockResolvedValue(true) }));
 
-import { invoke, getConfig, restartCore } from '../api.js';
+import { invoke, getConfig, restartCore, setSecret } from '../api.js';
+import { Bus, Events } from './events.js';
 import { postRestartRecovery } from './lifecycle.js';
 import { keepFallbackProfile } from './settings/subscriptions.js';
 import { showNotification, showConfirmModal } from './notifications.js';
@@ -325,6 +326,19 @@ describe('Windows: TUN without administrator rights', () => {
 });
 
 describe('recovery restart after a failed root TUN start', () => {
+    it('announces a successful privileged replacement after installing its secret', async () => {
+        setPlatform('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)', 'MacIntel');
+        mInvoke.mockImplementation(async (cmd) => cmd === 'restart_core_as_root_cmd' ? 'new-secret' : null);
+        const replaced = vi.fn(() => vi.mocked(setSecret).mock.calls.at(-1)?.[0]);
+        const unsubscribe = Bus.on(Events.CORE_RESTARTED, replaced);
+        try {
+            const { home } = mount();
+            click(home);
+            await settle();
+            expect(replaced).toHaveBeenCalledOnce();
+            expect(replaced).toHaveReturnedWith('new-secret');
+        } finally { unsubscribe(); }
+    });
     it('keeps the fallback profile and recovers the one the core loaded', async () => {
         setPlatform('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)', 'MacIntel');
         const mRestart = /** @type {import('vitest').Mock} */ (/** @type {unknown} */ (restartCore));

@@ -8,14 +8,13 @@ use tauri::{Manager as _, State};
 use clash_prism_extension::ApplyOptions;
 
 use crate::core_manager::core::fetch_util::fetch_url_content;
+use crate::core_manager::core::secure_io::write_file_secure_atomic;
 use crate::core_manager::write_file_secure;
 use crate::prism::overrides::overrides_model::{
     LogEntry, OverrideExt, OverrideItem, OverrideLog, OverrideType,
 };
 use crate::prism::overrides::overrides_store;
-use crate::prism::pipeline::{
-    execute_batch_pipeline, execute_test_pipeline, execute_write_pipeline,
-};
+use crate::prism::pipeline::{execute_test_pipeline, execute_write_pipeline_no_reload_locked};
 use crate::prism::types::{check_input_size, check_name_size};
 use crate::prism::PrismState;
 use zephyr_core::config::sanitizer::remove_dangerous_keys_internal_pub as remove_dangerous_keys;
@@ -380,8 +379,8 @@ function main(config) {
 
 /// Update metadata fields of an override item (not content).
 #[tauri::command]
-pub fn override_update(
-    state: State<PrismState>,
+pub async fn override_update(
+    state: State<'_, PrismState>,
     id: String,
     mut name: Option<String>,
     enabled: Option<bool>,
@@ -389,66 +388,91 @@ pub fn override_update(
     mut profile_ids: Option<Vec<String>>,
     mut url: Option<String>,
 ) -> Result<OverrideItem, String> {
-    // update_item performs read-modify-write within a single lock acquisition,
-    // preventing race conditions with concurrent updates. The name check
-    // lives inside it for the same reason: only a changed name is a new
-    // identifier held to the cap, while resubmitting the stored name
-    // (say, toggling an imported item whose name predates the limit)
-    // stays allowed — comparing against a copy loaded beforehand could
-    // race another update's rename.
-    let mut name_error: Option<String> = None;
-    let updated = overrides_store::update_item(&state, &id, |item| {
-        // A failed name check aborts the whole update: returning false
-        // means update_item saves nothing at all.
-        if let Some(n) = &name {
-            if *n != item.name {
-                if let Err(e) = check_name_size(n, "Override name") {
-                    name_error = Some(e);
-                    return false;
-                }
-            }
-        }
-        if let Some(n) = name.take() {
-            item.name = n;
-        }
-        if let Some(e) = enabled {
-            item.enabled = e;
-        }
-        if let Some(g) = global {
-            item.global = g;
-        }
-        if let Some(pids) = profile_ids.take() {
-            item.profile_ids = pids;
-        }
-        if let Some(u) = url.take() {
-            if u.trim().is_empty() {
-                if item.r#type == OverrideType::Remote {
-                    name_error = Some("URL is required for remote overrides".to_owned());
-                    return false;
-                }
-                item.url = None;
-            } else {
-                match validate_override_url(&u) {
-                    Ok(valid_url) => item.url = Some(valid_url),
-                    Err(e) => {
+    let app = state.app.clone();
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<PrismState>();
+        let _config = crate::prism::pipeline::RUN_CONFIG_LOCK
+            .lock()
+            .map_err(|error| format!("Run config lock poisoned: {error}"))?;
+        let patch_changed = enabled.is_some() || global.is_some() || profile_ids.is_some();
+        let previous = overrides_store::load_item(&state, &id)?;
+        // update_item performs read-modify-write within a single lock acquisition,
+        // preventing race conditions with concurrent updates. The name check
+        // lives inside it for the same reason: only a changed name is a new
+        // identifier held to the cap, while resubmitting the stored name
+        // (say, toggling an imported item whose name predates the limit)
+        // stays allowed — comparing against a copy loaded beforehand could
+        // race another update's rename.
+        let mut name_error: Option<String> = None;
+        let updated = overrides_store::update_item(&state, &id, |item| {
+            // A failed name check aborts the whole update: returning false
+            // means update_item saves nothing at all.
+            if let Some(n) = &name {
+                if *n != item.name {
+                    if let Err(e) = check_name_size(n, "Override name") {
                         name_error = Some(e);
                         return false;
                     }
                 }
             }
+            if let Some(n) = name.take() {
+                item.name = n;
+            }
+            if let Some(e) = enabled {
+                item.enabled = e;
+            }
+            if let Some(g) = global {
+                item.global = g;
+            }
+            if let Some(pids) = profile_ids.take() {
+                item.profile_ids = pids;
+            }
+            if let Some(u) = url.take() {
+                if u.trim().is_empty() {
+                    if item.r#type == OverrideType::Remote {
+                        name_error = Some("URL is required for remote overrides".to_owned());
+                        return false;
+                    }
+                    item.url = None;
+                } else {
+                    match validate_override_url(&u) {
+                        Ok(valid_url) => item.url = Some(valid_url),
+                        Err(e) => {
+                            name_error = Some(e);
+                            return false;
+                        }
+                    }
+                }
+            }
+            true
+        });
+        if let Some(e) = name_error {
+            return Err(e);
         }
-        true
-    });
-    if let Some(e) = name_error {
-        return Err(e);
-    }
-    updated
+        let item = updated?;
+        if patch_changed {
+            if let Err(error) = sync_override_patch(&state, &item) {
+                return Err(restore_override_metadata(&state, &previous, error));
+            }
+        }
+        Ok(item)
+    })
+    .await
+    .map_err(|error| format!("Override update task failed: {error}"))?
 }
 
 /// Delete an override item and its content/log files.
 #[tauri::command]
-pub fn override_delete(state: State<PrismState>, id: String) -> Result<(), String> {
-    overrides_store::delete_item(&state, &id)
+pub async fn override_delete(state: State<'_, PrismState>, id: String) -> Result<(), String> {
+    let app = state.app.clone();
+    tokio::task::spawn_blocking(move || {
+        let _config = crate::prism::pipeline::RUN_CONFIG_LOCK
+            .lock()
+            .map_err(|error| format!("Run config lock poisoned: {error}"))?;
+        overrides_store::delete_item(&app.state::<PrismState>(), &id)
+    })
+    .await
+    .map_err(|error| format!("Override delete task failed: {error}"))?
 }
 
 /// Get the content of an override script.
@@ -505,60 +529,67 @@ pub async fn override_set_content(
     // Save only: persist the content without executing it (JS is syntax-checked,
     // Prism YAML is parse-checked; both are fully checked when they run).
     if save_only.unwrap_or(false) {
-        // An enabled Prism YAML override is compiled from its workspace patch: keep
-        // the patch in step so the next apply uses what was just saved. The patch is
-        // written first, so a failed save leaves the stored script untouched too.
-        if item.ext == OverrideExt::PrismYaml && item.enabled {
-            // Same lock as the apply paths, so a compile never reads a half-written patch.
+        let app = state.app.clone();
+        return tokio::task::spawn_blocking(move || {
             let _guard = crate::prism::pipeline::RUN_CONFIG_LOCK
                 .lock()
                 .map_err(|e| format!("Run config lock poisoned: {e}"))?;
-            let prism_dir = crate::prism::prism_data_dir(&state.app)?;
-            let patch_path = prism_dir.join(item.patch_filename());
-            let previous_patch = std::fs::read_to_string(&patch_path).ok();
-            write_file_secure(&patch_path, &content)
-                .map_err(|e| format!("Failed to write Prism patch: {e}"))?;
-            if let Err(e) = overrides_store::write_content(&state, &id, &content) {
-                // The save failed: put the patch back so the next apply still uses
-                // the previously saved script.
-                let restored = match previous_patch {
-                    Some(text) => write_file_secure(&patch_path, &text).is_ok(),
-                    None => std::fs::remove_file(&patch_path).is_ok(),
+            let state = app.state::<PrismState>();
+            let current = overrides_store::load_item(&state, &id)?;
+            let profile = override_profile(&state)?;
+            if current.ext == OverrideExt::PrismYaml
+                && override_is_active(&current, profile.as_deref())
+            {
+                let prism_dir = crate::prism::prism_data_dir(&app)?;
+                let patch_path = prism_dir.join(current.patch_filename());
+                let previous_patch = match std::fs::read_to_string(&patch_path) {
+                    Ok(text) => Some(text),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(error) => return Err(format!("Failed to preserve Prism patch: {error}")),
                 };
-                if !restored {
-                    emit_warn!(
-                        Override,
-                        OVERRIDE_APPLY_FAILED,
-                        "Could not restore the Prism patch of override {} after a failed save",
-                        id
-                    );
+                write_file_secure_atomic(&patch_path, &content)
+                    .map_err(|e| format!("Failed to write Prism patch: {e}"))?;
+                if let Err(error) = overrides_store::write_content(&state, &id, &content) {
+                    let restored = match previous_patch {
+                        Some(text) => write_file_secure_atomic(&patch_path, &text),
+                        None => {
+                            std::fs::remove_file(&patch_path).map_err(|error| error.to_string())
+                        }
+                    };
+                    return Err(match restored {
+                        Ok(()) => error,
+                        Err(restore) => {
+                            format!("{error}; failed to restore Prism patch: {restore}")
+                        }
+                    });
                 }
-                return Err(e);
+            } else {
+                overrides_store::write_content(&state, &id, &content)?;
             }
-        } else {
-            overrides_store::write_content(&state, &id, &content)?;
-        }
-        return Ok(OverrideLog {
-            script_id: item.id,
-            script_name: item.name,
-            executed_at: chrono::Utc::now().timestamp_millis(),
-            duration_us: 0,
-            success: true,
-            config_modified: false,
-            error: None,
-            logs: Vec::new(),
-        });
+            Ok(OverrideLog {
+                script_id: current.id,
+                script_name: current.name,
+                executed_at: chrono::Utc::now().timestamp_millis(),
+                duration_us: 0,
+                success: true,
+                config_modified: false,
+                reloaded: None,
+                reload_uncertain: None,
+                error: None,
+                logs: Vec::new(),
+            })
+        })
+        .await
+        .map_err(|error| format!("Override save task failed: {error}"))?;
     }
 
     let dry = dry_run.unwrap_or(false);
 
-    // Only persist content when NOT in dry-run mode
     if !dry {
-        overrides_store::write_content(&state, &id, &content)?;
+        return execute_override_write(&state, &item, &content).await;
     }
 
-    // Execute (dry_run or live)
-    let log = if dry {
+    let log = {
         // The button is a syntax check and the script already passed validation above.
         // With no running config yet to try it on (the core has never started), say the
         // dry run was skipped instead of failing a script whose syntax is fine. Any other
@@ -574,6 +605,8 @@ pub async fn override_set_content(
                     duration_us: 0,
                     success: true,
                     config_modified: false,
+                    reloaded: None,
+                    reload_uncertain: None,
                     error: None,
                     logs: vec![LogEntry {
                         level: "warn".to_owned(),
@@ -588,42 +621,14 @@ pub async fn override_set_content(
                     duration_us: 0,
                     success: false,
                     config_modified: false,
+                    reloaded: None,
+                    reload_uncertain: None,
                     error: Some(e),
                     logs: Vec::new(),
                 }
             }
         })
-    } else {
-        // The content is already saved: a pipeline error (core not running, the
-        // running config unreadable) is this run's result, not a failed save, so
-        // record it as the last run instead of leaving the previous status shown.
-        execute_override_write(&state, &item, &content).unwrap_or_else(|e| OverrideLog {
-            script_id: item.id.clone(),
-            script_name: item.name.clone(),
-            executed_at: chrono::Utc::now().timestamp_millis(),
-            duration_us: 0,
-            success: false,
-            config_modified: false,
-            error: Some(e),
-            logs: Vec::new(),
-        })
     };
-
-    // Persist the log of real runs only: a dry run (syntax check) must not
-    // replace the last-run status shown for the override.
-    // The script is already written and applied by now: a log that cannot be
-    // saved must not turn the run into an error.
-    if !dry {
-        if let Err(e) = overrides_store::save_log(&state, &id, &log) {
-            emit_warn!(
-                Override,
-                OVERRIDE_APPLY_FAILED,
-                "Could not save the run log for override {}: {}",
-                id,
-                e
-            );
-        }
-    }
 
     Ok(log)
 }
@@ -647,6 +652,8 @@ fn execute_override_test(
             duration_us: 0,
             success: error.is_none(),
             config_modified: false,
+            reloaded: None,
+            reload_uncertain: None,
             error,
             logs: Vec::new(),
         });
@@ -661,6 +668,8 @@ fn execute_override_test(
         duration_us: result.duration_us,
         success: result.success,
         config_modified: result.config_modified,
+        reloaded: None,
+        reload_uncertain: None,
         error: result.error,
         logs: result
             .logs
@@ -674,17 +683,89 @@ fn execute_override_test(
 }
 
 /// Execute an override script and write back to config if modified.
-fn execute_override_write(
+async fn execute_override_write(
+    state: &PrismState,
+    item: &OverrideItem,
+    content: &str,
+) -> Result<OverrideLog, String> {
+    let app = state.app.clone();
+    let id = item.id.clone();
+    let owned_content = content.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let _config = crate::prism::pipeline::RUN_CONFIG_LOCK
+            .lock()
+            .map_err(|error| format!("Run config lock poisoned: {error}"))?;
+        let state = app.state::<PrismState>();
+        let current = overrides_store::load_item(&state, &id)?;
+        let profile = override_profile(&state)?;
+        overrides_store::write_content(&state, &id, &owned_content)?;
+        if !override_is_active(&current, profile.as_deref()) {
+            return Ok(inactive_override_log(&current));
+        }
+        let executed = execute_override_write_locked(&state, &current, &owned_content);
+        let log = executed.unwrap_or_else(|error| {
+            failed_apply_log(current.id.clone(), current.name.clone(), error)
+        });
+        save_combined_logs(&state, std::slice::from_ref(&log));
+        Ok(log)
+    })
+    .await
+    .map_err(|error| format!("Override write task failed: {error}"))?
+}
+
+fn execute_override_write_locked(
     state: &PrismState,
     item: &OverrideItem,
     content: &str,
 ) -> Result<OverrideLog, String> {
     // Prism YAML overrides are executed via the Prism DSL pipeline
     if item.ext == OverrideExt::PrismYaml {
-        return execute_prism_yaml_write(state, item, content);
+        let (mut log, reload_needed) = execute_prism_yaml_write_locked(state, item, content)?;
+        if reload_needed && log.success {
+            if let Some(reason) = crate::prism::pipeline::skipped_reload_reason(state) {
+                log.logs.push(LogEntry {
+                    level: "Info".to_owned(),
+                    message: reason.to_owned(),
+                });
+            } else {
+                match crate::prism::pipeline::reload_prepared_locked(&state.app) {
+                    Ok(reloaded) => {
+                        if reloaded {
+                            crate::prism::host::confirm_compiled_rule_annotations(&state.app);
+                        }
+                        log.reloaded = Some(reloaded);
+                    }
+                    Err(error) => {
+                        log.success = false;
+                        log.reload_uncertain = (!error.rejected).then_some(true);
+                        log.error = Some(error.message);
+                    }
+                }
+            }
+        }
+        return Ok(log);
     }
 
-    let result = execute_write_pipeline(state, content, &item.name)?;
+    let mut result = execute_write_pipeline_no_reload_locked(state, content, &item.name)?;
+    let mut reloaded = false;
+    let mut reload_uncertain = None;
+    if result.success && result.config_modified {
+        if let Some(reason) = crate::prism::pipeline::skipped_reload_reason(state) {
+            result.logs.push(crate::prism::pipeline::LogEntry {
+                level: "Info".to_owned(),
+                message: reason.to_owned(),
+            });
+        } else {
+            match crate::prism::pipeline::reload_prepared_locked(&state.app) {
+                Ok(applied) => reloaded = applied,
+                Err(error) => {
+                    result.success = false;
+                    reload_uncertain = (!error.rejected).then_some(true);
+                    result.error = Some(error.message);
+                }
+            }
+        }
+    }
 
     Ok(OverrideLog {
         script_id: item.id.clone(),
@@ -693,6 +774,8 @@ fn execute_override_write(
         duration_us: result.duration_us,
         success: result.success,
         config_modified: result.config_modified,
+        reloaded: Some(reloaded),
+        reload_uncertain,
         error: result.error,
         logs: result
             .logs
@@ -712,27 +795,28 @@ fn execute_override_write(
 /// the core; the returned flag says whether the core took that reload. With
 /// `trigger_reload`, one more (unawaited) reload follows; the batch caller passes
 /// false and decides itself whether a final awaited reload is needed.
-fn execute_prism_yaml_batch(
+fn execute_prism_yaml_batch_locked(
     state: &PrismState,
     patches: &[(String, String, String, String)], // (id, name, patch_filename, content)
     trigger_reload: bool,
 ) -> Result<(Vec<OverrideLog>, bool), String> {
-    use crate::prism::pipeline::RUN_CONFIG_LOCK;
-
-    let _guard = RUN_CONFIG_LOCK
-        .lock()
-        .map_err(|e| format!("Run config lock poisoned: {e}"))?;
-
     let start = std::time::Instant::now();
 
     // Step 1: Write all patch files to the Prism workspace
     let prism_dir = crate::prism::prism_data_dir(&state.app)?;
+    let mut patch_rollback = crate::prism::pipeline::PreparedConfigRollback::new(&state.app)?;
+    for (_, _, patch_filename, _) in patches {
+        patch_rollback.preserve_patch(prism_dir.join(patch_filename))?;
+    }
 
     for (_id, name, patch_filename, content) in patches {
         let patch_path = prism_dir.join(patch_filename);
-        write_file_secure(&patch_path, content)
-            .map_err(|e| format!("Failed to write Prism patch for '{name}': {e}"))?;
+        write_file_secure_atomic(&patch_path, content).map_err(|error| {
+            patch_rollback
+                .with_restore_error(format!("Failed to write Prism patch for '{name}': {error}"))
+        })?;
     }
+    patch_rollback.disarm();
 
     // Step 2: Single compilation via ext.apply()
     let lock = state.lock_inner()?;
@@ -744,10 +828,13 @@ fn execute_prism_yaml_batch(
     // on this thread; the guard captures whether the core took it, so the
     // caller knows these patches are live even if a later reload fails.
     let status_guard = crate::prism::host::HttpStatusGuard::enter();
+    status_guard.capture_rule_sources(&state.app)?;
     let applied = ext.apply(ApplyOptions::default());
-    let reloaded = status_guard
-        .take()
-        .is_some_and(crate::network_coordinator::is_http_success);
+    if applied.is_ok() {
+        crate::prism::host::mark_rule_insert_cache_current();
+    }
+    let reload_status = status_guard.take();
+    let reloaded = reload_status.is_some_and(crate::network_coordinator::is_http_success);
     let result = match applied {
         Ok(res) => res,
         Err(err) => {
@@ -762,6 +849,8 @@ fn execute_prism_yaml_batch(
                     duration_us,
                     success: false,
                     config_modified: false,
+                    reloaded: None,
+                    reload_uncertain: None,
                     error: Some(err.clone()),
                     logs: vec![],
                 })
@@ -803,6 +892,8 @@ fn execute_prism_yaml_batch(
             duration_us,
             success: true,
             config_modified: true,
+            reloaded: reloaded.then_some(true),
+            reload_uncertain: (reload_status == Some(0)).then_some(true),
             error: None,
             logs: trace_logs.clone(),
         })
@@ -832,17 +923,11 @@ fn single_apply_reload_error(status: Option<u16>) -> Option<String> {
 ///
 /// This writes the Prism YAML content as a patch file in the Prism workspace,
 /// then calls `ext.apply()` to compile and apply all patches.
-fn execute_prism_yaml_write(
+fn execute_prism_yaml_write_locked(
     state: &PrismState,
     item: &OverrideItem,
     content: &str,
-) -> Result<OverrideLog, String> {
-    use crate::prism::pipeline::RUN_CONFIG_LOCK;
-
-    let _guard = RUN_CONFIG_LOCK
-        .lock()
-        .map_err(|e| format!("Run config lock poisoned: {e}"))?;
-
+) -> Result<(OverrideLog, bool), String> {
     let start = std::time::Instant::now();
 
     // Write the override content as a patch file in the Prism workspace
@@ -864,7 +949,11 @@ fn execute_prism_yaml_write(
     // As in the batch path: the host reloads the core during `ext.apply`,
     // and the guard captures whether the core took it.
     let status_guard = crate::prism::host::HttpStatusGuard::enter();
+    status_guard.capture_rule_sources(&state.app)?;
     let applied = ext.apply(ApplyOptions::default());
+    if applied.is_ok() {
+        crate::prism::host::mark_rule_insert_cache_current();
+    }
     let reload_status = status_guard.take();
     drop(lock);
     let result = applied?;
@@ -877,17 +966,15 @@ fn execute_prism_yaml_write(
     // host also reconciled TUN; refused, the same file would be refused
     // again, and the run reports it instead of success.
     let error = single_apply_reload_error(reload_status);
-    if reload_status.is_none() {
-        crate::prism::pipeline::trigger_hot_reload_and_reconcile_tun(state)?;
-    }
-
-    Ok(OverrideLog {
+    let log = OverrideLog {
         script_id: item.id.clone(),
         script_name: item.name.clone(),
         executed_at: chrono::Utc::now().timestamp_millis(),
         duration_us,
         success: error.is_none(),
         config_modified: true,
+        reloaded: Some(reload_status.is_some_and(crate::network_coordinator::is_http_success)),
+        reload_uncertain: (reload_status == Some(0)).then_some(true),
         error,
         logs: result
             .trace
@@ -897,7 +984,8 @@ fn execute_prism_yaml_write(
                 message: format!("{t:?}"),
             })
             .collect(),
-    })
+    };
+    Ok((log, reload_status.is_none()))
 }
 
 /// Reorder override items.
@@ -908,53 +996,85 @@ pub fn override_reorder(state: State<PrismState>, ids: Vec<String>) -> Result<()
 
 /// Toggle override enabled/disabled.
 #[tauri::command]
-pub fn override_toggle(state: State<PrismState>, id: String, enabled: bool) -> Result<(), String> {
-    // When enabling a Prism YAML override, read and sanitize the stored
-    // content before persisting the flag: if the content cannot be restored
-    // as a patch, the toggle fails without changing any state.
-    let prepared = if enabled {
-        let peek = overrides_store::load_item(&state, &id)?;
-        if peek.ext == OverrideExt::PrismYaml {
-            let content = overrides_store::read_content(&state, &id)
-                .map_err(|e| format!("Failed to read override content to restore patch: {e}"))?;
-            // Sanitize on restore so a stored override saved before
-            // write-path sanitization cannot reactivate dangerous keys.
-            Some(sanitize_override_yaml(&content)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Use atomic update to avoid read-modify-write race
-    let item = overrides_store::update_item(&state, &id, |item| {
-        item.enabled = enabled;
-        true
-    })?;
-
-    // Synchronize Prism workspace patch file for Prism YAML overrides
-    if item.ext == OverrideExt::PrismYaml {
-        let prism_dir = crate::prism::prism_data_dir(&state.app)
-            .map_err(|e| format!("Failed to get prism data dir: {e}"))?;
-        let patch_path = prism_dir.join(item.patch_filename());
-
+pub async fn override_toggle(
+    state: State<'_, PrismState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let app = state.app.clone();
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<PrismState>();
+        let _config = crate::prism::pipeline::RUN_CONFIG_LOCK
+            .lock()
+            .map_err(|error| format!("Run config lock poisoned: {error}"))?;
+        // When enabling a Prism YAML override, read and sanitize the stored
+        // content before persisting the flag: if the content cannot be restored
+        // as a patch, the toggle fails without changing any state.
         if enabled {
-            // Re-enable: restore patch file from the content prepared above
-            if let Some(content) = &prepared {
-                write_file_secure(&patch_path, content)
-                    .map_err(|e| format!("Failed to restore patch file: {e}"))?;
+            let peek = overrides_store::load_item(&state, &id)?;
+            if peek.ext == OverrideExt::PrismYaml {
+                let content = overrides_store::read_content(&state, &id).map_err(|e| {
+                    format!("Failed to read override content to restore patch: {e}")
+                })?;
+                // Sanitize on restore so a stored override saved before
+                // write-path sanitization cannot reactivate dangerous keys.
+                sanitize_override_yaml(&content)?;
             }
-        } else {
-            // Disable: remove patch so Prism extension stops applying it
-            if patch_path.exists() {
-                std::fs::remove_file(&patch_path)
-                    .map_err(|e| format!("Failed to remove patch file: {e}"))?;
-            }
+        }
+
+        // Use atomic update to avoid read-modify-write race
+        let previous = overrides_store::load_item(&state, &id)?;
+        let item = overrides_store::update_item(&state, &id, |item| {
+            item.enabled = enabled;
+            true
+        })?;
+
+        if let Err(error) = sync_override_patch(&state, &item) {
+            return Err(restore_override_metadata(&state, &previous, error));
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("Override toggle task failed: {error}"))?
+}
+
+fn sync_override_patch(state: &PrismState, item: &OverrideItem) -> Result<(), String> {
+    if item.ext != OverrideExt::PrismYaml {
+        return Ok(());
+    }
+    let profile = override_profile(state)?;
+    let active = item.enabled
+        && (item.global
+            || profile
+                .as_ref()
+                .is_some_and(|name| item.profile_ids.contains(name)));
+    if active {
+        let content = sanitize_override_yaml(&overrides_store::read_content(state, &item.id)?)?;
+        let path = crate::prism::prism_data_dir(&state.app)?.join(item.patch_filename());
+        crate::core_manager::core::secure_io::write_file_secure_atomic(&path, &content)
+    } else if let Some(error) = remove_stale_patch(state, item) {
+        Err(error)
+    } else {
+        Ok(())
+    }
+}
+
+fn restore_override_metadata(state: &PrismState, previous: &OverrideItem, error: String) -> String {
+    let restored = overrides_store::update_item(state, &previous.id, |item| {
+        item.name.clone_from(&previous.name);
+        item.enabled = previous.enabled;
+        item.global = previous.global;
+        item.profile_ids.clone_from(&previous.profile_ids);
+        item.url.clone_from(&previous.url);
+        true
+    });
+    match restored {
+        Ok(_) => error,
+        Err(restore_error) => {
+            format!("{error}; could not restore override metadata: {restore_error}")
         }
     }
-
-    Ok(())
 }
 
 /// Test-execute an override without saving content.
@@ -977,6 +1097,8 @@ pub fn override_test(state: State<PrismState>, id: String) -> Result<OverrideLog
                     duration_us: 0,
                     success: false,
                     config_modified: false,
+                    reloaded: None,
+                    reload_uncertain: None,
                     error: Some(format!("Invalid Prism YAML: {e}")),
                     logs: vec![LogEntry {
                         level: "Error".to_owned(),
@@ -992,17 +1114,44 @@ pub fn override_test(state: State<PrismState>, id: String) -> Result<OverrideLog
     execute_override_test(&state, &item, &content)
 }
 
-/// Download and refresh a remote override.
-///
-/// Downloads directly first and falls back to the running managed core's proxy
-/// when the direct route fails.
-///
-/// Note: This function is async to avoid blocking the UI during network I/O.
+/// Serialize downloads and publication for one override without retaining old IDs.
+fn remote_refresh_lock(id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex, Weak};
+    type RefreshLocks = BTreeMap<String, Weak<tokio::sync::Mutex<()>>>;
+    static LOCKS: Mutex<RefreshLocks> = Mutex::new(BTreeMap::new());
+    let mut locks = LOCKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(id).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    locks.insert(id.to_owned(), Arc::downgrade(&lock));
+    lock
+}
+
+fn refresh_content_snapshot(
+    state: &PrismState,
+    item: &OverrideItem,
+) -> Result<Option<String>, String> {
+    let path = state.get_overrides_dir()?.join(item.content_filename());
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("Failed to snapshot override content: {error}")),
+    }
+}
+
+/// Download and refresh a remote override, directly first and through the
+/// managed proxy if needed. Network I/O never holds the global config lock.
 #[tauri::command]
 pub async fn override_refresh_remote(
     state: State<'_, PrismState>,
     id: String,
 ) -> Result<OverrideLog, String> {
+    let refresh_guard = remote_refresh_lock(&id).lock_owned().await;
     let item = overrides_store::load_item(&state, &id)?;
     if item.r#type != OverrideType::Remote {
         return Err("Only remote overrides can be refreshed".to_owned());
@@ -1013,6 +1162,7 @@ pub async fn override_refresh_remote(
         .as_ref()
         .ok_or("No URL set for remote override")?
         .clone();
+    let previous_content = refresh_content_snapshot(&state, &item)?;
 
     // Direct first, then through the managed core if direct fails
     let mut content = download_remote_content(&state.app, &url).await?;
@@ -1020,21 +1170,73 @@ pub async fn override_refresh_remote(
         content = sanitize_override_yaml(&content)?;
     }
 
-    // Update content
-    overrides_store::write_content(&state, &id, &content)?;
+    let app = state.app.clone();
+    tokio::task::spawn_blocking(move || {
+        // Retain per-ID ordering even if the awaiting IPC future is dropped.
+        let _refresh = refresh_guard;
+        let _config = crate::prism::pipeline::RUN_CONFIG_LOCK
+            .lock()
+            .map_err(|error| format!("Run config lock poisoned: {error}"))?;
+        let state = app.state::<PrismState>();
 
-    // Update timestamp atomically (returns the updated item)
-    let updated_item = overrides_store::update_item(&state, &id, |item| {
-        item.updated_at = Some(chrono::Utc::now().timestamp_millis());
-        true
-    })?;
+        let current = overrides_store::load_item(&state, &id)?;
+        if current.r#type != OverrideType::Remote || current.url.as_deref() != Some(url.as_str()) {
+            return Err(
+                "Override URL changed during refresh; downloaded content was discarded".to_owned(),
+            );
+        }
+        if refresh_content_snapshot(&state, &current)? != previous_content {
+            return Err(
+                "Override content changed during refresh; downloaded content was discarded"
+                    .to_owned(),
+            );
+        }
+        // Update content
+        overrides_store::write_content(&state, &id, &content)?;
 
-    // Execute via write pipeline so the refreshed override takes effect immediately.
-    // Using dry-run (execute_override_test) would update the file but leave the
-    // running config unchanged, confusing users who expect refresh to apply immediately.
-    let log = execute_override_write(&state, &updated_item, &content)?;
-    overrides_store::save_log(&state, &id, &log)?;
-    Ok(log)
+        // Update timestamp atomically (returns the updated item)
+        let updated = overrides_store::update_item(&state, &id, |item| {
+            item.updated_at = Some(chrono::Utc::now().timestamp_millis());
+            true
+        });
+        let updated_item = match updated {
+            Ok(item) => item,
+            Err(error) => {
+                let log = failed_apply_log(
+                    current.id,
+                    current.name,
+                    format!(
+                        "Content saved, not applied: failed to update refresh metadata: {error}"
+                    ),
+                );
+                save_combined_logs(&state, std::slice::from_ref(&log));
+                return Ok(log);
+            }
+        };
+
+        // Refreshing stored content does not activate a disabled or out-of-scope override.
+        let profile = override_profile(&state)?;
+        if !override_is_active(&updated_item, profile.as_deref()) {
+            return Ok(inactive_override_log(&updated_item));
+        }
+        // Execute via write pipeline so the refreshed override takes effect immediately.
+        // Using dry-run (execute_override_test) would update the file but leave the
+        // running config unchanged, confusing users who expect refresh to apply immediately.
+        let executed = execute_override_write_locked(&state, &updated_item, &content);
+        let log = executed.unwrap_or_else(|error| {
+            failed_apply_log(updated_item.id.clone(), updated_item.name.clone(), error)
+        });
+        if let Err(error) = overrides_store::save_log(&state, &id, &log) {
+            emit_warn!(
+                Override,
+                OVERRIDE_APPLY_FAILED,
+                "Could not save the run log for override {id}: {error}"
+            );
+        }
+        Ok(log)
+    })
+    .await
+    .map_err(|error| format!("Remote override refresh task failed: {error}"))?
 }
 
 /// Apply all enabled overrides to the current config.
@@ -1049,6 +1251,18 @@ pub async fn override_refresh_remote(
 /// Note: This function is async to avoid blocking the UI during script execution.
 #[tauri::command]
 pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<OverrideLog>, String> {
+    let app = state.app.clone();
+    tokio::task::spawn_blocking(move || {
+        let _config = crate::prism::pipeline::RUN_CONFIG_LOCK
+            .lock()
+            .map_err(|error| format!("Run config lock poisoned: {error}"))?;
+        override_apply_all_locked(&app.state::<PrismState>())
+    })
+    .await
+    .map_err(|error| format!("Override apply task failed: {error}"))?
+}
+
+fn override_apply_all_locked(state: &PrismState) -> Result<Vec<OverrideLog>, String> {
     // Get current active profile ID for scope filtering
     let current_profile_id: Option<String> = {
         let mihomo_state = state.app.state::<crate::MihomoState>();
@@ -1068,13 +1282,14 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
         lock.last_config_path().map(String::from)
     };
 
-    let meta = overrides_store::load_meta(&state)?;
-
     // Collect enabled overrides by type with scope filtering.
     // Pre-execution errors (empty file, read failure) are included in the returned logs
     // so the UI can display them alongside execution results.
-    let (js_scripts, prism_patches, pre_logs) =
-        collect_apply_all_items(&state, &meta.items, current_profile_id.as_deref());
+    let (js_scripts, prism_patches, pre_logs) = {
+        let meta = overrides_store::load_meta(state)?;
+        remove_inactive_patches(state, &meta.items, current_profile_id.as_deref())?;
+        collect_apply_all_items(state, &meta.items, current_profile_id.as_deref())
+    };
 
     if js_scripts.is_empty() && prism_patches.is_empty() {
         return Ok(pre_logs);
@@ -1097,19 +1312,19 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
         // the reloaded groups. A batch that fails as a whole (patch write,
         // run config write, a poisoned lock) becomes one failed log per
         // patch, saved like the others, and the JS overrides below still run.
-        let (prism_logs, prism_reloaded) = execute_prism_yaml_batch(&state, &prism_patches, false)
-            .unwrap_or_else(|e| {
-                emit_warn!(
-                    Override,
-                    OVERRIDE_APPLY_FAILED,
-                    "Prism override batch failed: {e}"
-                );
-                let logs = prism_patches
-                    .iter()
-                    .map(|(id, name, _, _)| failed_apply_log(id.clone(), name.clone(), e.clone()))
-                    .collect();
-                (logs, false)
-            });
+        let prepared = execute_prism_yaml_batch_locked(state, &prism_patches, false);
+        let (prism_logs, prism_reloaded) = prepared.unwrap_or_else(|e| {
+            emit_warn!(
+                Override,
+                OVERRIDE_APPLY_FAILED,
+                "Prism override batch failed: {e}"
+            );
+            let logs = prism_patches
+                .iter()
+                .map(|(id, name, _, _)| failed_apply_log(id.clone(), name.clone(), e.clone()))
+                .collect();
+            (logs, false)
+        });
         if prism_reloaded {
             live_prism_ids.extend(
                 prism_logs
@@ -1122,7 +1337,7 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
             prism_success = first_log.success;
         }
         for log in &prism_logs {
-            if let Err(e) = overrides_store::save_log(&state, &log.script_id, log) {
+            if let Err(e) = overrides_store::save_log(state, &log.script_id, log) {
                 emit_warn!(
                     Override,
                     OVERRIDE_APPLY_FAILED,
@@ -1145,30 +1360,32 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
 
         // A batch that fails as a whole must not skip the reload below:
         // Prism patches written in phase 1 would otherwise never reach the core.
-        let results = match execute_batch_pipeline(&state, &script_refs, false) {
-            Ok(results) => results,
-            Err(e) => {
-                emit_warn!(
-                    Override,
-                    OVERRIDE_APPLY_FAILED,
-                    "JS override batch failed: {e}"
-                );
-                for (id, name, _) in &js_scripts {
-                    let log = failed_apply_log(id.clone(), name.clone(), e.clone());
-                    // Saved like every other result, so the overrides
-                    // page does not keep showing the previous run's.
-                    if let Err(save_err) = overrides_store::save_log(&state, id, &log) {
-                        emit_warn!(
-                            Override,
-                            OVERRIDE_APPLY_FAILED,
-                            "Failed to save log for '{name}': {save_err}"
-                        );
+        let results =
+            match crate::prism::pipeline::execute_batch_pipeline_locked(state, &script_refs, false)
+            {
+                Ok(results) => results,
+                Err(e) => {
+                    emit_warn!(
+                        Override,
+                        OVERRIDE_APPLY_FAILED,
+                        "JS override batch failed: {e}"
+                    );
+                    for (id, name, _) in &js_scripts {
+                        let log = failed_apply_log(id.clone(), name.clone(), e.clone());
+                        // Saved like every other result, so the overrides
+                        // page does not keep showing the previous run's.
+                        if let Err(save_err) = overrides_store::save_log(state, id, &log) {
+                            emit_warn!(
+                                Override,
+                                OVERRIDE_APPLY_FAILED,
+                                "Failed to save log for '{name}': {save_err}"
+                            );
+                        }
+                        all_logs.push(log);
                     }
-                    all_logs.push(log);
+                    Vec::new()
                 }
-                Vec::new()
-            }
-        };
+            };
 
         // Convert pipeline results to override logs
         let exec_logs: Vec<OverrideLog> = js_scripts
@@ -1182,6 +1399,8 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
                     duration_us: result.duration_us,
                     success: result.success,
                     config_modified: result.config_modified,
+                    reloaded: None,
+                    reload_uncertain: None,
                     error: result.error.clone(),
                     logs: result
                         .logs
@@ -1193,7 +1412,7 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
                         .collect(),
                 };
                 // Persist individual logs (ignore errors)
-                if let Err(e) = overrides_store::save_log(&state, id, &log) {
+                if let Err(e) = overrides_store::save_log(state, id, &log) {
                     emit_warn!(
                         Override,
                         OVERRIDE_APPLY_FAILED,
@@ -1221,20 +1440,287 @@ pub async fn override_apply_all(state: State<'_, PrismState>) -> Result<Vec<Over
     // reconcile.
     let prism_pending = prism_success && live_prism_ids.is_empty();
     if js_modified || prism_pending {
-        if let Err(e) = crate::prism::pipeline::hot_reload_and_wait(&state).await {
-            let error = format!(
-                "The core did not reload the overridden config: {e}. The change is \
-                 saved in the running config and takes effect at its next reload."
-            );
-            record_failed_final_reload(&state, &mut all_logs, &live_prism_ids, error);
+        match crate::prism::pipeline::reload_prepared_locked(&state.app) {
+            Ok(reloaded) => {
+                if reloaded && prism_success {
+                    crate::prism::host::confirm_compiled_rule_annotations(&state.app);
+                }
+                for log in all_logs.iter_mut().filter(|log| {
+                    log.success && log.config_modified && !live_prism_ids.contains(&log.script_id)
+                }) {
+                    log.reloaded = Some(reloaded);
+                    log.reload_uncertain = None;
+                    if !reloaded {
+                        log.logs.push(LogEntry {
+                            level: "Info".to_owned(),
+                            message: "Config saved while the core is stopped; not reloaded"
+                                .to_owned(),
+                        });
+                    }
+                }
+                save_combined_logs(state, &all_logs);
+            }
+            Err(error) => {
+                let uncertain = !error.rejected
+                    || all_logs
+                        .iter()
+                        .any(|log| log.reload_uncertain == Some(true));
+                let message = if uncertain {
+                    format!(
+                        "Reload outcome remains unconfirmed; an earlier request may be live: {error}"
+                    )
+                } else {
+                    format!(
+                        "The core did not reload the overridden config: {error}. The change is \
+                         saved in the running config and takes effect at its next reload."
+                    )
+                };
+                record_failed_final_reload(
+                    state,
+                    &mut all_logs,
+                    &live_prism_ids,
+                    message,
+                    uncertain,
+                );
+            }
         }
     }
 
     Ok(all_logs)
 }
 
+/// Synchronize enabled Prism patches before the rebuilt base is compiled once.
+/// The caller holds `RUN_CONFIG_LOCK` and a `DeferredReloadGuard` on this thread.
+pub(crate) fn prepare_rebuild_overrides_locked(
+    state: &PrismState,
+    rollback: &mut crate::prism::pipeline::PreparedConfigRollback,
+) -> Result<(Vec<JsScript>, Vec<OverrideLog>), String> {
+    let current_profile = override_profile(state)?;
+    let meta = overrides_store::load_meta(state)?;
+    let directory = crate::prism::prism_data_dir(&state.app)?;
+    for item in meta
+        .items
+        .iter()
+        .filter(|item| item.ext == OverrideExt::PrismYaml)
+    {
+        rollback.preserve_patch(directory.join(item.patch_filename()))?;
+    }
+    remove_inactive_patches(state, &meta.items, current_profile.as_deref())?;
+    let (scripts, patches, logs) =
+        collect_apply_all_items(state, &meta.items, current_profile.as_deref());
+    if let Some(failed) = logs.iter().find(|log| !log.success) {
+        return Err(format!(
+            "Failed to prepare override '{}': {}",
+            failed.script_name,
+            failed
+                .error
+                .as_deref()
+                .unwrap_or("Unknown preparation failure"),
+        ));
+    }
+    let mut yaml_logs = Vec::with_capacity(patches.len());
+    for (id, name, filename, content) in patches {
+        write_file_secure(&directory.join(filename), &content)
+            .map_err(|error| format!("Failed to prepare Prism override '{name}': {error}"))?;
+        yaml_logs.push(OverrideLog {
+            script_id: id,
+            script_name: name,
+            executed_at: chrono::Utc::now().timestamp_millis(),
+            duration_us: 0,
+            success: true,
+            config_modified: true,
+            reloaded: Some(false),
+            reload_uncertain: None,
+            error: None,
+            logs: Vec::new(),
+        });
+    }
+    Ok((scripts, yaml_logs))
+}
+
+fn override_profile(state: &PrismState) -> Result<Option<String>, String> {
+    let mihomo = state.app.state::<crate::MihomoState>();
+    let core = mihomo
+        .0
+        .lock()
+        .map_err(|error| format!("Core state unavailable: {error}"))?;
+    let profile = core.last_config_path().map(str::to_owned);
+    drop(core);
+    Ok(profile)
+}
+
+fn override_is_active(item: &OverrideItem, profile: Option<&str>) -> bool {
+    item.enabled
+        && (item.global || profile.is_some_and(|name| item.profile_ids.iter().any(|id| id == name)))
+}
+
+fn inactive_override_log(item: &OverrideItem) -> OverrideLog {
+    OverrideLog {
+        script_id: item.id.clone(),
+        script_name: item.name.clone(),
+        executed_at: chrono::Utc::now().timestamp_millis(),
+        duration_us: 0,
+        success: true,
+        config_modified: false,
+        reloaded: Some(false),
+        reload_uncertain: None,
+        error: None,
+        logs: vec![LogEntry {
+            level: "Info".to_owned(),
+            message: "Content saved; override is inactive for this profile".to_owned(),
+        }],
+    }
+}
+
+/// Ordinary startup rebuilds also compile every patch in the workspace.
+pub(crate) fn prune_rebuild_overrides_locked(
+    state: &PrismState,
+    rollback: &mut crate::prism::pipeline::PreparedConfigRollback,
+) -> Result<(), String> {
+    let profile = override_profile(state)?;
+    let meta = overrides_store::load_meta(state)?;
+    let directory = crate::prism::prism_data_dir(&state.app)?;
+    for item in meta
+        .items
+        .iter()
+        .filter(|item| item.ext == OverrideExt::PrismYaml)
+    {
+        rollback.preserve_patch(directory.join(item.patch_filename()))?;
+    }
+    remove_inactive_patches(state, &meta.items, profile.as_deref())
+}
+
+fn remove_inactive_patches(
+    state: &PrismState,
+    items: &[OverrideItem],
+    profile: Option<&str>,
+) -> Result<(), String> {
+    for item in items
+        .iter()
+        .filter(|item| item.ext == OverrideExt::PrismYaml)
+    {
+        let active = item.enabled
+            && (item.global
+                || profile.is_some_and(|name| item.profile_ids.iter().any(|id| id == name)));
+        if !active {
+            if let Some(error) = remove_stale_patch(state, item) {
+                return Err(error);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Finish a candidate after its one Prism compilation, still without a reload.
+/// A combined rebuild is atomic: any enabled JS failure aborts this candidate
+/// and the caller restores the previous runtime and patches. Ordinary Apply All
+/// retains its separate per-override reporting behavior.
+pub(crate) fn apply_js_after_rebuild_locked(
+    state: &PrismState,
+    scripts: &[JsScript],
+) -> Result<Vec<OverrideLog>, String> {
+    let mut logs = Vec::new();
+    if !scripts.is_empty() {
+        let references: Vec<(&str, &str)> = scripts
+            .iter()
+            .map(|(_, name, content)| (content.as_str(), name.as_str()))
+            .collect();
+        let results = match crate::prism::pipeline::execute_batch_pipeline_locked(
+            state,
+            &references,
+            false,
+        ) {
+            Ok(results) => results,
+            Err(error) => {
+                let failed: Vec<_> = scripts
+                    .iter()
+                    .map(|(id, name, _)| failed_apply_log(id.clone(), name.clone(), error.clone()))
+                    .collect();
+                save_combined_logs(state, &failed);
+                return Err(error);
+            }
+        };
+        for ((id, name, _), result) in scripts.iter().zip(results) {
+            logs.push(OverrideLog {
+                script_id: id.clone(),
+                script_name: name.clone(),
+                executed_at: chrono::Utc::now().timestamp_millis(),
+                duration_us: result.duration_us,
+                success: result.success,
+                config_modified: result.config_modified,
+                reloaded: Some(false),
+                reload_uncertain: None,
+                error: result.error,
+                logs: result
+                    .logs
+                    .into_iter()
+                    .map(|log| LogEntry {
+                        level: log.level,
+                        message: log.message,
+                    })
+                    .collect(),
+            });
+        }
+    }
+    let failure = logs.iter().find(|log| !log.success).map(|log| {
+        log.error
+            .clone()
+            .unwrap_or_else(|| "An enabled override failed".to_owned())
+    });
+    if failure.is_some() {
+        for log in logs.iter_mut().filter(|log| log.success) {
+            log.success = false;
+            log.error = Some(
+                "The combined rebuild was rolled back because another override failed".to_owned(),
+            );
+        }
+    }
+    if failure.is_some() {
+        save_combined_logs(state, &logs);
+    }
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    Ok(logs)
+}
+
+fn save_combined_logs(state: &PrismState, logs: &[OverrideLog]) {
+    for log in logs {
+        if let Err(error) = overrides_store::save_log(state, &log.script_id, log) {
+            emit_warn!(
+                Override,
+                OVERRIDE_APPLY_FAILED,
+                "Could not save override run: {error}"
+            );
+        }
+    }
+}
+
+pub(crate) fn finish_rebuild_logs(
+    state: &PrismState,
+    mut logs: Vec<OverrideLog>,
+    reloaded: bool,
+    reload_uncertain: bool,
+    error: Option<&str>,
+) {
+    for log in &mut logs {
+        log.reloaded = Some(reloaded);
+        log.reload_uncertain = reload_uncertain.then_some(true);
+        if let Some(reason) = error {
+            log.success = false;
+            log.error = Some(reason.to_owned());
+        } else if !reloaded {
+            log.logs.push(LogEntry {
+                level: "Info".to_owned(),
+                message: "Config saved while the core is stopped; not reloaded".to_owned(),
+            });
+        }
+    }
+    save_combined_logs(state, &logs);
+}
+
 /// A JS override to run: `(id, name, content)`.
-type JsScript = (String, String, String);
+pub(crate) type JsScript = (String, String, String);
 /// A Prism override to apply: `(id, name, patch_filename, content)`.
 type PrismPatch = (String, String, String, String);
 
@@ -1334,8 +1820,14 @@ fn remove_stale_patch(state: &PrismState, item: &OverrideItem) -> Option<String>
         }
     };
     let patch_path = prism_dir.join(item.patch_filename());
-    if !patch_path.exists() {
-        return None;
+    match patch_path.try_exists() {
+        Ok(false) => return None,
+        Ok(true) => {}
+        Err(error) => {
+            return Some(format!(
+                " Also could not check for its stale workspace patch: {error}"
+            ));
+        }
     }
     std::fs::remove_file(&patch_path)
         .err()
@@ -1367,6 +1859,8 @@ fn saved_pre_log(
         duration_us: 0,
         success: false,
         config_modified: false,
+        reloaded: None,
+        reload_uncertain: None,
         error: Some(error),
         logs: vec![LogEntry {
             level: "Error".to_owned(),
@@ -1395,6 +1889,7 @@ fn record_failed_final_reload(
     all_logs: &mut Vec<OverrideLog>,
     live_prism_ids: &std::collections::HashSet<String>,
     error: String,
+    reload_uncertain: bool,
 ) {
     let mut lost_any = false;
     for log in all_logs.iter_mut() {
@@ -1403,6 +1898,7 @@ fn record_failed_final_reload(
         }
         lost_any = true;
         log.success = false;
+        log.reload_uncertain = reload_uncertain.then_some(true);
         log.error = Some(error.clone());
         let saved: &OverrideLog = log;
         if let Err(save_err) = overrides_store::save_log(state, &saved.script_id, saved) {
@@ -1415,11 +1911,9 @@ fn record_failed_final_reload(
         }
     }
     if lost_any {
-        all_logs.push(failed_apply_log(
-            String::new(),
-            "hot-reload".to_owned(),
-            error,
-        ));
+        let mut reload_log = failed_apply_log(String::new(), "hot-reload".to_owned(), error);
+        reload_log.reload_uncertain = reload_uncertain.then_some(true);
+        all_logs.push(reload_log);
     } else {
         emit_warn!(Override, OVERRIDE_APPLY_FAILED, "{error}");
     }
@@ -1448,6 +1942,8 @@ fn failed_apply_log(script_id: String, script_name: String, error: String) -> Ov
         duration_us: 0,
         success: false,
         config_modified: false,
+        reloaded: None,
+        reload_uncertain: None,
         error: Some(error),
         logs: Vec::new(),
     }

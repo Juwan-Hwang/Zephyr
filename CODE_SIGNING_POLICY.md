@@ -19,7 +19,7 @@ Artifacts are built by GitHub Actions directly from the source in this repositor
 
 ## Privacy
 
-This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.
+This program connects only to the services listed in the [privacy policy](PRIVACY.md), for the purposes described there. It has no accounts, collects no usage statistics, and has no server of its own.
 
 ## Verifying a download
 

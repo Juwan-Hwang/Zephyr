@@ -14,6 +14,7 @@ import { COMMANDS } from '@zephyr/shared';
 import { postRestartRecovery, restartedProfile } from './lifecycle.js';
 import { currentProfile } from './active-profile.js';
 import { renderTunStatus } from './tun-status.js';
+import { Bus, Events } from './events.js';
 
 /**
  * The backend's answer when the user stopped the core before a root restart
@@ -251,6 +252,9 @@ export function initTunToggle() {
                             setSecret(result);
                             setWsSecret(result);
                         }
+                        // This privileged replacement bypasses restartCore's
+                        // event. Restore runtime overlays using the new secret.
+                        Bus.emit(Events.CORE_RESTARTED);
                     } catch (authErr) {
                         // A stop of the user's during the restart is no failure.
                         if (authErr !== CORE_STOPPED_BEFORE_START && authErr !== CORE_STOPPED_MEANWHILE) {

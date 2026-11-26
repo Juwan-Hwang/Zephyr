@@ -21,7 +21,7 @@ use crate::MihomoState;
 /// or profile switches occur concurrently.
 pub(crate) static RUN_CONFIG_LOCK: Mutex<()> = Mutex::new(());
 
-/// Number of core starts currently in progress (see [`CoreStartGuard`]).
+/// Number of core starts or settings reloads in progress (see [`CoreStartGuard`]).
 /// A Prism write that lands while a start is replacing `run_config.yaml`
 /// would re-write the file with the previous run's port/secret and fail
 /// the startup health check — the new core reads the old secret while
@@ -32,7 +32,7 @@ pub(crate) static RUN_CONFIG_LOCK: Mutex<()> = Mutex::new(());
 /// other's flag.
 static CORE_START_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-/// Whether a core start/restart is currently in progress.
+/// Whether a core start/restart or settings reload is currently in progress.
 pub(crate) fn core_start_in_progress() -> bool {
     CORE_START_COUNT.load(Ordering::SeqCst) > 0
 }
@@ -42,18 +42,24 @@ pub(crate) fn core_start_in_progress() -> bool {
 /// core state. Cleared on drop, so every failure path releases it too.
 /// The guard only gates `hot_reload_target` and the Prism host's apply
 /// path — a refused reload errors and its caller retries.
+/// Settings reloads also retain this gate across their async request, so no
+/// writer changes the candidate before the core has finished reading it.
 #[must_use]
 pub(crate) struct CoreStartGuard;
 
 impl CoreStartGuard {
     pub(crate) fn acquire() -> Self {
         CORE_START_COUNT.fetch_add(1, Ordering::SeqCst);
+        crate::speed_test::lookup_exit_ip_cancel();
+        crate::speed_test::speed_test_cancel(None);
         Self
     }
 }
 
 impl Drop for CoreStartGuard {
     fn drop(&mut self) {
+        crate::speed_test::lookup_exit_ip_cancel();
+        crate::speed_test::speed_test_cancel(None);
         CORE_START_COUNT.fetch_sub(1, Ordering::SeqCst);
     }
 }
@@ -105,6 +111,38 @@ pub struct PipelineResult {
     pub config_modified: bool,
     pub logs: Vec<LogEntry>,
     pub patches: Vec<PatchInfo>,
+    pub reload: Option<PipelineReload>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PipelineReload {
+    pub reloaded: bool,
+    pub uncertain: bool,
+    pub error: Option<String>,
+}
+
+fn record_pipeline_reload(result: &mut PipelineResult, outcome: &Result<bool, ReloadError>) {
+    result.reload = Some(match outcome {
+        Ok(reloaded) => PipelineReload {
+            reloaded: *reloaded,
+            uncertain: false,
+            error: None,
+        },
+        Err(error) => PipelineReload {
+            reloaded: false,
+            uncertain: !error.rejected,
+            error: Some(error.message.clone()),
+        },
+    });
+    if let Err(error) = outcome {
+        result.logs.push(LogEntry {
+            level: "Error".to_owned(),
+            message: format!(
+                "Script changes were saved; reload failed: {}",
+                error.message
+            ),
+        });
+    }
 }
 
 /// Log entry from script execution.
@@ -137,7 +175,9 @@ fn running_core_endpoint(app: &AppHandle) -> Result<Option<(u16, String)>, Strin
     // `CORE_START_COUNT`) — a write here would re-write the file with
     // the previous run's port/secret and fail the startup health check.
     if core_start_in_progress() {
-        return Err("Hot reload refused: a core start is in progress".to_owned());
+        return Err(
+            "Hot reload refused: a core start or configuration reload is in progress".to_owned(),
+        );
     }
     let mihomo_state = app.state::<MihomoState>();
     let lock = mihomo_state
@@ -171,59 +211,97 @@ fn hot_reload_target(app: &AppHandle) -> Result<(u16, String, String), String> {
     Ok((port, secret, run_config_path_str))
 }
 
-/// Send `PUT /configs?force=true` with `{"path": "<run_config.yaml>"}` so that
-/// Mihomo reloads the config from disk. Blocking: call it from a background
-/// thread.
-fn send_hot_reload(port: u16, secret: &str, run_config_path: &str) -> Result<(), String> {
+/// Distinguish a rejected request from a missing answer after sending it.
+#[derive(Debug)]
+pub(super) struct ReloadError {
+    pub message: String,
+    /// False only when a sent request has no trustworthy HTTP response.
+    pub rejected: bool,
+}
+
+impl ReloadError {
+    const fn not_applied(message: String) -> Self {
+        Self {
+            message,
+            rejected: true,
+        }
+    }
+}
+
+impl std::fmt::Display for ReloadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.message)
+    }
+}
+
+/// Send `PUT /configs?force=true` on a blocking thread.
+fn send_hot_reload(
+    app: &AppHandle,
+    port: u16,
+    secret: &str,
+    run_config_path: &str,
+) -> Result<(), ReloadError> {
     let url = format!("http://127.0.0.1:{port}/configs?force=true");
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(10))
         .no_proxy()
         .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
+        .map_err(|e| ReloadError::not_applied(format!("HTTP client error: {e}")))?;
     // Mihomo PUT /configs expects {"path": "..."} to reload from file
     let body = serde_json::json!({ "path": run_config_path });
-    let resp = client
+    let listener = std::fs::read_to_string(run_config_path)
+        .ok()
+        .map(|config| crate::speed_test::route_from_config(&config))
+        .unwrap_or_default();
+    let diagnostics = crate::speed_test::ReloadGuard::acquire();
+    let sent = client
         .put(&url)
         .header("Authorization", format!("Bearer {secret}"))
         .json(&body)
-        .send()
-        .map_err(|e| format!("Request failed: {e}"))?;
+        .send();
+    let resp = match sent {
+        Ok(response) => response,
+        Err(error) => {
+            if !crate::config_manager::reload_may_still_land(&error) {
+                return Err(ReloadError::not_applied(format!(
+                    "Reload could not reach the core: {error}"
+                )));
+            }
+            crate::speed_test::reconcile_unknown_listener(app, listener.group_owned);
+            drop(diagnostics);
+            crate::speed_test::notify_reloaded(app);
+            return Err(ReloadError {
+                message: format!("Reload outcome unknown: {error}"),
+                rejected: false,
+            });
+        }
+    };
     if resp.status().is_success() {
+        crate::speed_test::confirm_listener(app, listener);
+        drop(diagnostics);
+        crate::speed_test::notify_reloaded(app);
         log_info!("[hot-reload] Success: {}", resp.status());
         Ok(())
     } else {
-        Err(format!(
+        Err(ReloadError::not_applied(format!(
             "Failed: {} - {}",
             resp.status(),
             resp.text().unwrap_or_default()
-        ))
-    }
-}
-
-/// Send the hot-reload request and report whether Mihomo accepted it;
-/// failures are logged. Blocking: call it from a background thread.
-fn perform_hot_reload(port: u16, secret: &str, run_config_path_str: &str) -> bool {
-    match send_hot_reload(port, secret, run_config_path_str) {
-        Ok(()) => true,
-        Err(e) => {
-            log_error!("[hot-reload] {e}");
-            false
-        }
+        )))
     }
 }
 
 /// Trigger a hot-reload request to Mihomo via its REST API.
 ///
-/// Spawns a background thread to avoid blocking the caller.
+/// Standalone blocking entry point; callers that already hold the config lock
+/// use `reload_prepared_locked` to keep their write and reload in one turn.
 pub fn trigger_hot_reload(state: &PrismState) -> Result<(), String> {
-    let (port, secret, run_config_path_str) = hot_reload_target(&state.app)?;
-
-    thread::spawn(move || {
-        perform_hot_reload(port, &secret, &run_config_path_str);
-    });
-
-    Ok(())
+    let _config = RUN_CONFIG_LOCK
+        .lock()
+        .map_err(|error| format!("Run config lock poisoned: {error}"))?;
+    let _sequence = acquire_reload_reconcile_lock();
+    let (port, secret, path) = hot_reload_target(&state.app)?;
+    send_hot_reload(&state.app, port, &secret, &path).map_err(|error| error.message)
 }
 
 /// Ask the running core which `tun.enable` it has actually applied.
@@ -301,7 +379,7 @@ pub(crate) fn confirmed_tun_enabled(port: u16, secret: &str) -> Option<bool> {
 /// Returns the log line to record when the reload is skipped, or
 /// `None` when it should run. `hot_reload_target` itself stays
 /// fail-closed: this only gates the call.
-fn skipped_reload_reason(state: &PrismState) -> Option<&'static str> {
+pub(super) fn skipped_reload_reason(state: &PrismState) -> Option<&'static str> {
     match running_core_endpoint(&state.app) {
         Ok(Some(_)) => None,
         Ok(None) => Some(
@@ -309,7 +387,7 @@ fn skipped_reload_reason(state: &PrismState) -> Option<&'static str> {
         ),
         Err(_) => {
             if core_start_in_progress() {
-                Some("Core start in progress: config saved, not reloaded. The starting core regenerates the runtime file from the profile, so this edit is lost — run the script again after startup.")
+                Some("Core start or configuration reload in progress: config saved, not reloaded. Run the script again after the transition finishes.")
             } else {
                 Some("Core state unavailable: config saved, not reloaded. The edit applies to the runtime file only — run the script again once the core is running.")
             }
@@ -317,50 +395,12 @@ fn skipped_reload_reason(state: &PrismState) -> Option<&'static str> {
     }
 }
 
+/// The writer holds `RUN_CONFIG_LOCK`; reload its candidate before releasing it.
+/// All callers run on blocking workers. Only the tray repaint is detached.
 pub fn trigger_hot_reload_and_reconcile_tun(state: &PrismState) -> Result<(), String> {
-    // Read here to report a missing target to the caller; read again under
-    // the sequence lock, since a core restart while queued changes them.
-    hot_reload_target(&state.app)?;
-    let app = state.app.clone();
-
-    thread::spawn(move || {
-        // The sequence lock covers the snapshot, the reload, the
-        // confirmation and the publication — but not the tray repaint
-        // the reconciliation may call for: tray writes wait on the main
-        // thread, so holding the lock across them could deadlock
-        // against a main-thread caller waiting on this lock. The
-        // repaint reads the live state fresh, so running it after the
-        // lock is released still paints the newest state.
-        let tray_refresh_needed = {
-            let _sequence = acquire_reload_reconcile_lock();
-            // Snapshot the live-state generation before the reload: a TUN
-            // preference recorded while the reload and the confirmation
-            // query are in flight voids this reconciliation, even when the
-            // recorded value itself did not change.
-            let epoch = crate::core_manager::core::tun_manager::live_tun_state_epoch();
-            let target = hot_reload_target(&app);
-            if let Err(e) = &target {
-                log_error!("[hot-reload] {e}");
-            }
-            let Ok((port, secret, run_config_path_str)) = target else {
-                return;
-            };
-            if !perform_hot_reload(port, &secret, &run_config_path_str) {
-                false
-            } else if let Some(applied) = confirmed_tun_enabled(port, &secret) {
-                crate::core_manager::core::tun_manager::reconcile_tun_with_core(
-                    &app, applied, epoch,
-                )
-            } else {
-                false
-            }
-        };
-        if tray_refresh_needed {
-            crate::core_manager::core::tun_manager::refresh_tray_after_reconcile(&app);
-        }
-    });
-
-    Ok(())
+    reload_prepared_locked(&state.app)
+        .map(|_| ())
+        .map_err(|error| error.message)
 }
 
 /// Hot-reload, reconcile the live TUN state with the core, and wait for both.
@@ -376,13 +416,19 @@ pub async fn hot_reload_and_wait(state: &PrismState) -> Result<(), String> {
         // blocking thread (it can shell out and waits on the main thread,
         // so it must not tie up an async worker).
         let (result, tray_refresh_needed) = {
+            let _config = RUN_CONFIG_LOCK
+                .lock()
+                .map_err(|error| format!("Run config lock poisoned: {error}"))?;
             let _sequence = acquire_reload_reconcile_lock();
             let epoch = crate::core_manager::core::tun_manager::live_tun_state_epoch();
             // Read under the lock: a core restart while this waited for it
             // changes the port and secret.
             let target = hot_reload_target(&app);
             let result = target.as_ref().map_err(Clone::clone).and_then(
-                |(port, secret, run_config_path)| send_hot_reload(*port, secret, run_config_path),
+                |(port, secret, run_config_path)| {
+                    send_hot_reload(&app, *port, secret, run_config_path)
+                        .map_err(|error| error.message)
+                },
             );
             let refresh = result.is_ok()
                 && target.as_ref().is_ok_and(|(port, secret, _)| {
@@ -404,6 +450,145 @@ pub async fn hot_reload_and_wait(state: &PrismState) -> Result<(), String> {
     result.inspect_err(|e| {
         log_error!("[hot-reload] {e}");
     })
+}
+
+/// Reload a fully assembled candidate while the caller holds `RUN_CONFIG_LOCK`.
+/// Tray work is detached so it never waits for the UI while that lock is held.
+pub(super) fn reload_prepared_locked(app: &AppHandle) -> Result<bool, ReloadError> {
+    let sequence = acquire_reload_reconcile_lock();
+    if running_core_endpoint(app)
+        .map_err(ReloadError::not_applied)?
+        .is_none()
+    {
+        return Ok(false);
+    }
+    let epoch = crate::core_manager::core::tun_manager::live_tun_state_epoch();
+    let (port, secret, path) = hot_reload_target(app).map_err(ReloadError::not_applied)?;
+    send_hot_reload(app, port, &secret, &path)?;
+    let refresh = confirmed_tun_enabled(port, &secret).is_some_and(|enabled| {
+        crate::core_manager::core::tun_manager::reconcile_tun_with_core(app, enabled, epoch)
+    });
+    drop(sequence);
+    if refresh {
+        let app_for_tray = app.clone();
+        thread::spawn(move || {
+            crate::core_manager::core::tun_manager::refresh_tray_after_reconcile(&app_for_tray);
+        });
+    }
+    Ok(true)
+}
+
+/// Failed combined builds must not leave a partial candidate for a later reload.
+pub(crate) struct PreparedConfigRollback {
+    path: std::path::PathBuf,
+    previous: Option<String>,
+    armed: bool,
+    patches: Vec<(std::path::PathBuf, Option<String>)>,
+    insert_cache_revision: u64,
+}
+
+impl PreparedConfigRollback {
+    pub(super) fn new(app: &AppHandle) -> Result<Self, String> {
+        let path = ensure_app_storage(app)?.core_dir.join("run_config.yaml");
+        let previous = match std::fs::read_to_string(&path) {
+            Ok(content) => Some(content),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(format!("Failed to preserve running config: {error}")),
+        };
+        Ok(Self {
+            path,
+            previous,
+            armed: true,
+            patches: Vec::new(),
+            insert_cache_revision: super::host::rule_insert_cache_revision(),
+        })
+    }
+
+    pub(super) const fn disarm(&mut self) {
+        self.armed = false;
+    }
+
+    pub(super) fn preserve_patch(&mut self, path: std::path::PathBuf) -> Result<(), String> {
+        let previous = match std::fs::read_to_string(&path) {
+            Ok(content) => Some(content),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(format!("Failed to preserve workspace patch: {error}")),
+        };
+        self.patches.push((path, previous));
+        Ok(())
+    }
+
+    pub(super) fn restore(&mut self) -> Result<(), String> {
+        if !self.armed {
+            return Ok(());
+        }
+        self.armed = false;
+        // Only a successful compilation can replace the extension's output.
+        // A backup/preparation failure must not invalidate an unchanged cache.
+        if super::host::rule_insert_cache_revision() != self.insert_cache_revision {
+            super::host::invalidate_rule_insert_cache();
+        }
+        let mut errors = Vec::new();
+        for (path, previous) in &self.patches {
+            let restored = match previous {
+                Some(content) => write_file_secure_atomic(path, content),
+                None => match std::fs::remove_file(path) {
+                    Ok(()) => Ok(()),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(error) => Err(error.to_string()),
+                },
+            };
+            if let Err(error) = restored {
+                errors.push(format!(
+                    "Failed to restore workspace patch '{}': {error}",
+                    path.display(),
+                ));
+            }
+        }
+        let cleanup = crate::core_manager::core::core_process::RUN_CONFIG_CLEANUP_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let restored = match &self.previous {
+            // A normal candidate overwrites this file atomically; it does not
+            // remove it. If Stop already deleted it, preserve that cleanup.
+            Some(content) => match self.path.try_exists() {
+                Ok(true) => write_file_secure_atomic(&self.path, content),
+                Ok(false) => Ok(()),
+                Err(error) => Err(error.to_string()),
+            },
+            None => match std::fs::remove_file(&self.path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error.to_string()),
+            },
+        };
+        drop(cleanup);
+        if let Err(error) = restored {
+            errors.push(format!(
+                "Failed to restore the previous runtime config: {error}",
+            ));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
+    }
+
+    pub(super) fn with_restore_error(&mut self, error: String) -> String {
+        match self.restore() {
+            Ok(()) => error,
+            Err(restore) => format!("{error}; rollback failed: {restore}"),
+        }
+    }
+}
+
+impl Drop for PreparedConfigRollback {
+    fn drop(&mut self) {
+        if let Err(error) = self.restore() {
+            log_error!("{error}");
+        }
+    }
 }
 
 /// Read the current running config from `run_config.yaml` and parse as JSON.
@@ -552,6 +737,13 @@ fn restore_unchanged_provider_paths(
     }
 }
 
+/// The effective rules of direct or inherited JSON mappings.
+fn effective_rules(config: &serde_json::Value) -> Option<&serde_json::Value> {
+    config
+        .as_object()
+        .and_then(|root| zephyr_core::config::sanitizer::merged_json_mapping_get(root, "rules", 0))
+}
+
 /// Write the modified config back to `run_config.yaml`, through a temporary
 /// file: a failed write leaves the previous config whole, since the reload
 /// that follows a failed batch (for the Prism patches before it) loads it.
@@ -592,7 +784,8 @@ fn write_running_config(
     // not fail the write (scripts run with the core stopped, and the
     // no-reload paths promise not to reload). A start in progress
     // still refuses, like the re-check below.
-    if let Some((port, secret)) = running_core_endpoint(&state.app)? {
+    let endpoint = running_core_endpoint(&state.app)?;
+    if let Some((port, secret)) = &endpoint {
         if let Some(obj) = stripped.as_object_mut() {
             obj.insert(
                 "external-controller".to_owned(),
@@ -601,7 +794,21 @@ fn write_running_config(
             obj.insert("secret".to_owned(), serde_json::json!(secret));
         }
     }
-    let yaml_str = serde_yaml::to_string(&stripped)
+    let mut yaml_val = serde_yaml::to_value(&stripped)
+        .map_err(|e| format!("Failed to serialize config to YAML: {e}"))?;
+    // A script that rewrote `proxy-groups` or `listeners` may have dropped
+    // the speed-test group or listener: put back the missing one while a
+    // core runs (a no-op when both are there), so the reload is not refused
+    // for a listener pointing at a group that is gone.
+    // Reuse a confirmed port when one exists. A fresh candidate is allowed
+    // otherwise, but is never advertised unless the reload binds it.
+    if endpoint.is_some() {
+        let held = crate::speed_test::held_port(&state.app);
+        crate::speed_test::with_running_port(held, || {
+            crate::speed_test::inject_for_runtime(&mut yaml_val);
+        });
+    }
+    let yaml_str = serde_yaml::to_string(&yaml_val)
         .map_err(|e| format!("Failed to serialize config to YAML: {e}"))?;
     // Re-check immediately before the write: a start that began during
     // the strip/serialize above would have its fresh credentials
@@ -609,13 +816,21 @@ fn write_running_config(
     // began). The endpoint read above is already just before the
     // injection, so this only covers the serialize step.
     if core_start_in_progress() {
-        return Err("Hot reload refused: a core start is in progress".to_owned());
+        return Err(
+            "Hot reload refused: a core start or configuration reload is in progress".to_owned(),
+        );
     }
     state.with_ext(|_ext| {
         let paths = ensure_app_storage(&state.app)?;
         let run_config_path = paths.core_dir.join("run_config.yaml");
         write_file_secure_atomic(&run_config_path, &yaml_str)
             .map_err(|e| format!("Failed to write run_config.yaml: {e}"))?;
+        // Script output is newer than the dependency's compiled-output cache.
+        // A low-level insert must not publish that older complete config again.
+        super::host::invalidate_rule_insert_cache();
+        if effective_rules(&stripped) != effective_rules(before) {
+            super::host::set_rule_annotations_confirmed(false);
+        }
         Ok::<(), String>(())
     })
 }
@@ -656,6 +871,7 @@ fn to_pipeline_result(result: &clash_prism_script::WriteScriptResult) -> Pipelin
         config_modified: result.config_modified,
         logs,
         patches,
+        reload: None,
     }
 }
 
@@ -690,6 +906,7 @@ pub fn execute_write_pipeline(
     let runtime = ScriptRuntime::with_context(build_script_context());
     let result = runtime.execute_with_write(script, script_name, &config);
 
+    let mut pipeline_result = to_pipeline_result(&result);
     let mut skipped_reload: Option<&'static str> = None;
     if result.success && result.config_modified {
         if let Some(modified) = &result.modified_config {
@@ -697,14 +914,15 @@ pub fn execute_write_pipeline(
             // With no core to reload, the write is the whole job:
             // failing here would report the run as failed and drop
             // its result even though the config is already on disk.
-            match skipped_reload_reason(state) {
-                Some(reason) => skipped_reload = Some(reason),
-                None => trigger_hot_reload_and_reconcile_tun(state)?,
+            if let Some(reason) = skipped_reload_reason(state) {
+                skipped_reload = Some(reason);
+            } else {
+                let outcome = reload_prepared_locked(&state.app);
+                record_pipeline_reload(&mut pipeline_result, &outcome);
             }
         }
     }
 
-    let mut pipeline_result = to_pipeline_result(&result);
     if let Some(reason) = skipped_reload {
         pipeline_result.logs.push(LogEntry {
             level: "Info".to_owned(),
@@ -769,6 +987,7 @@ pub fn pipeline_result_to_json(result: &PipelineResult) -> serde_json::Value {
         "config_modified": result.config_modified,
         "logs": logs,
         "patches": patches,
+        "reload": result.reload,
     })
 }
 
@@ -794,6 +1013,14 @@ pub fn execute_write_pipeline_no_reload(
         .lock()
         .map_err(|e| format!("Run config lock poisoned: {e}"))?;
 
+    execute_write_pipeline_no_reload_locked(state, script, script_name)
+}
+
+pub(super) fn execute_write_pipeline_no_reload_locked(
+    state: &PrismState,
+    script: &str,
+    script_name: &str,
+) -> Result<PipelineResult, String> {
     let config = read_running_config(state)?;
 
     let runtime = ScriptRuntime::with_context(build_script_context());
@@ -831,6 +1058,14 @@ pub fn execute_batch_pipeline(
         .lock()
         .map_err(|e| format!("Run config lock poisoned: {e}"))?;
 
+    execute_batch_pipeline_locked(state, scripts, hot_reload)
+}
+
+pub(super) fn execute_batch_pipeline_locked(
+    state: &PrismState,
+    scripts: &[(&str, &str)],
+    hot_reload: bool,
+) -> Result<Vec<PipelineResult>, String> {
     // 1. Load config once
     let mut config = read_running_config(state)?;
     // The config before any script ran: the write-back restores
@@ -863,16 +1098,18 @@ pub fn execute_batch_pipeline(
             // its results even though the config is already on disk.
             // The note goes on the last script's result, which is
             // the one the write-back belongs to.
-            match skipped_reload_reason(state) {
-                Some(reason) => {
-                    if let Some(last) = results.last_mut() {
-                        last.logs.push(LogEntry {
-                            level: "Info".to_owned(),
-                            message: reason.to_owned(),
-                        });
-                    }
+            if let Some(reason) = skipped_reload_reason(state) {
+                if let Some(last) = results.last_mut() {
+                    last.logs.push(LogEntry {
+                        level: "Info".to_owned(),
+                        message: reason.to_owned(),
+                    });
                 }
-                None => trigger_hot_reload_and_reconcile_tun(state)?,
+            } else {
+                let outcome = reload_prepared_locked(&state.app);
+                for result in results.iter_mut().filter(|result| result.config_modified) {
+                    record_pipeline_reload(result, &outcome);
+                }
             }
         }
     }
@@ -885,6 +1122,50 @@ pub fn execute_batch_pipeline(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn rollback_keeps_a_deleted_runtime_file_absent_but_restores_patches() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("run_config.yaml");
+        let patch = directory.path().join("rules.prism.yaml");
+        std::fs::write(&patch, "candidate patch").unwrap();
+        let mut rollback = PreparedConfigRollback {
+            path: config.clone(),
+            previous: Some("old runtime".to_owned()),
+            armed: true,
+            patches: vec![(patch.clone(), Some("old patch".to_owned()))],
+            insert_cache_revision: crate::prism::host::rule_insert_cache_revision(),
+        };
+        rollback.restore().unwrap();
+        assert!(!config.exists());
+        assert_eq!(std::fs::read_to_string(patch).unwrap(), "old patch");
+    }
+
+    #[test]
+    fn failed_assembly_restores_existing_patches_and_removes_new_ones() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("run_config.yaml");
+        let existing = directory.path().join("override_existing.prism.yaml");
+        let added = directory.path().join("override_new.prism.yaml");
+        std::fs::write(&config, "old runtime").unwrap();
+        std::fs::write(&existing, "old patch").unwrap();
+        let mut rollback = PreparedConfigRollback {
+            path: config.clone(),
+            previous: Some("old runtime".to_owned()),
+            armed: true,
+            patches: Vec::new(),
+            insert_cache_revision: crate::prism::host::rule_insert_cache_revision(),
+        };
+        rollback.preserve_patch(existing.clone()).unwrap();
+        rollback.preserve_patch(added.clone()).unwrap();
+        std::fs::write(&config, "partial runtime").unwrap();
+        std::fs::write(&existing, "changed patch").unwrap();
+        std::fs::write(&added, "new patch").unwrap();
+        drop(rollback);
+        assert_eq!(std::fs::read_to_string(config).unwrap(), "old runtime");
+        assert_eq!(std::fs::read_to_string(existing).unwrap(), "old patch");
+        assert!(!added.exists());
+    }
 
     fn file_provider(path: &str) -> serde_json::Value {
         json!({ "type": "file", "path": path, "interval": 3600 })
