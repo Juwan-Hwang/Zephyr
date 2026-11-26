@@ -82,16 +82,32 @@ export function saveSettings(patch) {
  * for callers that must report it (a change the core already runs that
  * settings.json, which overrides every profile at core start, did not take).
  * @param {Record<string, *>} patch
+ * @param {() => boolean} [shouldSave] checked when this write reaches the queue
  * @returns {Promise<void>}
  */
-export function saveSettingsChecked(patch) {
+export function saveSettingsChecked(patch, shouldSave = () => true) {
     const run = saveQueue.then(async () => {
+        if (!shouldSave()) return;
         await invoke(COMMANDS.PATCH_SETTINGS, { patch });
         invalidateSettingsCache();
     });
     saveQueue = run.catch((e) => {
         settingsLogger.warn('Failed to save settings:', e);
     });
+    return run;
+}
+
+/**
+ * Run `fn` in the settings write queue: after every save queued before it,
+ * before every save queued after. For a whole-settings read and write (Restore
+ * Defaults) that a queued patch must not land in the middle of.
+ * @template T
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export function inSettingsSaveQueue(fn) {
+    const run = saveQueue.then(fn);
+    saveQueue = run.then(() => {}, () => {});
     return run;
 }
 
