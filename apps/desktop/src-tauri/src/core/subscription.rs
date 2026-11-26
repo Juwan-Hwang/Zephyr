@@ -593,6 +593,22 @@ pub(crate) async fn check_mihomo_dns_is_private(
 static GLOBAL_MODE_LOCK: std::sync::LazyLock<std::sync::Arc<tokio::sync::Mutex<()>>> =
     std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
 
+/// Keep a full runtime overlay ordered with user and temporary mode changes.
+pub(crate) async fn lock_mode_for_overlay() -> Result<tokio::sync::OwnedMutexGuard<()>, String> {
+    let guard = tokio::time::timeout(
+        Duration::from_millis(1500),
+        GLOBAL_MODE_LOCK.clone().lock_owned(),
+    )
+    .await
+    .map_err(|_elapsed| "Proxy mode is changing; retry the runtime update".to_owned())?;
+    // Temporary downloads release the mode lock while streaming. A full
+    // reload would reset their selected route, so wait for their restore.
+    if GLOBAL_FALLBACK_ACTIVE.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("Subscription fallback is active; retry the runtime update".to_owned());
+    }
+    Ok(guard)
+}
+
 /// Set while a global-mode fallback is in progress (switches done, download
 /// running, restore pending).
 ///

@@ -23,21 +23,23 @@
  * - `applied`: every file was saved and the core reloaded it.
  * - `restart`: every file was saved; the core applies it after a restart.
  * - `partial`: the active profile did not take the change, so it is lost
- *   the next time that profile is loaded. The core reloaded it, or, when
- *   the reload went unconfirmed (below), may have.
+ *   the next time that profile is loaded. The core confirmed the reload.
+ * - `unconfirmed`: the reload may still apply. Keep the edit and warning
+ *   without recording it as live, whether or not the profile was saved.
  * - `failed`: the active profile did not take it and the core did not reload
  *   it either: it is neither live nor kept (a start rebuilds the run config
  *   from the profile). A reload the core took without confirming it in time
- *   may still apply, so that one reads as `partial`: the page keeps the
+ *   may still apply, so that one reads as `unconfirmed`: the page keeps the
  *   change and offers to save it again, rather than showing the old value
  *   the core may no longer run.
  *
  * @param {Partial<ConfigUpdateResult>|null|undefined} result
- * @returns {'applied'|'restart'|'partial'|'failed'}
+ * @returns {'applied'|'restart'|'partial'|'unconfirmed'|'failed'}
  */
 export function configUpdateOutcome(result) {
+    if (!result?.hot_reload_success && result?.reload_unconfirmed) return 'unconfirmed';
     if (result?.files_saved === false || result?.profile_saved === false) {
-        return result?.hot_reload_success || result?.reload_unconfirmed ? 'partial' : 'failed';
+        return result?.hot_reload_success ? 'partial' : 'failed';
     }
     if (result?.hot_reload_success) return 'applied';
     return 'restart';

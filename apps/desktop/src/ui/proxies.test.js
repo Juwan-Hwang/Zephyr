@@ -24,6 +24,7 @@ vi.mock('../api.js', () => ({
     proxySwitchedSince: vi.fn(() => false),
     isLatestSwitch: vi.fn(() => true),
     coreReplacements: vi.fn(() => 0),
+    providerGeneration: vi.fn(() => 0),
     // Like api.js: the switch counts as started, then waits for its turn,
     // where canSend may drop it; switchProxy stands for the core's answer.
     ...(() => {
@@ -104,14 +105,72 @@ vi.mock('./known-selection.js', () => {
 });
 
 // Import after mocks are set up
-import { switchProxy, invoke, getProxies, proxySwitchedSince } from '../api.js';
+import { switchProxy, invoke, getProxies, getConfig, proxySwitchedSince, providerGeneration } from '../api.js';
 import { proxyLogger } from '../utils/logger.js';
 import { getConfigCached, getProxiesCached, invalidateProxiesCache } from './cache.js';
 import { fetchProxyGroups } from './proxy-groups.js';
 import { saveProxySelection } from './proxy-memory.js';
 import { appStore } from './state.js';
 import { knownSelectionRevision } from './known-selection.js';
-import { startProviderPoll, stopProviderPoll, handleFailoverAction } from './proxies.js';
+import { startProviderPoll, stopProviderPoll, handleFailoverAction, syncCoreConfig } from './proxies.js';
+
+describe('core selection reconciliation', () => {
+    it('allows the owning profile operation to publish its fresh TUN state', async () => {
+        const values = new Map([['isNetworkUpdating', true], ['isTunEnabled', false], ['currentOutboundMode', 'rule']]);
+        appStore.get.mockImplementation((key) => values.get(key));
+        appStore.set.mockImplementation((key, value) => values.set(key, value));
+        getConfig.mockResolvedValueOnce({ tun: { enable: true } });
+        document.body.innerHTML = '<input id="tun-proxy-toggle" type="checkbox"><span id="tun-status-text"></span>';
+        try {
+            await syncCoreConfig(undefined, { owningNetworkChange: true });
+            expect(values.get('isTunEnabled')).toBe(true);
+            expect(document.getElementById('tun-proxy-toggle').checked).toBe(true);
+        } finally { appStore.get.mockReset(); appStore.set.mockReset(); }
+    });
+    it('does not overwrite TUN from a read started while a network change was running', async () => {
+        const values = new Map([['isNetworkUpdating', true], ['isTunEnabled', false], ['currentOutboundMode', 'rule']]);
+        appStore.get.mockImplementation((key) => values.get(key));
+        appStore.set.mockImplementation((key, value) => values.set(key, value));
+        let answer = (/** @type {any} */ _value) => {};
+        getConfig.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+        document.body.innerHTML = '<input id="tun-proxy-toggle" type="checkbox"><span id="tun-status-text"></span>';
+        const toggle = document.getElementById('tun-proxy-toggle');
+        const syncing = syncCoreConfig();
+        try {
+            values.set('isTunEnabled', true);
+            values.set('isNetworkUpdating', false);
+            toggle.checked = true;
+            answer({ tun: { enable: false } });
+            await syncing;
+            expect(values.get('isTunEnabled')).toBe(true);
+            expect(toggle.checked).toBe(true);
+        } finally { answer({}); appStore.get.mockReset(); appStore.set.mockReset(); }
+    });
+    it.each(['none', 'group', 'reload', 'mode'])('does not replace a newer selection (change=%s)', async (change) => {
+        const values = new Map([['currentOutboundMode', 'rule'], ['uiGroupName', 'Old']]);
+        appStore.get.mockImplementation((key) => values.get(key));
+        appStore.set.mockImplementation((key, value) => values.set(key, value));
+        /** @type {(value: any) => void} */
+        let answer = () => {};
+        fetchProxyGroups.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+        document.body.innerHTML = '<span id="current-node-name">new node</span>';
+        try {
+            const syncing = syncCoreConfig();
+            await vi.waitFor(() => expect(fetchProxyGroups).toHaveBeenCalled());
+            if (change === 'group') values.set('uiGroupName', 'New');
+            if (change === 'reload') providerGeneration.mockReturnValue(1);
+            if (change === 'mode') values.set('currentOutboundMode', 'global');
+            answer({ uiGroupName: 'Old', current: 'old node', data: { proxies: { Old: { now: 'old node' } } } });
+            await syncing;
+            expect(document.getElementById('current-node-name').textContent).toBe(change === 'none' ? 'old node' : 'new node');
+        } finally {
+            appStore.get.mockReset();
+            appStore.set.mockReset();
+            fetchProxyGroups.mockClear();
+            providerGeneration.mockReturnValue(0);
+        }
+    });
+});
 
 describe('Provider poller state machine', () => {
     beforeEach(() => {

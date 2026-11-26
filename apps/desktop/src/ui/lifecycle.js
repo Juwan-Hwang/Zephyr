@@ -398,7 +398,7 @@ export async function postRestartRecovery(configName) {
     invalidateConfigCache();
     invalidateRunConfigCache();
     try {
-      await syncCoreConfig();
+      await syncCoreConfig(undefined, { owningNetworkChange: true });
     } catch (e) {
       apiLogger.warn('[postRestartRecovery] syncing the core config failed:', e);
       failed += 1;
