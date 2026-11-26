@@ -15,10 +15,171 @@ use super::types::sanitize_filename;
 // ── Thread-confined HTTP status bridge for ext.apply() ───────────────────
 // (WiFi SSID detection now lives in network_coordinator)
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+
+use sha2::{Digest as _, Sha256};
+
+static RULE_ANNOTATIONS_CONFIRMED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static RULE_ANNOTATIONS_REVISION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+static COMPILED_RUNTIME_RULES: Mutex<Option<serde_yaml::Value>> = Mutex::new(None);
+static RULE_INSERT_CACHE_INVALIDATED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static RULE_INSERT_CACHE_REVISION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+pub(crate) fn invalidate_rule_insert_cache() {
+    RULE_INSERT_CACHE_INVALIDATED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// A restored file does not restore the dependency's candidate annotations.
+/// Discard their promotion evidence until another complete compilation.
+pub(crate) fn discard_compiled_rule_annotations() {
+    let mut rules = COMPILED_RUNTIME_RULES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut sources = COMPILED_RULE_SOURCES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    set_rule_annotations_confirmed(false);
+    *rules = None;
+    drop(rules);
+    sources.clear();
+    drop(sources);
+}
+
+pub(crate) fn mark_rule_insert_cache_current() {
+    RULE_INSERT_CACHE_REVISION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    RULE_INSERT_CACHE_INVALIDATED.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub(crate) fn rule_insert_cache_revision() -> u64 {
+    RULE_INSERT_CACHE_REVISION.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+pub(crate) fn require_current_rule_insert_cache() -> Result<(), String> {
+    if RULE_INSERT_CACHE_INVALIDATED.load(std::sync::atomic::Ordering::SeqCst)
+        || !rule_annotations_confirmed()
+    {
+        return Err(
+            "The compiled insertion cache is stale. Reapply rules or edit the rule file instead."
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
+// Captured before ext.apply while RUN_CONFIG_LOCK excludes source
+// writers. A failed/deferred reload leaves these candidates untrusted; only a
+// confirmed reload enables edits against them.
+static COMPILED_RULE_SOURCES: Mutex<BTreeMap<String, [u8; 32]>> = Mutex::new(BTreeMap::new());
+
+fn compiled_rule_sources(app: &tauri::AppHandle) -> Result<BTreeMap<String, [u8; 32]>, String> {
+    let directory = prism_data_dir(app)?;
+    let entries = std::fs::read_dir(&directory)
+        .map_err(|error| format!("Failed to snapshot compiled rule sources: {error}"))?;
+    let mut sources = BTreeMap::new();
+    for result in entries {
+        let entry = result.map_err(|error| format!("Failed to read rule entry: {error}"))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".prism.yaml") && entry.path().is_file() {
+            let content = std::fs::read(entry.path())
+                .map_err(|error| format!("Failed to snapshot rule source '{name}': {error}"))?;
+            sources.insert(name, Sha256::digest(&content).into());
+        }
+    }
+    Ok(sources)
+}
+
+pub(crate) fn rule_source_matches(filename: &str, content: &str) -> Result<bool, String> {
+    let sources = COMPILED_RULE_SOURCES
+        .lock()
+        .map_err(|error| format!("Compiled rule source lock poisoned: {error}"))?;
+    let digest: [u8; 32] = Sha256::digest(content.as_bytes()).into();
+    Ok(rule_annotations_confirmed() && sources.get(filename) == Some(&digest))
+}
+
+pub(crate) fn set_rule_annotations_confirmed(confirmed: bool) {
+    if !confirmed {
+        RULE_ANNOTATIONS_REVISION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    RULE_ANNOTATIONS_CONFIRMED.store(confirmed, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[must_use]
+pub(crate) fn rule_annotations_revision() -> u64 {
+    RULE_ANNOTATIONS_REVISION.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+fn runtime_rules(config: &str) -> Result<serde_yaml::Value, String> {
+    let yaml = serde_yaml::from_str(config).map_err(|error| error.to_string())?;
+    effective_runtime_rules(&yaml)
+}
+
+pub(crate) fn effective_runtime_rules(
+    yaml: &serde_yaml::Value,
+) -> Result<serde_yaml::Value, String> {
+    // Resolve from the original mapping: flattening a nested merge sequence
+    // can turn a later source into a direct key and reverse its precedence.
+    let mapping = untagged(yaml)
+        .as_mapping()
+        .ok_or("Runtime config must be a mapping")?;
+    Ok(
+        zephyr_core::config::sanitizer::merged_mapping_get(mapping, "rules", 0)
+            .cloned()
+            .unwrap_or_default(),
+    )
+}
+
+pub(crate) fn confirm_compiled_rule_annotations(app: &tauri::AppHandle) {
+    let matches = ensure_app_storage(app)
+        .and_then(|paths| {
+            std::fs::read_to_string(paths.core_dir.join("run_config.yaml"))
+                .map_err(|error| error.to_string())
+        })
+        .and_then(|content| runtime_rules(&content))
+        .is_ok_and(|rules| {
+            COMPILED_RUNTIME_RULES
+                .lock()
+                .is_ok_and(|compiled| compiled.as_ref() == Some(&rules))
+        });
+    set_rule_annotations_confirmed(matches);
+}
+
+#[must_use]
+pub(crate) fn rule_annotations_confirmed() -> bool {
+    RULE_ANNOTATIONS_CONFIRMED.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 thread_local! {
     static CURRENT_APPLY_HTTP_STATUS: Cell<Option<u16>> = const { Cell::new(None) };
+    static PENDING_RULE_SOURCES: RefCell<Option<BTreeMap<String, [u8; 32]>>> = const { RefCell::new(None) };
+    static DEFER_RELOAD: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Compile a whole candidate on one blocking thread before reloading it.
+pub(crate) struct DeferredReloadGuard {
+    previous: bool,
+    _marker: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl DeferredReloadGuard {
+    #[must_use]
+    pub(crate) fn enter() -> Self {
+        Self {
+            previous: DEFER_RELOAD.with(|value| value.replace(true)),
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Drop for DeferredReloadGuard {
+    fn drop(&mut self) {
+        DEFER_RELOAD.with(|value| value.set(self.previous));
+    }
 }
 
 pub(crate) fn set_current_apply_http_status(status: Option<u16>) {
@@ -56,10 +217,19 @@ impl HttpStatusGuard {
     #[must_use]
     pub fn enter() -> Self {
         CURRENT_APPLY_HTTP_STATUS.with(|c| c.set(None));
+        PENDING_RULE_SOURCES.with(|sources| *sources.borrow_mut() = None);
         Self {
             taken: false,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Call immediately before ext.apply, under `RUN_CONFIG_LOCK`. Direct host
+    /// writes such as `insert_rule` do not compile files and must not refresh this.
+    pub(crate) fn capture_rule_sources(&self, app: &tauri::AppHandle) -> Result<(), String> {
+        let sources = compiled_rule_sources(app)?;
+        PENDING_RULE_SOURCES.with(|pending| *pending.borrow_mut() = Some(sources));
+        Ok(())
     }
 
     #[must_use]
@@ -71,6 +241,7 @@ impl HttpStatusGuard {
 
 impl Drop for HttpStatusGuard {
     fn drop(&mut self) {
+        PENDING_RULE_SOURCES.with(|sources| *sources.borrow_mut() = None);
         if !self.taken {
             let _ = take_current_apply_http_status();
         }
@@ -82,41 +253,38 @@ pub(crate) struct ZephyrPrismHost {
 }
 
 impl ZephyrPrismHost {
+    const MAX_HTTP_STATUS_LINE: usize = 8192;
+
     pub(crate) const fn new(app: tauri::AppHandle) -> Self {
         Self { app }
     }
 
-    /// Synchronous HTTP PUT to localhost --- no tokio dependency.
-    /// Used by `apply_config` which is a sync trait method callable from any thread.
-    fn http_put(url: &str, body: &str, bearer: &str) -> Option<u16> {
-        use std::io::{Read as _, Write as _};
-        use std::net::TcpStream;
-
-        let parsed = match url::Url::parse(url) {
-            Ok(u) => u,
-            Err(_) => return None,
-        };
-
-        let host = parsed.host_str().unwrap_or("127.0.0.1");
-        let port = parsed.port().unwrap_or(9090);
-        let target = &parsed[url::Position::BeforePath..url::Position::AfterQuery];
-
-        // Connect with timeout (2s connect, 5s total)
-        let mut stream = match TcpStream::connect_timeout(
-            &format!("{host}:{port}")
-                .parse()
-                .unwrap_or_else(|_| std::net::SocketAddr::from(([127, 0, 0, 1], port))),
+    /// Establish the connection before publishing a candidate, without sending it.
+    fn connect_reload(port: u16) -> Result<std::net::TcpStream, String> {
+        let stream = std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
             std::time::Duration::from_secs(2),
-        ) {
-            Ok(s) => s,
-            Err(_) => return None,
-        };
+        )
+        .map_err(|error| format!("Reload could not reach the core before dispatch: {error}"))?;
         stream
             .set_read_timeout(Some(std::time::Duration::from_secs(5)))
             .ok();
         stream
             .set_write_timeout(Some(std::time::Duration::from_secs(5)))
             .ok();
+        Ok(stream)
+    }
+
+    /// Synchronous HTTP PUT on the prepared local connection. Once the file has
+    /// been saved, transport failure means an unknown reload rather than a
+    /// failed file write, so extension callers still update their saved output.
+    fn http_put(
+        mut stream: std::net::TcpStream,
+        port: u16,
+        body: &str,
+        bearer: &str,
+    ) -> Option<u16> {
+        use std::io::{Read as _, Write as _};
 
         let auth_header = if bearer.is_empty() {
             String::new()
@@ -125,8 +293,8 @@ impl ZephyrPrismHost {
         };
 
         let request = format!(
-            "PUT {target} HTTP/1.1\r\n\
-             Host: {host}:{port}\r\n\
+            "PUT /configs?force=true HTTP/1.1\r\n\
+             Host: 127.0.0.1:{port}\r\n\
              Content-Type: application/json\r\n\
              Content-Length: {}\r\n\
              Connection: close\r\n\
@@ -143,27 +311,33 @@ impl ZephyrPrismHost {
         // Read response status line (first line only)
         let mut buf = [0u8; 256];
         let mut response = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() || response.len() >= Self::MAX_HTTP_STATUS_LINE + 2 {
+                return None;
+            }
+            stream.set_read_timeout(Some(remaining)).ok()?;
             match stream.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => response.extend_from_slice(buf.get(..n).unwrap_or_default()),
             }
             // Stop after we have the status line
-            if response.windows(4).any(|w| w == b"\r\n\r\n") {
+            if response.windows(2).any(|w| w == b"\r\n") {
                 break;
             }
         }
 
-        // Parse 3-digit HTTP status code (e.g. "HTTP/1.1 204 No Content" -> 204)
-        // Tokenize by whitespace; validate version as HTTP/<digit>.<digit>.
-        let head = response
-            .split(|b| *b == b'\r' || *b == b'\n')
-            .next()
-            .unwrap_or(&[]);
-        let line = match std::str::from_utf8(head) {
-            Ok(s) => s,
-            Err(_) => return None,
-        };
+        Self::parse_http_status(&response)
+    }
+
+    fn parse_http_status(response: &[u8]) -> Option<u16> {
+        // A truncated status line cannot confirm whether a reload completed.
+        let end = response.windows(2).position(|pair| pair == b"\r\n")?;
+        if end > Self::MAX_HTTP_STATUS_LINE {
+            return None;
+        }
+        let line = std::str::from_utf8(response.get(..end)?).ok()?;
         // Reject malformed status lines: require exactly "HTTP/<digit>.<digit>".
         // This rejects "HTTP/ 200 OK", "HTTP/nonsense 200 OK", "HTTP/1.",
         // "HTTP/1.1junk", etc.
@@ -386,7 +560,10 @@ impl PrismHost for ZephyrPrismHost {
         // would write the previous run's port/secret back into the
         // file and fail the startup health check.
         if super::pipeline::core_start_in_progress() {
-            return Err("Prism apply refused: a core start is in progress".to_owned());
+            return Err(
+                "Prism apply refused: a core start or configuration reload is in progress"
+                    .to_owned(),
+            );
         }
 
         // A script may add an unauthenticated control surface (such as
@@ -464,7 +641,10 @@ impl PrismHost for ZephyrPrismHost {
                 // written, without the injection and without a reload
                 // (same rule as `write_running_config` in the pipeline).
                 if super::pipeline::core_start_in_progress() {
-                    return Err("Prism apply refused: a core start is in progress".to_owned());
+                    return Err(
+                        "Prism apply refused: a core start or configuration reload is in progress"
+                            .to_owned(),
+                    );
                 }
                 endpoint = {
                     let state = self.app.state::<MihomoState>();
@@ -485,6 +665,14 @@ impl PrismHost for ZephyrPrismHost {
                         );
                     }
                 }
+                if endpoint.is_some() {
+                    // Check diagnostic collisions against the managed controller
+                    // restored above, not an untrusted script replacement.
+                    let held = crate::speed_test::held_port(&self.app);
+                    crate::speed_test::with_running_port(held, || {
+                        crate::speed_test::inject_for_runtime(target);
+                    });
+                }
                 match serde_yaml::to_string(&value) {
                     Ok(text) => {
                         filtered = text;
@@ -504,15 +692,64 @@ impl PrismHost for ZephyrPrismHost {
         // during the filter/serialize above would have its fresh
         // credentials overwritten by this write.
         if super::pipeline::core_start_in_progress() {
-            return Err("Prism apply refused: a core start is in progress".to_owned());
+            return Err(
+                "Prism apply refused: a core start or configuration reload is in progress"
+                    .to_owned(),
+            );
         }
 
+        // A known connection failure must leave the file untouched. In
+        // particular, insert_rule updates its cached output only after this
+        // host returns success, so a saved write cannot fail at connection setup.
+        let reload_stream = if DEFER_RELOAD.with(Cell::get) {
+            None
+        } else {
+            endpoint
+                .as_ref()
+                .map(|(port, _)| Self::connect_reload(*port))
+                .transpose()?
+        };
+
+        // Only an actual ext.apply can supply source versions. A direct host
+        // write must not attribute existing rules to a newer save-only draft.
+        let sources = PENDING_RULE_SOURCES.with(|pending| pending.borrow_mut().take());
+        let compiled = sources.is_some();
+        let compiled_rules = if compiled {
+            // Attribution is optional evidence. A merge form unsupported by
+            // serde_yaml must not prevent the core accepting its own YAML.
+            runtime_rules(config_to_write).ok()
+        } else {
+            None
+        };
+        let mut rules_snapshot = COMPILED_RUNTIME_RULES
+            .lock()
+            .map_err(|error| format!("Compiled rules lock poisoned: {error}"))?;
+        let mut compiled_sources = COMPILED_RULE_SOURCES
+            .lock()
+            .map_err(|error| format!("Compiled rule source lock poisoned: {error}"))?;
         // Secure write (Unix 0600 / Windows DACL) through a temporary file:
         // a failed write leaves the config the core loaded intact.
         crate::core_manager::core::secure_io::write_file_secure_atomic(
             &run_config_path,
             config_to_write,
         )?;
+        set_rule_annotations_confirmed(false);
+        *rules_snapshot = compiled_rules;
+        drop(rules_snapshot);
+        if let Some(captured) = sources {
+            *compiled_sources = captured;
+        }
+        drop(compiled_sources);
+
+        let Some(connected_stream) = reload_stream else {
+            set_current_apply_http_status(None);
+            return Ok(ApplyStatus {
+                files_saved: true,
+                hot_reload_success: false,
+                message: "Config saved; reload deferred".to_owned(),
+                restarted: false,
+            });
+        };
 
         // Mihomo's PUT /configs expects a JSON body {"path": "..."} to reload
         // from disk — NOT the raw YAML config. Sending raw YAML with
@@ -527,20 +764,32 @@ impl PrismHost for ZephyrPrismHost {
         // Hot-reload via mihomo REST API (PUT for full config replacement).
         // The endpoint was read above, under the sequence lock, so the
         // PUT talks to the same core the injected controller values
-        // belong to. With no endpoint the core is stopped: there is
-        // nothing to reload, so no PUT is made — but a 0 is still
-        // recorded (a reload attempt with no answer), rather than
-        // leaving "no reload was attempted" (None), or the caller
-        // retries the reload itself against the stopped core (see
-        // `execute_prism_yaml_write`).
+        // belong to. Stopped and deferred writes returned above without
+        // attempting a reload; only a sent request can record a missing answer.
         // Synchronous HTTP PUT --- apply_config is a sync trait method that may be
         // called from non-tokio threads (e.g. WebView2 COM callbacks). Using
         // std::net avoids the "no reactor running" panic from block_on().
         let http_status_code = if let Some((port, secret)) = &endpoint {
-            let url = format!("http://127.0.0.1:{port}/configs?force=true");
-            let code = Self::http_put(&url, &body, secret);
-            // A reload attempt without an HTTP answer (the connection or the
-            // write failed, or the core never replied) is recorded as 0, so
+            let diagnostics = crate::speed_test::ReloadGuard::acquire();
+            let code = Self::http_put(connected_stream, *port, &body, secret);
+            if code.is_some_and(crate::network_coordinator::is_http_success) {
+                set_rule_annotations_confirmed(compiled);
+                crate::speed_test::confirm_listener(
+                    &self.app,
+                    crate::speed_test::route_from_config(config_to_write),
+                );
+                drop(diagnostics);
+                crate::speed_test::notify_reloaded(&self.app);
+            } else if code.is_none() {
+                crate::speed_test::reconcile_unknown_listener(
+                    &self.app,
+                    crate::speed_test::route_from_config(config_to_write).group_owned,
+                );
+                drop(diagnostics);
+                crate::speed_test::notify_reloaded(&self.app);
+            }
+            // A possibly dispatched request without an HTTP answer (the write
+            // failed, or the core never replied) is recorded as 0, so
             // callers can tell it from "no reload was attempted" (None);
             // `reload_outcome` in prism.rs reports it as a failed reload
             // without an HTTP status.
@@ -758,6 +1007,9 @@ None => "Config saved. Failed to apply via core REST API (connection or response
                 // Collect all non-special proxy group names
                 let names: Vec<String> = groups
                     .iter()
+                    // Zephyr's hidden download-test group is never a routing
+                    // target; a profile's own group of that name is.
+                    .filter(|g| !crate::speed_test::is_injected_group(g))
                     .filter_map(|g| g.get("name").and_then(|n| n.as_str()).map(String::from))
                     .filter(|n| {
                         // Skip internal/special groups
@@ -819,6 +1071,61 @@ None => "Config saved. Failed to apply via core REST API (connection or response
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effective_rules_compare_plain_tagged_and_inherited_keys() {
+        let plain = runtime_rules("rules: ['MATCH,DIRECT']\n").unwrap();
+        let tagged = runtime_rules("!custom rules: ['MATCH,DIRECT']\n").unwrap();
+        let inherited = runtime_rules("<<: {rules: ['MATCH,DIRECT']}\n").unwrap();
+        assert_eq!(plain, tagged);
+        assert_eq!(plain, inherited);
+        assert_ne!(
+            plain,
+            runtime_rules("!custom rules: ['MATCH,REJECT']\n").unwrap()
+        );
+    }
+
+    #[test]
+    fn effective_rules_preserve_nested_merge_precedence() {
+        let direct = runtime_rules("rules: ['MATCH,DIRECT']\n").unwrap();
+        let nested =
+            runtime_rules("<<: [{<<: {rules: ['MATCH,DIRECT']}}, {rules: ['MATCH,REJECT']}]\n")
+                .unwrap();
+        assert_eq!(nested, direct);
+        let tagged = runtime_rules("<<: !custom {rules: ['MATCH,DIRECT']}\n").unwrap();
+        assert_eq!(tagged, direct);
+        let explicit =
+            runtime_rules("<<: {rules: ['MATCH,REJECT']}\nrules: ['MATCH,DIRECT']\n").unwrap();
+        assert_eq!(explicit, direct);
+    }
+
+    #[test]
+    fn reload_confirmation_requires_a_complete_http_status_line() {
+        let oversized = format!(
+            "HTTP/1.1 204 {}\r\n",
+            "x".repeat(ZephyrPrismHost::MAX_HTTP_STATUS_LINE)
+        );
+        assert_eq!(
+            ZephyrPrismHost::parse_http_status(oversized.as_bytes()),
+            None
+        );
+        assert_eq!(
+            ZephyrPrismHost::parse_http_status(b"HTTP/1.1 204 No Content\r\n\r\n"),
+            Some(204)
+        );
+        for response in [
+            "HTTP/1.1 204",
+            "HTTP/1.1 204 No Content\r",
+            "HTTP/1.1 204 No Content\n",
+            "HTTP/nonsense 204 No Content\r\n",
+            "HTTP/1.1 0204 No Content\r\n",
+        ] {
+            assert_eq!(
+                ZephyrPrismHost::parse_http_status(response.as_bytes()),
+                None
+            );
+        }
+    }
 
     fn file_provider_yaml(path: &str) -> serde_yaml::Value {
         serde_yaml::from_str(&format!("type: file\npath: {path}\ninterval: 3600\n")).unwrap()
