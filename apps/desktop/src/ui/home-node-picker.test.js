@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// The wheel only needs the node list; everything else is a no-op.
+// The list only needs the node list; everything else is a no-op.
 vi.mock('../api.js', () => ({
     getProxies: vi.fn(),
     // Runs the click's `prepare` in its turn, as the real queue does, and
@@ -17,7 +17,7 @@ vi.mock('../api.js', () => ({
     closeAllConnections: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../utils/logger.js', () => ({
-    nodeWheelLogger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    homeNodePickerLogger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 vi.mock('../i18n.js', () => ({ t: (/** @type {string} */ k) => k }));
 vi.mock('./proxy-groups.js', () => ({ fetchProxyGroups: vi.fn() }));
@@ -40,47 +40,41 @@ vi.mock('./cache.js', () => ({
 vi.mock('./proxy-memory.js', () => ({ saveProxySelection: vi.fn() }));
 vi.mock('./running-profile.js', () => ({ readRunningProfile: vi.fn().mockResolvedValue('config.yaml') }));
 vi.mock('./notifications.js', () => ({ showNotification: vi.fn() }));
+vi.mock('./home-stats.js', () => ({ splitFlag: (/** @type {string} */ n) => ({ flag: '', label: n }) }));
 
 const GROUPS = {
     uiGroupName: 'Proxy',
     mainGroup: 'Proxy',
     current: 'HK 02',
     proxies: ['HK 01', 'HK 02', 'JP 01'],
-    data: { proxies: { 'HK 01': { udp: true }, 'HK 02': { udp: true }, 'JP 01': { udp: false } } },
+    data: { proxies: {
+        'HK 01': { history: [{ delay: 120 }] },
+        'HK 02': { history: [{ delay: 80 }] },
+        'JP 01': { history: [] },
+    } },
 };
 
 function mountDom() {
     document.body.innerHTML = `
       <div data-page="home">
-        <section id="home-hero">
-          <div id="node-wheel-container">
-            <button type="button" id="node-wheel-trigger" aria-expanded="false"><span id="current-node-name">HK 02</span></button>
-            <div id="node-wheel-dropdown" class="opacity-0 pointer-events-none">
-              <div id="node-wheel-scroll"><div id="node-wheel-list"></div></div>
-            </div>
-          </div>
-          <div id="elsewhere">speed</div>
-        </section>
+        <div id="home-node-current">
+          <button type="button" id="home-node-trigger" aria-expanded="false"><span id="current-node-name">HK 02</span></button>
+          <div id="home-node-picker" class="dz-hidden"><div id="home-node-list"></div></div>
+        </div>
+        <div id="elsewhere">speed</div>
       </div>
       <div data-page="proxies" class="hidden"></div>`;
     return {
         page: /** @type {HTMLElement} */ (document.querySelector('[data-page="home"]')),
-        container: /** @type {HTMLElement} */ (document.getElementById('node-wheel-container')),
-        trigger: /** @type {HTMLElement} */ (document.getElementById('node-wheel-trigger')),
-        dropdown: /** @type {HTMLElement} */ (document.getElementById('node-wheel-dropdown')),
-        list: /** @type {HTMLElement} */ (document.getElementById('node-wheel-list')),
+        trigger: /** @type {HTMLElement} */ (document.getElementById('home-node-trigger')),
+        dropdown: /** @type {HTMLElement} */ (document.getElementById('home-node-picker')),
+        list: /** @type {HTMLElement} */ (document.getElementById('home-node-list')),
         elsewhere: /** @type {HTMLElement} */ (document.getElementById('elsewhere')),
     };
 }
 
-/** @param {HTMLElement} el @param {number} [x] @param {number} [y] */
-const enter = (el, x = 10, y = 10) => el.dispatchEvent(new PointerEvent('pointerenter', { clientX: x, clientY: y }));
-/** @param {HTMLElement} from @param {Element | null} to */
-const leave = (from, to) => from.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget: to }));
-/** @param {EventTarget} target @param {number} [x] @param {number} [y] */
-const move = (target, x = 10, y = 10) => target.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y }));
 /** @param {HTMLElement} dropdown */
-const isShown = (dropdown) => !dropdown.classList.contains('opacity-0');
+const isShown = (dropdown) => !dropdown.classList.contains('dz-hidden');
 
 /** Resolve-on-demand stand-in for the /proxies round trip. */
 function deferred() {
@@ -90,8 +84,8 @@ function deferred() {
     return { promise, resolve };
 }
 
-/** @type {typeof import('./node-wheel.js')} */
-let wheel;
+/** @type {typeof import('./home-node-picker.js')} */
+let picker;
 /** @type {import('vitest').Mock} */
 let fetchProxyGroups;
 /** @type {ReturnType<typeof mountDom>} */
@@ -100,176 +94,128 @@ let dom;
 beforeEach(async () => {
     vi.useFakeTimers();
     vi.resetModules();
-    /** @type {any} */ (window)._wheelListenerAdded = false;
-    /** @type {any} */ (window)._wheelPointerTracked = false;
     dom = mountDom();
-    wheel = await import('./node-wheel.js');
+    picker = await import('./home-node-picker.js');
     fetchProxyGroups = /** @type {any} */ ((await import('./proxy-groups.js')).fetchProxyGroups);
     fetchProxyGroups.mockReset();
     fetchProxyGroups.mockResolvedValue(GROUPS);
-    wheel.initNodeWheel();
+    picker.initHomeNodePicker();
 });
 
 afterEach(() => {
-    wheel.closeWheel();
+    picker.closePicker();
     vi.useRealTimers();
     document.body.innerHTML = '';
 });
 
-/** Hover the pill long enough to open it and let the node list arrive. */
-async function hoverOpen() {
-    enter(dom.trigger);
-    await vi.advanceTimersByTimeAsync(wheel.WHEEL_HOVER_OPEN_DELAY);
+/** Click the node bar and let the node list arrive. */
+async function clickOpen() {
+    if (picker.isNodePickerOpen()) picker.closePicker();
+    dom.trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
     await vi.advanceTimersByTimeAsync(0);
 }
 
-describe('node quick-switch wheel', () => {
-    it('opens after the hover delay and collapses when the pointer leaves the pill', async () => {
-        await hoverOpen();
+/** @param {string} name */
+const row = (name) => /** @type {HTMLElement} */ (dom.list.querySelector(`[data-node="${name}"]`));
+
+describe('home node list', () => {
+    it('opens on click with one row per node, the current one marked, and closes on a second click', async () => {
+        await clickOpen();
         expect(isShown(dom.dropdown)).toBe(true);
         expect(dom.trigger.getAttribute('aria-expanded')).toBe('true');
-        expect(dom.list.querySelectorAll('[role="option"]')).toHaveLength(3);
+        expect(dom.list.getAttribute('role')).toBe('listbox');
+        const options = dom.list.querySelectorAll('[role="option"]');
+        expect(options).toHaveLength(3);
+        expect(row('HK 02').getAttribute('aria-selected')).toBe('true');
+        expect(row('HK 01').getAttribute('aria-selected')).toBe('false');
+        expect(row('HK 01').textContent).toContain('120 ms');
+        // No measurement: no figure.
+        expect(row('JP 01').textContent).not.toContain('ms');
 
-        leave(dom.dropdown, dom.elsewhere);
+        dom.trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
         expect(isShown(dom.dropdown)).toBe(false);
-        expect(wheel.isNodeWheelOpen()).toBe(false);
+        expect(picker.isNodePickerOpen()).toBe(false);
         expect(dom.trigger.getAttribute('aria-expanded')).toBe('false');
     });
 
-    it('does not open when the pointer leaves before the hover delay, and keeps one timer', async () => {
-        enter(dom.trigger);
-        enter(dom.trigger); // repeated enter must not stack a second open timer
-        await vi.advanceTimersByTimeAsync(wheel.WHEEL_HOVER_OPEN_DELAY - 50);
-        leave(dom.trigger, dom.elsewhere);
-        await vi.advanceTimersByTimeAsync(1000);
-        expect(fetchProxyGroups).not.toHaveBeenCalled();
-        expect(isShown(dom.dropdown)).toBe(false);
-    });
-
-    it('stays closed when the pointer leaves while the node list is still loading (the stuck-open race)', async () => {
+    it('stays closed when it was closed while the node list was still loading', async () => {
         const slow = deferred();
         fetchProxyGroups.mockReturnValueOnce(slow.promise);
-        enter(dom.trigger);
-        await vi.advanceTimersByTimeAsync(wheel.WHEEL_HOVER_OPEN_DELAY);
-        expect(fetchProxyGroups).toHaveBeenCalledTimes(1);
-
-        leave(dom.trigger, dom.elsewhere); // pointer gone before /proxies answered
+        dom.trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         slow.resolve(GROUPS);
         await vi.advanceTimersByTimeAsync(0);
-
         expect(isShown(dom.dropdown)).toBe(false);
-        expect(wheel.isNodeWheelOpen()).toBe(false);
-        expect(dom.trigger.style.pointerEvents).not.toBe('none');
+        expect(picker.isNodePickerOpen()).toBe(false);
 
-        // ...and the next normal hover still opens and closes it.
-        await hoverOpen();
+        // ...and the next click still opens it.
+        await clickOpen();
         expect(isShown(dom.dropdown)).toBe(true);
-        leave(dom.dropdown, dom.elsewhere);
-        expect(isShown(dom.dropdown)).toBe(false);
     });
 
-    it('a click on the pill while a hover-started open is loading does not cancel it', async () => {
-        const slow = deferred();
-        fetchProxyGroups.mockReturnValueOnce(slow.promise);
-        enter(dom.trigger);
-        await vi.advanceTimersByTimeAsync(wheel.WHEEL_HOVER_OPEN_DELAY);
-        dom.trigger.click();
-        slow.resolve(GROUPS);
-        await vi.advanceTimersByTimeAsync(0);
-        expect(isShown(dom.dropdown)).toBe(true);
-        expect(wheel.isNodeWheelOpen()).toBe(true);
-    });
-
-    it('releases the open state when there is nothing to show, so the next hover can open', async () => {
+    it('releases the open state when there is nothing to show, so the next click can open', async () => {
         fetchProxyGroups.mockResolvedValueOnce(null);
-        await hoverOpen();
-        expect(wheel.isNodeWheelOpen()).toBe(false);
-        leave(dom.trigger, dom.elsewhere);
-        await hoverOpen();
+        await clickOpen();
+        expect(picker.isNodePickerOpen()).toBe(false);
+        await clickOpen();
         expect(isShown(dom.dropdown)).toBe(true);
     });
 
-    it('closeWheel restores the closed look even when the flag was already cleared', async () => {
-        await hoverOpen();
-        wheel.closeWheel();
-        // Simulate a stale, visible dropdown left behind by some other path.
-        dom.dropdown.classList.remove('opacity-0', 'pointer-events-none');
-        dom.trigger.style.opacity = '0';
-        wheel.closeWheel();
+    it('closePicker restores the closed look even when the flag was already cleared', async () => {
+        await clickOpen();
+        picker.closePicker();
+        dom.dropdown.classList.remove('dz-hidden');
+        picker.closePicker();
         expect(isShown(dom.dropdown)).toBe(false);
-        expect(dom.trigger.style.opacity).toBe('1');
     });
 
-    it('moving into the dropdown keeps it open; sliding off into the positioning strip closes it', async () => {
-        await hoverOpen();
-        const option = /** @type {HTMLElement} */ (dom.list.querySelector('[role="option"]'));
-        leave(dom.trigger, option);
+    it('closes on a click outside, but not on a click inside the list', async () => {
+        await clickOpen();
+        dom.list.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         expect(isShown(dom.dropdown)).toBe(true);
-        leave(option, dom.container);
-        expect(isShown(dom.dropdown)).toBe(false);
-    });
-
-    it('closes when the pointer leaves the window (relatedTarget null)', async () => {
-        await hoverOpen();
-        leave(dom.dropdown, null);
-        expect(isShown(dom.dropdown)).toBe(false);
-    });
-
-    it('closes on a pointermove outside the wheel even if no leave event arrived', async () => {
-        await hoverOpen();
-        move(dom.dropdown);
-        expect(isShown(dom.dropdown)).toBe(true);
-        move(dom.elsewhere, 400, 300);
+        dom.elsewhere.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         expect(isShown(dom.dropdown)).toBe(false);
     });
 
     it('closes on window blur, on the app being hidden, and on Escape', async () => {
-        await hoverOpen();
+        await clickOpen();
         window.dispatchEvent(new Event('blur'));
         expect(isShown(dom.dropdown)).toBe(false);
 
-        move(dom.trigger, 20, 20); // pointer moves again → hover may reopen
-        await hoverOpen();
+        await clickOpen();
         expect(isShown(dom.dropdown)).toBe(true);
         const vis = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
         document.dispatchEvent(new Event('visibilitychange'));
         vis.mockRestore();
         expect(isShown(dom.dropdown)).toBe(false);
 
-        move(dom.trigger, 30, 30);
-        await hoverOpen();
+        await clickOpen();
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         expect(isShown(dom.dropdown)).toBe(false);
     });
 
     it('closes when navigation hides the home page', async () => {
-        await hoverOpen();
+        await clickOpen();
         dom.page.classList.add('hidden');
         await vi.advanceTimersByTimeAsync(0); // MutationObserver delivery
         expect(isShown(dom.dropdown)).toBe(false);
-        expect(wheel.isNodeWheelOpen()).toBe(false);
+        expect(picker.isNodePickerOpen()).toBe(false);
     });
 
-    it('does not pop open again under a pointer that has not moved after a forced close', async () => {
-        move(dom.trigger, 50, 12);
-        await hoverOpen();
-        window.dispatchEvent(new Event('blur'));
-        // The pill reappears under the same pointer; the browser reports a fresh enter.
-        enter(dom.trigger, 50, 12);
-        await vi.advanceTimersByTimeAsync(wheel.WHEEL_HOVER_OPEN_DELAY + 50);
-        expect(isShown(dom.dropdown)).toBe(false);
-        // A real movement over the pill opens it as usual.
-        move(dom.trigger, 56, 14);
-        await vi.advanceTimersByTimeAsync(wheel.WHEEL_HOVER_OPEN_DELAY);
-        await vi.advanceTimersByTimeAsync(0);
-        expect(isShown(dom.dropdown)).toBe(true);
-    });
-
-    it('picking a node collapses the wheel and switches through the API', async () => {
+    it('picking the current node only closes the list', async () => {
         const api = await import('../api.js');
-        await hoverOpen();
-        const jp = /** @type {HTMLElement} */ (Array.from(dom.list.querySelectorAll('[role="option"]'))
-            .find((o) => o.textContent === 'JP 01'));
+        await clickOpen();
+        /** @type {any} */ (api.switchProxyResult).mockClear();
+        row('HK 02').click();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(isShown(dom.dropdown)).toBe(false);
+        expect(api.switchProxyResult).not.toHaveBeenCalled();
+    });
+
+    it('picking a node closes the list and switches through the API', async () => {
+        const api = await import('../api.js');
+        await clickOpen();
+        const jp = /** @type {HTMLElement} */ (dom.list.querySelector('[data-node="JP 01"]'));
         jp.click();
         expect(isShown(dom.dropdown)).toBe(false);
         await vi.advanceTimersByTimeAsync(0);
@@ -282,9 +228,8 @@ describe('node quick-switch wheel', () => {
         const rejected = new Error('busy');
         for (const fail of [() => Promise.resolve({ ok: false, reason: rejected }), () => Promise.reject(new Error('boom'))]) {
             /** @type {any} */ (api.switchProxyResult).mockImplementationOnce(fail);
-            await hoverOpen();
-            const jp = /** @type {HTMLElement} */ (Array.from(dom.list.querySelectorAll('[role="option"]'))
-                .find((o) => o.textContent === 'JP 01'));
+            await clickOpen();
+            const jp = /** @type {HTMLElement} */ (dom.list.querySelector('[data-node="JP 01"]'));
             jp.click();
             await vi.advanceTimersByTimeAsync(0);
             expect(document.getElementById('current-node-name')?.textContent).toBe('HK 02');
@@ -310,9 +255,8 @@ describe('node quick-switch wheel', () => {
             .mockImplementationOnce(() => new Promise((_, j) => { rejectB = j; }));
         /** @param {string} name */
         const pick = async (name) => {
-            await hoverOpen();
-            /** @type {HTMLElement} */ (Array.from(dom.list.querySelectorAll('[role="option"]'))
-                .find((o) => o.textContent === name)).click();
+            await clickOpen();
+            /** @type {HTMLElement} */ (dom.list.querySelector(`[data-node="${name}"]`)).click();
             await vi.advanceTimersByTimeAsync(0);
         };
         await pick('JP 01');
@@ -331,12 +275,12 @@ describe('node quick-switch wheel', () => {
         expect(proxies.notifySwitchFailed).toHaveBeenCalledWith(boom, false);
     });
 
-    it('a network change that began after the click drops the switch unsent and leaves the wheel idle', async () => {
+    it('a network change that began after the click drops the switch unsent and leaves the list idle', async () => {
         const api = await import('../api.js');
         const state = await import('./state.js');
         const memory = await import('./proxy-memory.js');
         const notes = await import('./notifications.js');
-        await hoverOpen();
+        await clickOpen();
         /** @type {any} */ (api.switchProxyResult).mockClear();
         const realQueue = /** @type {any} */ (api.switchProxyResult).getMockImplementation();
         // The change begins once the click is queued, before its turn.
@@ -345,8 +289,7 @@ describe('node quick-switch wheel', () => {
             return realQueue(...args);
         });
         try {
-            /** @type {HTMLElement} */ (Array.from(dom.list.querySelectorAll('[role="option"]'))
-                .find((o) => o.textContent === 'JP 01')).click();
+            /** @type {HTMLElement} */ (dom.list.querySelector('[data-node="JP 01"]')).click();
             await vi.advanceTimersByTimeAsync(3000);
             expect(api.switchProxyResult).toHaveBeenCalledTimes(1);
             expect(memory.saveProxySelection).not.toHaveBeenCalled();
@@ -366,9 +309,8 @@ describe('node quick-switch wheel', () => {
         // A node card's switch, taken by the core after this one, is the latest.
         /** @type {any} */ (api.isLatestSwitch).mockReturnValue(false);
         try {
-            await hoverOpen();
-            /** @type {HTMLElement} */ (Array.from(dom.list.querySelectorAll('[role="option"]'))
-                .find((o) => o.textContent === 'JP 01')).click();
+            await clickOpen();
+            /** @type {HTMLElement} */ (dom.list.querySelector('[data-node="JP 01"]')).click();
             await vi.advanceTimersByTimeAsync(3000);
             expect(api.switchProxyResult).toHaveBeenCalledWith('Proxy', 'JP 01', expect.anything());
             // Asked about its own switch, by the number the queue gave it.
@@ -379,21 +321,32 @@ describe('node quick-switch wheel', () => {
         }
     });
 
-    it('is keyboard operable: Enter opens on the current node, arrows move, Escape returns focus', async () => {
+    it('is keyboard operable: Enter opens on the current node, arrows move, Enter picks, Escape returns focus', async () => {
+        const api = await import('../api.js');
         dom.trigger.focus();
         dom.trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
         await vi.advanceTimersByTimeAsync(0);
         expect(isShown(dom.dropdown)).toBe(true);
-        expect(document.activeElement?.textContent).toBe('HK 02');
+        expect(document.activeElement).toBe(row('HK 02'));
 
         dom.list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-        expect(document.activeElement?.textContent).toBe('JP 01');
+        expect(document.activeElement).toBe(row('JP 01'));
         dom.list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-        expect(document.activeElement?.textContent).toBe('HK 01');
+        expect(document.activeElement).toBe(row('HK 01'));
 
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         expect(isShown(dom.dropdown)).toBe(false);
         expect(document.activeElement).toBe(dom.trigger);
+
+        // An arrow key on the bar opens it too; Enter picks the focused row.
+        dom.trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(isShown(dom.dropdown)).toBe(true);
+        dom.list.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+        dom.list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(isShown(dom.dropdown)).toBe(false);
+        expect(api.switchProxyResult).toHaveBeenCalledWith('Proxy', 'JP 01', expect.anything());
     });
 
     it('moves keyboard focus to the loading hint when the group has no nodes yet', async () => {
@@ -406,5 +359,18 @@ describe('node quick-switch wheel', () => {
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         expect(isShown(dom.dropdown)).toBe(false);
         expect(document.activeElement).toBe(dom.trigger);
+    });
+
+    it('switchNodeFromHome switches the selected group with the same bookkeeping', async () => {
+        const api = await import('../api.js');
+        const state = await import('./state.js');
+        /** @type {any} */ (state.appStore.get).mockImplementation((/** @type {string} */ k) => (k === 'uiGroupName' ? 'Proxy' : null));
+        try {
+            picker.switchNodeFromHome('JP 01');
+            await vi.advanceTimersByTimeAsync(0);
+            expect(api.switchProxyResult).toHaveBeenCalledWith('Proxy', 'JP 01', expect.anything());
+        } finally {
+            /** @type {any} */ (state.appStore.get).mockImplementation(() => null);
+        }
     });
 });

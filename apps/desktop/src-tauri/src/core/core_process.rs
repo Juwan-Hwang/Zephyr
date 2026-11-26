@@ -1416,6 +1416,10 @@ pub fn prepare_runtime_config(
         }
     }
 
+    // The hidden group and loopback listener the download speed test goes
+    // through (see `speed_test`).
+    crate::speed_test::inject_for_runtime(&mut yaml_val);
+
     // Parse proxy_port AFTER all overrides are applied so it reflects
     // any user-overridden values (mixed_port, socks_port, http_port).
     let proxy_endpoint = parse_proxy_endpoint(&yaml_val);

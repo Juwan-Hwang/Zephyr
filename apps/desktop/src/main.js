@@ -41,6 +41,7 @@ import {
   setSecret,
   setCoreReachable,
   noteCoreReplaced,
+  setLatencyTestUrl,
 } from './api.js';
 import {
   setBaseUrl as setWsBaseUrl,
@@ -66,14 +67,16 @@ import { initSettings, initUwpExemption } from './ui/settings.js';
 import { autoApplyIfNeeded } from './ui/network-optim.js';
 import { initNavigation, switchPage, navigateTo } from './ui/navigation.js';
 import { initNavTooltips } from './ui/nav-tooltip.js';
+import { initSidebar } from './ui/sidebar.js';
 import { initProxyControls, syncCoreConfig, refreshProxies } from './ui/proxies.js';
 import { initPlugins } from './ui/plugins.js';
 import { initModeSelector } from './ui/modes.js';
 import { initConsoleHome, activateConsole, deactivateConsole } from './ui/console-home.js';
 import { initTunToggle } from './ui/tun.js';
 import { initDnsRewriteToggle } from './ui/dns.js';
-import { initNodeWheel } from './ui/node-wheel.js';
+import { initHomeNodePicker, switchNodeFromHome } from './ui/home-node-picker.js';
 import { initHomeStats } from './ui/home-stats.js';
+import { initHomeProfile } from './ui/home-profile.js';
 import { initHeaderFit } from './ui/header-fit.js';
 import { initTablistKeys } from './ui/tablist-keys.js';
 import {
@@ -276,6 +279,8 @@ async function startCoreAndConfigure() {
     const tGetSettings = performance.now();
     const settings = await invoke(COMMANDS.GET_SETTINGS);
     apiLogger.info(`[Zephyr] get_settings: +${(performance.now() - tGetSettings).toFixed(0)}ms`);
+    // The latency test asks for the address chosen in Settings > Proxy.
+    setLatencyTestUrl(settings.latency_test_url);
 
     // Apply saved UI scale early (before UI renders)
     if (settings.ui_scale && settings.ui_scale > 0 && settings.ui_scale !== 1) {
@@ -473,6 +478,10 @@ async function initApp() {
   await _backendListenersReady;
   registerCleanup(cleanupBackendEventListeners);
 
+  // Restore the sidebar's expanded/collapsed state before the window is
+  // shown, so it does not jump open once the core has started.
+  registerCleanup(initSidebar());
+
   apiLogger.info(`[Zephyr] initApp started at ${new Date().toLocaleTimeString()}`);
 
   // 0a. Reset transient locks that may have been persisted to localStorage
@@ -561,8 +570,9 @@ async function initApp() {
   await initSettings();
   initUwpExemption();
   autoApplyIfNeeded().catch(() => {}); // Non-blocking: avoid freezing UI on admin password prompt
-  initNodeWheel();
-  registerCleanup(initHomeStats());
+  initHomeNodePicker();
+  registerCleanup(initHomeProfile());
+  registerCleanup(initHomeStats({ switchNode: switchNodeFromHome, openConnections: () => navigateTo('connections') }));
   registerCleanup(initHeaderFit());
   registerCleanup(initTablistKeys());
   initShortcutSettings();

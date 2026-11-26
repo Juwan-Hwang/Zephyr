@@ -337,6 +337,33 @@ export async function rebuild(/** @type {object|undefined} */ options = undefine
     return invoke(COMMANDS.PRISM.REBUILD, { options: options ?? null });
 }
 
+/**
+ * Rebuild, then run the enabled override scripts again: the rebuild starts
+ * from the profile, so a JavaScript override's changes (groups, DNS, rules)
+ * would otherwise be gone until the next restart. An override that fails
+ * reports the result as not fully running (`hot_reload_success: false`).
+ * @param {object|undefined} [options]
+ * @returns {Promise<any>} the rebuild result
+ */
+export async function rebuildWithOverrides(options = undefined) {
+    /** @type {any} */
+    const result = await rebuild(options);
+    if (!result || result.skipped) return result;
+    /** @param {any} r */
+    const notRunning = (r) => ({
+        ...r,
+        hot_reload_success: false,
+        ...(r.status && typeof r.status === 'object' ? { status: { ...r.status, hot_reload_success: false } } : {}),
+    });
+    try {
+        const logs = await overrideApplyAll();
+        if (Array.isArray(logs) && logs.some((l) => !l?.success)) return notRunning(result);
+    } catch {
+        return notRunning(result);
+    }
+    return result;
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 //  Debug tools
 // ═══════════════════════════════════════════════════════════════════════
