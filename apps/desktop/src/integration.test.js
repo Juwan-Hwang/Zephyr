@@ -869,6 +869,10 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
         'failover_enabled',
         'network_optim_auto_apply',
         'lightweight_mode',
+        'latency_test_url',
+        'speed_test_url',
+        'speed_test_max_secs',
+        'show_exit_ip',
     ];
 
     // All settings.xxx property accesses in frontend JS code
@@ -899,6 +903,10 @@ describe('Rust Settings struct ↔ Frontend settings.xxx field contract', () => 
         'failover_enabled',   // settings.js
         'network_optim_auto_apply', // settings.js
         'lightweight_mode',   // settings.js
+        'latency_test_url',   // main.js, settings/speed-settings.js
+        'speed_test_url',     // speed-test.js
+        'speed_test_max_secs', // speed-test.js
+        'show_exit_ip',       // home-stats.js, settings/speed-settings.js
     ];
 
     it('every frontend settings.xxx access has a matching Rust struct field', () => {
