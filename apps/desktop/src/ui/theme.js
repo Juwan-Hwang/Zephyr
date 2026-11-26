@@ -29,6 +29,36 @@ const THEME_CLASSES = [
 /** A custom accent: #rgb or #rrggbb, the forms applyTheme can expand. */
 const HEX_THEME_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 
+/** @param {number} channel */
+function linearChannel(channel) {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+}
+
+/** Keep white button text readable while retaining the chosen accent's hue.
+ * @param {number[]} rgb
+ * @param {number} shade
+ */
+function buttonBackground(rgb, shade) {
+    let channels = rgb.map((c) => Math.floor(c * shade));
+    while (0.2126 * linearChannel(channels[0]) + 0.7152 * linearChannel(channels[1]) + 0.0722 * linearChannel(channels[2]) > 0.175) {
+        shade = Math.max(0, shade - 0.01);
+        channels = rgb.map((c) => Math.floor(c * shade));
+    }
+    return `rgb(${channels.join(', ')})`;
+}
+
+/** @param {string} accent */
+function applyButtonContrast(accent) {
+    let hex = HEX_THEME_RE.test(accent) ? accent.slice(1) : '007aff';
+    if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('');
+    const rgb = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const style = document.documentElement.style;
+    style.setProperty('--accent-button-bg', buttonBackground(rgb, 0.84));
+    style.setProperty('--accent-button-hover-light', buttonBackground(rgb, 0.74));
+    style.setProperty('--accent-button-hover-dark', buttonBackground(rgb, 0.90));
+}
+
 /**
  * Normalize a persisted theme value: well-formed custom hex colors are kept as-is
  * (a malformed one falls back to the default),
@@ -82,6 +112,9 @@ export function applyTheme(theme) {
         document.documentElement.classList.add(`theme-${t}`);
         currentTheme = t;
     }
+
+    applyButtonContrast(theme && theme.startsWith('#') ? theme
+        : getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim());
 
     // Sync the custom color input if it's a hex theme
     /** @type {HTMLInputElement|null} */

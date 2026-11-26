@@ -89,8 +89,30 @@ fn write_new_private_file(path: &Path, content: &str) -> std::io::Result<()> {
 /// Returns `Err` if either the file write or permission setting fails.
 /// Callers can distinguish "secure write succeeded" from "file written but insecure".
 pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
-    fs::write(path, content).map_err(|e| format!("Failed to write to {path:?}: {e}"))?;
+    write_owner_only(path, content).map_err(|e| format!("Failed to write to {path:?}: {e}"))?;
     restrict_permissions(path)
+}
+
+/// `fs::write`, except that on Unix a file it creates is owner-only from the
+/// start: the content is never readable by other users before
+/// [`restrict_permissions`] runs.
+fn write_owner_only(path: &Path, content: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(content.as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, content)
+    }
 }
 
 /// Owner-only permissions for an existing file (the second half of

@@ -12,6 +12,7 @@ const prismMock = {
     insertRuleStr: vi.fn(async () => 0),
     apply: vi.fn(async () => ({})),
     rebuild: vi.fn(async () => ({})),
+    rebuildWithOverrides: vi.fn(async () => ({})),
     toggleGroup: vi.fn(async () => true),
     traceReportText: vi.fn(async () => 'trace body'),
 };
@@ -81,7 +82,7 @@ describe('rule library page', () => {
         toggle.dispatchEvent(new Event('change'));
         await flush();
         expect(prismMock.toggleGroup).toHaveBeenCalledWith('ads.prism.yaml', true);
-        expect(prismMock.rebuild).toHaveBeenCalled();
+        expect(prismMock.rebuildWithOverrides).toHaveBeenCalled();
     });
 
     it('editor: Add rule keeps the list and inserts on ✓; rows edit in place', async () => {
@@ -120,6 +121,22 @@ describe('rule library page', () => {
         expect(update?.[1].content).toContain('DOMAIN-SUFFIX,gemini.google.com,OpenAI');
         expect(update?.[1].content).toContain('DOMAIN-SUFFIX,chatgpt.com,OpenAI');
         await new Promise((r) => setTimeout(r, 350));
+    });
+
+    it('shows the rebuild error after deleting a file and does not reapply stale rules', async () => {
+        prismMock.rebuildWithOverrides.mockRejectedValueOnce(new Error('Invalid target: missing-group'));
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        /** @type {HTMLElement} */ (document.querySelector('.rl-file-more')).click();
+        const actions = [...document.querySelectorAll('.ctx-menu-root button')];
+        /** @type {HTMLElement} */ (actions.at(-1)).click();
+        await flush();
+        /** @type {HTMLElement} */ (document.getElementById('modal-confirm')).click();
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        await flush();
+        expect(invokeMock).toHaveBeenCalledWith('rule_delete', { filename: 'ai.prism.yaml' });
+        expect(notify).toHaveBeenCalledWith(expect.stringContaining('Invalid target: missing-group'), 'warning');
+        expect(prismMock.apply).not.toHaveBeenCalled();
     });
 
     it('insert dialog: one form with visible positions', async () => {

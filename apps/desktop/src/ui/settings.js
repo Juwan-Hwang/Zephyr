@@ -45,7 +45,7 @@ import { checkConsoleWidthNotification } from './console-width.js';
 import { invalidateSettingsCache } from './cache.js';
 import { postRestartRecovery, restartedProfile, withPageBusy } from './lifecycle.js';
 import { currentProfile } from './active-profile.js';
-import { loadedToggleState, portPatchError, saveSettingChecked, saveSettingsChecked } from './settings-helpers.js';
+import { inSettingsSaveQueue, loadedToggleState, portPatchError, saveSettingChecked, saveSettingsChecked } from './settings-helpers.js';
 import { applyCoreToggle, noteCoreToggleApplied, noteCoreTogglePersisted, coreToggleApplied, pauseCoreToggles, coreToggleMark, coreToggleChangedSince, coreToggleShownBeforeHeld, coreToggleClickedDuringReset } from './settings/core-toggle.js';
 import { initNetworkOptim } from './network-optim.js';
 import { noNetworkChangeSince } from './network-change.js';
@@ -91,16 +91,20 @@ import { updateModeUI } from './modes.js';
 
 // Settings submodules
 import { initThemeSettings } from './settings/theme.js';
+import { initSpeedSettings, afterSpeedSettingsReset, speedSettingsResetToken } from './settings/speed-settings.js';
 import { initTunnelSettings } from './settings/tunnels.js';
 import { applyFailover, applySmart, applyAutoTest, readSmartState, readAutoTestEnabled, shownFailover, queueSmartConfigWrite, smartEnabledOf } from './settings/auto-switch.js';
 import { initSubscriptionSettings, keepFallbackProfile } from './settings/subscriptions.js';
-import { withResetChanges } from './settings/reset-merge.js';
+import { resetChangesPatch } from './settings/reset-merge.js';
 import { selectSegment } from './seg-control.js';
 import { openUpdateDialog, showPendingUpdateNote } from './update-dialog.js';
 import { createClientVersionFetcher, DEFAULT_MAX_ATTEMPTS, isValidClientVersions } from './settings/client-version-fetch.js';
 import { uaTripleFromBackendUA, createUaEditTracker, trimLikeRust } from './settings/ua-triple.js';
 import { configUpdateOutcome, updateConfigThenSync } from './config-update.js';
 import { readRunningProfile } from './running-profile.js';
+
+/** The privacy policy (Settings › About). */
+export const PRIVACY_POLICY_URL = 'https://github.com/Juwan-Hwang/Zephyr/blob/main/PRIVACY.md';
 
 /** @type {ReturnType<typeof initCustomDropdown> | null} */
 let __langDropdown = null;
@@ -2116,6 +2120,13 @@ export async function initSettings() {
         };
     }
 
+    const privacyBtn = document.getElementById('view-privacy-btn');
+    if (privacyBtn) {
+        privacyBtn.onclick = () => {
+            openUrl(PRIVACY_POLICY_URL).catch(err => settingsLogger.warn('Failed to open the privacy policy', err));
+        };
+    }
+
     const gotoGithubBtn = document.getElementById('btn-goto-github');
     if (gotoGithubBtn) {
         gotoGithubBtn.onclick = (e) => {
@@ -2329,6 +2340,9 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             }
         });
     });
+
+    // ---- Latency test address + download speed test (settings/speed-settings.js) ----
+    registerCleanup(initSpeedSettings());
 
     // ---- Theme + Opacity (delegated to settings/theme.js) ----
     const _themeApi = initThemeSettings({
@@ -2775,8 +2789,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                 // settles first (its store value may be a click that is about
                 // to roll back), and a scale click saved meanwhile can't land
                 // between this save and the scale it applies.
-                // Saved even when the log-size patch after it fails: the home
-                // mode below follows the saved settings.
+                // The home mode below follows the saved settings.
                 let appSettingsSaved = false;
                 // The TUN item's restart ran, but some recovery step failed.
                 let recoveryFailed = false;
@@ -2786,23 +2799,33 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     // Items the reset used to skip (the confirm says "all settings"):
                     resetTo('ui_scale', 1);
                     resetTo('lightweight_mode', false);
-                    delete settings.copy_env_format;   // missing → backend default for this platform
-                    resetKeys.add('copy_env_format');
+                    const { resolveEnvFormat } = await import('./tray.js');
+                    resetTo('copy_env_format', resolveEnvFormat(''));
                     resetTo('log_retention_days', 3);
                     resetTo('log_max_file_mb', 50);
+                    // Latency test address, download test and the IP line (null: the default).
+                    resetTo('latency_test_url', null);
+                    resetTo('speed_test_url', null);
+                    resetTo('speed_test_max_secs', null);
+                    resetTo('show_exit_ip', false);
                     // Owned by the auto-switch switch: if it was turned on while the
                     // reset ran, this snapshot must not save it back off.
                     if (failoverToggle) resetTo('failover_enabled', !!appStore.get('failoverEnabled'));
-                    // Onto what is stored now: a save that landed while the
-                    // reset ran (a proxy choice, a subscription update) stays.
+                    // Patch only what this reset changed. Other settings keep
+                    // concurrent writes made by the frontend or backend.
                     const forced = [...resetKeys];
-                    /** @type {any} */
-                    // Unread, the snapshot alone would put back everything
-                    // saved while the reset ran: the item fails instead.
-                    const now = await invoke(COMMANDS.GET_SETTINGS);
-                    if (!now || typeof now !== 'object') throw new Error('Settings could not be read before saving the reset');
-                    const stored = withResetChanges(now, resetBase, settings, forced);
-                    await invoke(COMMANDS.SAVE_SETTINGS, { settings: stored });
+                    // In the settings write queue: a switch saved just before
+                    // (the IP line) lands first and is reset; one saved after
+                    // lands after the reset.
+                    const speedResetToken = speedSettingsResetToken();
+                    await inSettingsSaveQueue(async () => {
+                        const patch = resetChangesPatch(resetBase, settings, forced);
+                        await invoke(COMMANDS.PATCH_SETTINGS, { patch });
+                        invalidateSettingsCache();
+                        // Before the queue advances, discard editor saves that
+                        // captured values from before this successful reset.
+                        afterSpeedSettingsReset(speedResetToken);
+                    });
                     appSettingsSaved = true;
                     // The switches' preferences are cleared: a core started from
                     // now on runs what the profile holds, the defaults once the
@@ -2823,8 +2846,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     if (lightweightModeToggle) lightweightModeToggle.checked = false;
                     appStore.set('logRetentionDays', 3);
                     appStore.set('logMaxFileMb', 50);
-                    // The running log writers take a new size limit only through a patch.
-                    await invoke(COMMANDS.PATCH_SETTINGS, { patch: { log_max_file_mb: 50 } });
+                    // The atomic patch also updates the running log writers.
                 })));
                 invalidateSettingsCache();
                 // The core runs the reset DNS choice (or what it kept after a

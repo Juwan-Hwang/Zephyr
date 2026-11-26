@@ -48,6 +48,8 @@ pub(crate) struct CoreStartGuard;
 impl CoreStartGuard {
     pub(crate) fn acquire() -> Self {
         CORE_START_COUNT.fetch_add(1, Ordering::SeqCst);
+        crate::speed_test::lookup_exit_ip_cancel();
+        crate::speed_test::speed_test_cancel(None);
         Self
     }
 }
@@ -174,7 +176,12 @@ fn hot_reload_target(app: &AppHandle) -> Result<(u16, String, String), String> {
 /// Send `PUT /configs?force=true` with `{"path": "<run_config.yaml>"}` so that
 /// Mihomo reloads the config from disk. Blocking: call it from a background
 /// thread.
-fn send_hot_reload(port: u16, secret: &str, run_config_path: &str) -> Result<(), String> {
+fn send_hot_reload(
+    app: &AppHandle,
+    port: u16,
+    secret: &str,
+    run_config_path: &str,
+) -> Result<(), String> {
     let url = format!("http://127.0.0.1:{port}/configs?force=true");
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -183,6 +190,10 @@ fn send_hot_reload(port: u16, secret: &str, run_config_path: &str) -> Result<(),
         .map_err(|e| format!("HTTP client error: {e}"))?;
     // Mihomo PUT /configs expects {"path": "..."} to reload from file
     let body = serde_json::json!({ "path": run_config_path });
+    let listener = std::fs::read_to_string(run_config_path)
+        .ok()
+        .and_then(|config| crate::speed_test::listener_from_config(&config));
+    let _diagnostics = crate::speed_test::ReloadGuard::acquire();
     let resp = client
         .put(&url)
         .header("Authorization", format!("Bearer {secret}"))
@@ -190,6 +201,7 @@ fn send_hot_reload(port: u16, secret: &str, run_config_path: &str) -> Result<(),
         .send()
         .map_err(|e| format!("Request failed: {e}"))?;
     if resp.status().is_success() {
+        crate::speed_test::confirm_listener(app, listener);
         log_info!("[hot-reload] Success: {}", resp.status());
         Ok(())
     } else {
@@ -203,8 +215,8 @@ fn send_hot_reload(port: u16, secret: &str, run_config_path: &str) -> Result<(),
 
 /// Send the hot-reload request and report whether Mihomo accepted it;
 /// failures are logged. Blocking: call it from a background thread.
-fn perform_hot_reload(port: u16, secret: &str, run_config_path_str: &str) -> bool {
-    match send_hot_reload(port, secret, run_config_path_str) {
+fn perform_hot_reload(app: &AppHandle, port: u16, secret: &str, run_config_path_str: &str) -> bool {
+    match send_hot_reload(app, port, secret, run_config_path_str) {
         Ok(()) => true,
         Err(e) => {
             log_error!("[hot-reload] {e}");
@@ -217,10 +229,21 @@ fn perform_hot_reload(port: u16, secret: &str, run_config_path_str: &str) -> boo
 ///
 /// Spawns a background thread to avoid blocking the caller.
 pub fn trigger_hot_reload(state: &PrismState) -> Result<(), String> {
-    let (port, secret, run_config_path_str) = hot_reload_target(&state.app)?;
+    hot_reload_target(&state.app)?;
+    let app = state.app.clone();
 
     thread::spawn(move || {
-        perform_hot_reload(port, &secret, &run_config_path_str);
+        let Ok(_config) = RUN_CONFIG_LOCK.lock() else {
+            log_error!("Run config lock poisoned; reload skipped");
+            return;
+        };
+        let _sequence = acquire_reload_reconcile_lock();
+        match hot_reload_target(&app) {
+            Ok((port, secret, path)) => {
+                perform_hot_reload(&app, port, &secret, &path);
+            }
+            Err(error) => log_error!("[hot-reload] {error}"),
+        }
     });
 
     Ok(())
@@ -332,6 +355,12 @@ pub fn trigger_hot_reload_and_reconcile_tun(state: &PrismState) -> Result<(), St
         // repaint reads the live state fresh, so running it after the
         // lock is released still paints the newest state.
         let tray_refresh_needed = {
+            // A no-reload writer must not replace the candidate between our
+            // snapshot and the core reading its path. Match the host's lock order.
+            let Ok(_config) = RUN_CONFIG_LOCK.lock() else {
+                log_error!("Run config lock poisoned; reload skipped");
+                return;
+            };
             let _sequence = acquire_reload_reconcile_lock();
             // Snapshot the live-state generation before the reload: a TUN
             // preference recorded while the reload and the confirmation
@@ -345,7 +374,7 @@ pub fn trigger_hot_reload_and_reconcile_tun(state: &PrismState) -> Result<(), St
             let Ok((port, secret, run_config_path_str)) = target else {
                 return;
             };
-            if !perform_hot_reload(port, &secret, &run_config_path_str) {
+            if !perform_hot_reload(&app, port, &secret, &run_config_path_str) {
                 false
             } else if let Some(applied) = confirmed_tun_enabled(port, &secret) {
                 crate::core_manager::core::tun_manager::reconcile_tun_with_core(
@@ -376,13 +405,16 @@ pub async fn hot_reload_and_wait(state: &PrismState) -> Result<(), String> {
         // blocking thread (it can shell out and waits on the main thread,
         // so it must not tie up an async worker).
         let (result, tray_refresh_needed) = {
+            let _config = RUN_CONFIG_LOCK
+                .lock()
+                .map_err(|error| format!("Run config lock poisoned: {error}"))?;
             let _sequence = acquire_reload_reconcile_lock();
             let epoch = crate::core_manager::core::tun_manager::live_tun_state_epoch();
             // Read under the lock: a core restart while this waited for it
             // changes the port and secret.
             let target = hot_reload_target(&app);
             let result = target.as_ref().map_err(Clone::clone).and_then(
-                |(port, secret, run_config_path)| send_hot_reload(*port, secret, run_config_path),
+                |(port, secret, run_config_path)| send_hot_reload(&app, *port, secret, run_config_path),
             );
             let refresh = result.is_ok()
                 && target.as_ref().is_ok_and(|(port, secret, _)| {
@@ -592,7 +624,8 @@ fn write_running_config(
     // not fail the write (scripts run with the core stopped, and the
     // no-reload paths promise not to reload). A start in progress
     // still refuses, like the re-check below.
-    if let Some((port, secret)) = running_core_endpoint(&state.app)? {
+    let endpoint = running_core_endpoint(&state.app)?;
+    if let Some((port, secret)) = &endpoint {
         if let Some(obj) = stripped.as_object_mut() {
             obj.insert(
                 "external-controller".to_owned(),
@@ -601,7 +634,21 @@ fn write_running_config(
             obj.insert("secret".to_owned(), serde_json::json!(secret));
         }
     }
-    let yaml_str = serde_yaml::to_string(&stripped)
+    let mut yaml_val = serde_yaml::to_value(&stripped)
+        .map_err(|e| format!("Failed to serialize config to YAML: {e}"))?;
+    // A script that rewrote `proxy-groups` or `listeners` may have dropped
+    // the speed-test group or listener: put back the missing one while a
+    // core runs (a no-op when both are there), so the reload is not refused
+    // for a listener pointing at a group that is gone.
+    // The listener keeps the port the running core holds, so a refused
+    // reload does not leave this file naming a port the core never opened.
+    if endpoint.is_some() {
+        let held = crate::speed_test::held_port(&state.app);
+        crate::speed_test::with_running_port(held, || {
+            crate::speed_test::inject_for_runtime(&mut yaml_val);
+        });
+    }
+    let yaml_str = serde_yaml::to_string(&yaml_val)
         .map_err(|e| format!("Failed to serialize config to YAML: {e}"))?;
     // Re-check immediately before the write: a start that began during
     // the strip/serialize above would have its fresh credentials

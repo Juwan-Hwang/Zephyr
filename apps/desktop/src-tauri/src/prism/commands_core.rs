@@ -293,10 +293,10 @@ pub async fn prism_rebuild(
         // re-reads the endpoint just before injecting it; the lock order
         // here — run-config lock, then the core-state lock — matches that
         // path.)
-        let current_secret = {
+        let (current_secret, core_running) = {
             let mihomo = tauri::Manager::state::<crate::core_manager::MihomoState>(&app);
             let lock = lock_critical(&mihomo.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
-            lock.last_secret().to_owned()
+            (lock.last_secret().to_owned(), lock.last_port().is_some())
         };
         // Captures the core's answer to the reload `ext.apply` triggers
         // (set by `ZephyrPrismHost::apply_config` on this thread).
@@ -309,12 +309,21 @@ pub async fn prism_rebuild(
 
             // Use prepare_runtime_config to inject secret + external-controller
             // into the raw profile, just like start_core does.
-            let (prepared, _api_port, _proxy_port) = core_process::prepare_runtime_config(
-                &raw_profile,
-                &current_secret,
-                global_prefs.as_ref(),
-            )
-            .ok_or_else(|| "Failed to prepare runtime config".to_owned())?;
+            // The running core keeps its speed-test listener where it is:
+            // a reload that fails must not leave this file naming a port
+            // the core never opened.
+            let held_port = core_running
+                .then(|| crate::speed_test::held_port(&app))
+                .flatten();
+            let (prepared, _api_port, _proxy_port) =
+                crate::speed_test::with_running_port(held_port, || {
+                    core_process::prepare_runtime_config(
+                        &raw_profile,
+                        &current_secret,
+                        global_prefs.as_ref(),
+                    )
+                })
+                .ok_or_else(|| "Failed to prepare runtime config".to_owned())?;
             // Atomic: an override dry run (`override_test`) reads this file
             // without the run-config lock and must not see it half written.
             crate::core_manager::core::secure_io::write_file_secure_atomic(

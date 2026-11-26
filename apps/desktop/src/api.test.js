@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
     ApiError,
+    stripSpeedTestGroup,
+    SPEED_TEST_GROUP,
     setBaseUrl,
     setSecret,
     isCoreReachable,
@@ -427,6 +429,29 @@ describe('switchProxy', () => {
 
         await expect(switchProxy('Proxy', 'Bad')).rejects.toThrow();
         vi.unstubAllGlobals();
+    });
+
+    it('skips only when the queued group read already selects the requested node', async () => {
+        const api = await import('./api.js');
+        vi.stubGlobal('fetch', vi.fn(async (_url, init) => init.method === 'PUT'
+            ? { ok: true }
+            : { ok: true, json: async () => ({ proxies: { Proxy: { now: 'node-a.example' } } }) }));
+        const first = await api.switchProxyResult('Proxy', 'node-a.example');
+        const result = await api.switchProxyResult('Proxy', 'node-a.example', { skipIfCurrent: true });
+        expect(result).toMatchObject({ ok: true, unchanged: true });
+        expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
+        expect(api.isLatestSwitch('Proxy', first.seq)).toBe(true);
+    });
+
+    it('sends the requested selection when the queued group read reports another node', async () => {
+        const api = await import('./api.js');
+        vi.stubGlobal('fetch', vi.fn(async (_url, init) => init.method === 'PUT'
+            ? { ok: true }
+            : { ok: true, json: async () => ({ proxies: { Proxy: { now: 'node-b.example' } } }) }));
+        const result = await api.switchProxyResult('Proxy', 'node-a.example', { skipIfCurrent: true });
+        expect(result.ok).toBe(true);
+        expect(result.unchanged).not.toBe(true);
+        expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
     });
 
     it('counts a switch as started and in flight until it is answered', async () => {
@@ -1211,5 +1236,34 @@ describe('getProxiesMerged', () => {
         // Should return data with the original proxies (no crash).
         expect(result.proxies['GLOBAL']).toBeDefined();
         expect(result.proxies['missing-node']).toBeUndefined();
+    });
+});
+
+describe('stripSpeedTestGroup', () => {
+    it('drops the hidden speed-test group and its GLOBAL entry', () => {
+        const data = { proxies: { [SPEED_TEST_GROUP]: { all: ['a'], hidden: true }, GLOBAL: { all: ['Proxy', SPEED_TEST_GROUP] }, Proxy: { all: ['a'] }, a: {} } };
+        stripSpeedTestGroup(data, true);
+        expect(Object.keys(data.proxies)).toEqual(['GLOBAL', 'Proxy', 'a']);
+        expect(data.proxies.GLOBAL.all).toEqual(['Proxy']);
+    });
+    it('keeps a profile-owned node or visible group of that name', () => {
+        const group = { proxies: { [SPEED_TEST_GROUP]: { all: ['a'], hidden: false }, GLOBAL: { all: [SPEED_TEST_GROUP] } } };
+        stripSpeedTestGroup(group);
+        expect(group.proxies.GLOBAL.all).toEqual([SPEED_TEST_GROUP]);
+        expect(group.proxies[SPEED_TEST_GROUP]).toBeDefined();
+        const node = { proxies: { [SPEED_TEST_GROUP]: { type: 'Shadowsocks' }, GLOBAL: { all: [SPEED_TEST_GROUP] } } };
+        stripSpeedTestGroup(node);
+        expect(node.proxies[SPEED_TEST_GROUP]).toBeDefined();
+    });
+    it('keeps a user-owned hidden group and its parent membership', () => {
+        const data = { proxies: { [SPEED_TEST_GROUP]: { type: 'URLTest', all: ['a'], hidden: true }, GLOBAL: { all: [SPEED_TEST_GROUP] } } };
+        stripSpeedTestGroup(data, false);
+        expect(data.proxies[SPEED_TEST_GROUP]).toBeDefined();
+        expect(data.proxies.GLOBAL.all).toEqual([SPEED_TEST_GROUP]);
+    });
+    it('leaves other bodies alone', () => {
+        const data = { proxies: { GLOBAL: { all: ['Proxy'] } } };
+        expect(stripSpeedTestGroup(data)).toBe(data);
+        expect(stripSpeedTestGroup(null)).toBeNull();
     });
 });

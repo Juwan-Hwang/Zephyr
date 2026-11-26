@@ -14,7 +14,7 @@ use crate::prism::overrides::overrides_model::{
 };
 use crate::prism::overrides::overrides_store;
 use crate::prism::pipeline::{
-    execute_batch_pipeline, execute_test_pipeline, execute_write_pipeline,
+    execute_batch_pipeline, execute_test_pipeline, execute_write_pipeline_no_reload,
 };
 use crate::prism::types::{check_input_size, check_name_size};
 use crate::prism::PrismState;
@@ -597,16 +597,18 @@ pub async fn override_set_content(
         // The content is already saved: a pipeline error (core not running, the
         // running config unreadable) is this run's result, not a failed save, so
         // record it as the last run instead of leaving the previous status shown.
-        execute_override_write(&state, &item, &content).unwrap_or_else(|e| OverrideLog {
-            script_id: item.id.clone(),
-            script_name: item.name.clone(),
-            executed_at: chrono::Utc::now().timestamp_millis(),
-            duration_us: 0,
-            success: false,
-            config_modified: false,
-            error: Some(e),
-            logs: Vec::new(),
-        })
+        execute_override_write(&state, &item, &content)
+            .await
+            .unwrap_or_else(|e| OverrideLog {
+                script_id: item.id.clone(),
+                script_name: item.name.clone(),
+                executed_at: chrono::Utc::now().timestamp_millis(),
+                duration_us: 0,
+                success: false,
+                config_modified: false,
+                error: Some(e),
+                logs: Vec::new(),
+            })
     };
 
     // Persist the log of real runs only: a dry run (syntax check) must not
@@ -674,17 +676,30 @@ fn execute_override_test(
 }
 
 /// Execute an override script and write back to config if modified.
-fn execute_override_write(
+async fn execute_override_write(
     state: &PrismState,
     item: &OverrideItem,
     content: &str,
 ) -> Result<OverrideLog, String> {
     // Prism YAML overrides are executed via the Prism DSL pipeline
     if item.ext == OverrideExt::PrismYaml {
-        return execute_prism_yaml_write(state, item, content);
+        let (mut log, reload_needed) = execute_prism_yaml_write(state, item, content)?;
+        if reload_needed && log.success {
+            if let Err(error) = crate::prism::pipeline::hot_reload_and_wait(state).await {
+                log.success = false;
+                log.error = Some(error);
+            }
+        }
+        return Ok(log);
     }
 
-    let result = execute_write_pipeline(state, content, &item.name)?;
+    let mut result = execute_write_pipeline_no_reload(state, content, &item.name)?;
+    if result.success && result.config_modified {
+        if let Err(error) = crate::prism::pipeline::hot_reload_and_wait(state).await {
+            result.success = false;
+            result.error = Some(error);
+        }
+    }
 
     Ok(OverrideLog {
         script_id: item.id.clone(),
@@ -836,7 +851,7 @@ fn execute_prism_yaml_write(
     state: &PrismState,
     item: &OverrideItem,
     content: &str,
-) -> Result<OverrideLog, String> {
+) -> Result<(OverrideLog, bool), String> {
     use crate::prism::pipeline::RUN_CONFIG_LOCK;
 
     let _guard = RUN_CONFIG_LOCK
@@ -877,11 +892,7 @@ fn execute_prism_yaml_write(
     // host also reconciled TUN; refused, the same file would be refused
     // again, and the run reports it instead of success.
     let error = single_apply_reload_error(reload_status);
-    if reload_status.is_none() {
-        crate::prism::pipeline::trigger_hot_reload_and_reconcile_tun(state)?;
-    }
-
-    Ok(OverrideLog {
+    let log = OverrideLog {
         script_id: item.id.clone(),
         script_name: item.name.clone(),
         executed_at: chrono::Utc::now().timestamp_millis(),
@@ -897,7 +908,8 @@ fn execute_prism_yaml_write(
                 message: format!("{t:?}"),
             })
             .collect(),
-    })
+    };
+    Ok((log, reload_status.is_none()))
 }
 
 /// Reorder override items.
@@ -1032,7 +1044,7 @@ pub async fn override_refresh_remote(
     // Execute via write pipeline so the refreshed override takes effect immediately.
     // Using dry-run (execute_override_test) would update the file but leave the
     // running config unchanged, confusing users who expect refresh to apply immediately.
-    let log = execute_override_write(&state, &updated_item, &content)?;
+    let log = execute_override_write(&state, &updated_item, &content).await?;
     overrides_store::save_log(&state, &id, &log)?;
     Ok(log)
 }
