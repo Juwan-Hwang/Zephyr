@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as yaml from '../js-yaml.min.js';
 
 const invokeMock = vi.fn();
 vi.mock('../api.js', () => ({ invoke: (...a) => invokeMock(...a) }));
@@ -12,12 +13,13 @@ const prismMock = {
     insertRuleStr: vi.fn(async () => 0),
     apply: vi.fn(async () => ({})),
     rebuild: vi.fn(async () => ({})),
+    rebuildWithOverrides: vi.fn(async () => ({})),
     toggleGroup: vi.fn(async () => true),
     traceReportText: vi.fn(async () => 'trace body'),
 };
 vi.mock('./prism.js', () => prismMock);
 vi.mock('./proxy-groups.js', () => ({ fetchProxyGroups: vi.fn(async () => ({ orderedGroupNames: ['OpenAI', 'Proxy'] })) }));
-vi.mock('./editor/prism-editor.js', () => ({ createEditor: vi.fn(() => ({ destroy() {} })), getEditorContent: vi.fn(() => '') }));
+vi.mock('./editor/prism-editor.js', () => ({ createEditor: vi.fn(({ content }) => ({ content, destroy() {} })), getEditorContent: vi.fn((view) => view.content) }));
 
 const notify = vi.fn();
 vi.mock('./notifications.js', async () => {
@@ -49,8 +51,10 @@ const frames = () => new Promise((r) => setTimeout(r, 40));
 Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return 600; } });
 
 describe('rule library page', () => {
+    afterEach(() => vi.unstubAllGlobals());
     beforeEach(() => {
         vi.resetModules();
+        vi.stubGlobal('jsyaml', yaml);
         setupDom();
         invokeMock.mockReset();
         invokeMock.mockImplementation(async (cmd, args) => {
@@ -81,7 +85,27 @@ describe('rule library page', () => {
         toggle.dispatchEvent(new Event('change'));
         await flush();
         expect(prismMock.toggleGroup).toHaveBeenCalledWith('ads.prism.yaml', true);
-        expect(prismMock.rebuild).toHaveBeenCalled();
+        expect(prismMock.rebuildWithOverrides).toHaveBeenCalled();
+    });
+
+    it('keeps a disabled file saved when rebuild fails without applying the stale config', async () => {
+        prismMock.rebuildWithOverrides.mockRejectedValueOnce(new Error('Profile rebuild failed'));
+        let enabled = true;
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation((command, args) => command === 'rule_list'
+            ? [{ ...FILES[0], enabled }] : previous(command, args));
+        prismMock.toggleGroup.mockImplementationOnce(async () => { enabled = false; return true; });
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        const toggle = document.querySelector('.rl-file-toggle');
+        toggle.checked = false;
+        toggle.dispatchEvent(new Event('change'));
+        await flush();
+        expect(prismMock.toggleGroup).toHaveBeenCalledWith('ai.prism.yaml', false);
+        expect(prismMock.apply).not.toHaveBeenCalled();
+        expect(notify).toHaveBeenCalledWith(expect.stringContaining('Profile rebuild failed'), 'warning');
+        expect(document.querySelector('.rl-file-toggle').checked).toBe(false);
+        expect(document.querySelector('.rl-file-card').classList.contains('is-disabled')).toBe(true);
     });
 
     it('editor: Add rule keeps the list and inserts on ✓; rows edit in place', async () => {
@@ -120,6 +144,231 @@ describe('rule library page', () => {
         expect(update?.[1].content).toContain('DOMAIN-SUFFIX,gemini.google.com,OpenAI');
         expect(update?.[1].content).toContain('DOMAIN-SUFFIX,chatgpt.com,OpenAI');
         await new Promise((r) => setTimeout(r, 350));
+    });
+
+    it('shows the rebuild error after deleting a file and does not reapply stale rules', async () => {
+        prismMock.rebuildWithOverrides.mockRejectedValueOnce(new Error('Invalid target: missing-group'));
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        /** @type {HTMLElement} */ (document.querySelector('.rl-file-more')).click();
+        const actions = [...document.querySelectorAll('.ctx-menu-root button')];
+        /** @type {HTMLElement} */ (actions.at(-1)).click();
+        await flush();
+        /** @type {HTMLElement} */ (document.getElementById('modal-confirm')).click();
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        await flush();
+        expect(invokeMock).toHaveBeenCalledWith('rule_delete', { filename: 'ai.prism.yaml' });
+        expect(notify).toHaveBeenCalledWith(expect.stringContaining('Invalid target: missing-group'), 'warning');
+        expect(prismMock.apply).not.toHaveBeenCalled();
+    });
+
+    it.each([0, 1])('keeps the other duplicate in its list after deleting row %i', async (deleted) => {
+        vi.stubGlobal('jsyaml', yaml);
+        const duplicate = 'DOMAIN,a.com,DIRECT';
+        const content = yaml.dump({ rules: { $prepend: [duplicate], $append: [duplicate] } });
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation(async (command, args) => command === 'rule_read' ? content : previous(command, args));
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        document.querySelector('.rl-file-edit').click();
+        await flush();
+        await frames();
+        document.querySelectorAll('.btn-rl-rule-del')[deleted].click();
+        document.getElementById('rl-editor-save').click();
+        await flush();
+        const saved = invokeMock.mock.calls.find(([command]) => command === 'rule_update')?.[1].content;
+        expect(yaml.load(saved).rules).toEqual({
+            $prepend: deleted === 0 ? [] : [duplicate],
+            $append: deleted === 1 ? [] : [duplicate],
+        });
+        await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+
+    it.each(['down', 'up'])('moves only the selected rule across the profile boundary: %s', async (direction) => {
+        const a = 'DOMAIN,a.com,DIRECT';
+        const b = 'DOMAIN,b.com,DIRECT';
+        const c = 'DOMAIN,c.com,DIRECT';
+        const content = yaml.dump({ rules: { $prepend: [a], $append: [b, c] } });
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation((command, args) => command === 'rule_read' ? content : previous(command, args));
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        document.querySelector('.rl-file-edit').click();
+        await flush();
+        await frames();
+        const button = direction === 'down' ? document.querySelector('.btn-rl-rule-down') : document.querySelectorAll('.btn-rl-rule-up')[1];
+        button.click();
+        document.getElementById('rl-editor-save').click();
+        await flush();
+        const saved = invokeMock.mock.calls.find(([command]) => command === 'rule_update')?.[1].content;
+        expect(yaml.load(saved).rules).toEqual(direction === 'down'
+            ? { $prepend: [], $append: [b, a, c] }
+            : { $prepend: [b, a], $append: [c] });
+        await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+
+    it('preserves mixed-list identity when an edited rule becomes the other list\'s duplicate', async () => {
+        vi.stubGlobal('jsyaml', yaml);
+        const content = yaml.dump({ rules: { $prepend: ['DOMAIN,a.com,DIRECT'], $append: ['DOMAIN,b.com,DIRECT'] } });
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation(async (command, args) => command === 'rule_read' ? content : previous(command, args));
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        document.querySelector('.rl-file-edit').click();
+        await flush();
+        await frames();
+        document.querySelector('#rl-vs-lines .rl-rule-row').click();
+        await frames();
+        const value = document.getElementById('rl-edit-value');
+        value.value = 'b.com';
+        value.dispatchEvent(new Event('input'));
+        document.getElementById('rl-edit-ok').click();
+        document.getElementById('rl-editor-save').click();
+        await flush();
+        const saved = invokeMock.mock.calls.find(([command]) => command === 'rule_update')?.[1].content;
+        expect(yaml.load(saved).rules).toEqual({ $prepend: ['DOMAIN,b.com,DIRECT'], $append: ['DOMAIN,b.com,DIRECT'] });
+        await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+
+    it.each([
+        'rules: true\n',
+        'rules: {$append: false}\n',
+        yaml.dump({ rules: { $prepend: [{ type: 'DOMAIN', payload: 'a.com', proxy: 'DIRECT' }] } }),
+    ])('opens unrepresentable rules as YAML and disables the visual editor: %s', async (content) => {
+        vi.stubGlobal('jsyaml', yaml);
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation(async (command, args) => command === 'rule_read' ? content : previous(command, args));
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        document.querySelector('.rl-file-edit').click();
+        await flush();
+        expect(document.querySelector('[data-rl-mode="visual"]').disabled).toBe(true);
+        expect(document.getElementById('rl-editor-text').classList.contains('hidden')).toBe(false);
+        const { createEditor } = await import('./editor/prism-editor.js');
+        expect(createEditor).toHaveBeenCalledWith(expect.objectContaining({ content }));
+        document.getElementById('rl-editor-cancel').click();
+        await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+
+    it('preserves a conflicting draft until the user chooses to reopen the current file', async () => {
+        vi.stubGlobal('jsyaml', yaml);
+        const latest = 'rules:\n  $append:\n    - DOMAIN,newer.com,DIRECT\n';
+        const fixture = 'rules:\n  $prepend:\n    - DOMAIN-SUFFIX,openai.com,OpenAI\n  $append:\n    - DOMAIN-SUFFIX,anthropic.com,OpenAI\n';
+        const draft = fixture.replace('openai.com', 'my-draft.com');
+        let file = fixture;
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation(async (command, args) => {
+            if (command === 'rule_read') return file;
+            if (command === 'rule_update') {
+                expect(args.expectedContent).toBe(fixture);
+                expect(args.content).toBe(draft);
+                file = latest;
+                throw new Error('RULE_FILE_CHANGED: Reopen and retry.');
+            }
+            return previous(command, args);
+        });
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        document.querySelector('.rl-file-edit').click();
+        await flush();
+        await frames();
+        const { getEditorContent } = await import('./editor/prism-editor.js');
+        document.querySelector('[data-rl-mode="text"]').click();
+        getEditorContent.mockReturnValueOnce(draft);
+        document.getElementById('rl-editor-save').click();
+        await vi.waitFor(() => expect(document.querySelector('[data-conflict-draft]')).not.toBeNull());
+        expect(document.querySelector('[data-conflict-draft]').value).toBe(draft);
+        expect(document.getElementById('rl-editor-save').disabled).toBe(true);
+        document.querySelector('[data-conflict-reopen]').click();
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        await flush();
+        await frames();
+        expect(document.querySelector('#rl-vs-lines').textContent).toContain('newer.com');
+        expect(prismMock.rebuildWithOverrides).not.toHaveBeenCalled();
+        document.getElementById('rl-editor-cancel').click();
+        await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+
+    it('does not destroy a newer text editor when a closed editor finishes saving', async () => {
+        const { queueRuleWrite } = await import('./rule-library/write-queue.js');
+        const { createEditor, getEditorContent } = await import('./editor/prism-editor.js');
+        const destroy = vi.fn();
+        createEditor.mockImplementationOnce(({ content }) => ({ content, destroy }));
+        getEditorContent.mockImplementationOnce((view) => view.content);
+        let release;
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation((command, args) => command === 'rule_update'
+            ? new Promise((resolve) => { release = resolve; }) : previous(command, args));
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        try {
+            document.querySelector('.rl-file-edit').click();
+            await flush();
+            document.getElementById('rl-editor-save').click();
+            await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+            document.getElementById('rl-editor-cancel').click();
+            await new Promise((resolve) => setTimeout(resolve, 350));
+            document.querySelector('.rl-file-edit').click();
+            await flush();
+            document.querySelector('[data-rl-mode="text"]').click();
+            const listsBeforeSave = invokeMock.mock.calls.filter(([command]) => command === 'rule_list').length;
+            release();
+            // A queued sentinel settles only after the actual save and apply.
+            await queueRuleWrite(async () => {});
+            expect(destroy).not.toHaveBeenCalled();
+            await vi.waitFor(() => expect(invokeMock.mock.calls.filter(([command]) => command === 'rule_list').length).toBeGreaterThan(listsBeforeSave));
+            expect(document.getElementById('rl-editor-text').classList.contains('hidden')).toBe(false);
+        } finally {
+            release?.();
+            await queueRuleWrite(async () => {});
+            document.getElementById('rl-editor-cancel')?.click();
+            await new Promise((resolve) => setTimeout(resolve, 350));
+        }
+    });
+
+    it('keeps generated override files read-only in library actions', async () => {
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation((command, args) => command === 'rule_list'
+            ? [{ ...FILES[0], read_only: true }] : previous(command, args));
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        expect(document.querySelector('.rl-file-edit').disabled).toBe(true);
+        expect(document.querySelector('.rl-file-toggle').disabled).toBe(true);
+        document.querySelector('.rl-file-more').click();
+        expect(document.querySelectorAll('.ctx-menu-root button')).toHaveLength(1);
+    });
+
+    it('refuses visual editing when the YAML parser is unavailable', async () => {
+        vi.stubGlobal('jsyaml', undefined);
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        document.querySelector('.rl-file-edit').click();
+        await flush();
+        expect(document.getElementById('rl-editor-save')).toBeNull();
+        expect(invokeMock.mock.calls.some(([command]) => command === 'rule_update')).toBe(false);
+    });
+
+    it('preserves untouched YAML text across modes and rejects scalar rules', async () => {
+        const original = '# original\nrules:\n  $prepend: ["DOMAIN,a.com,DIRECT"]\n  $append: ["MATCH,Proxy"]\n';
+        const previous = invokeMock.getMockImplementation();
+        invokeMock.mockImplementation((command, args) => command === 'rule_read' ? original : previous(command, args));
+        const { createEditor, getEditorContent } = await import('./editor/prism-editor.js');
+        const { initRuleLibraryPage } = await import('./rule-library.js');
+        await initRuleLibraryPage();
+        document.querySelector('.rl-file-edit').click();
+        await flush();
+        document.querySelector('[data-rl-mode="text"]').click();
+        expect(createEditor).toHaveBeenLastCalledWith(expect.objectContaining({ content: original }));
+        getEditorContent.mockReturnValueOnce('rules: true');
+        document.querySelector('[data-rl-mode="visual"]').click();
+        expect(document.getElementById('rl-editor-text').classList.contains('hidden')).toBe(false);
+        const withComment = '# extra comment\n' + original;
+        getEditorContent.mockReturnValueOnce(withComment);
+        document.querySelector('[data-rl-mode="visual"]').click();
+        document.querySelector('[data-rl-mode="text"]').click();
+        expect(createEditor).toHaveBeenLastCalledWith(expect.objectContaining({ content: withComment }));
+        document.getElementById('rl-editor-cancel').click();
+        await new Promise((resolve) => setTimeout(resolve, 350));
     });
 
     it('insert dialog: one form with visible positions', async () => {

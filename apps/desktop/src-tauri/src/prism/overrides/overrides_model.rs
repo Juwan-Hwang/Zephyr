@@ -127,6 +127,13 @@ pub struct OverrideLog {
     pub duration_us: u64,
     pub success: bool,
     pub config_modified: bool,
+    /// Whether a single live run actually reloaded the core. Older and batch
+    /// records omit this; a successful save while stopped explicitly says false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reloaded: Option<bool>,
+    /// A sent reload had no trustworthy response and may already be live.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reload_uncertain: Option<bool>,
     pub error: Option<String>,
     pub logs: Vec<LogEntry>,
 }
