@@ -26,6 +26,8 @@ pub mod network_coordinator;
 pub mod os_notification;
 pub mod prism;
 pub mod process_icon;
+pub mod runtime_dns;
+pub mod speed_test;
 pub mod sys_proxy;
 pub mod tray;
 pub mod updater;
@@ -181,6 +183,20 @@ pub(crate) struct Settings {
     /// Hide proxy nodes that are unavailable (timeout) in the proxy list.
     #[serde(default)]
     hide_timeout_nodes: bool,
+    /// Address the latency test asks for through each node; `None` uses the
+    /// built-in default.
+    #[serde(default)]
+    latency_test_url: Option<String>,
+    /// File the download speed test fetches; `None` uses the built-in default.
+    #[serde(default)]
+    speed_test_url: Option<String>,
+    /// Longest a download speed test runs for one node, in seconds.
+    #[serde(default)]
+    speed_test_max_secs: Option<u32>,
+    /// Show the address sites see (looked up through the proxy) beside the
+    /// current node.
+    #[serde(default)]
+    show_exit_ip: bool,
     // --- Global user preferences (applied to all profiles) ---
     /// Proxy mode: rule, global, or direct.
     #[serde(default)]
@@ -815,6 +831,12 @@ fn save_settings(
     // flip the flag with no transform, leaving the flag and the profile files
     // disagreeing.
     next.encrypt_configs = guard.encrypt_configs;
+    // Diagnostic preferences are changed/reset through patch_settings. A DNS
+    // or card-order snapshot must not restore older values over those writes.
+    next.latency_test_url.clone_from(&guard.latency_test_url);
+    next.speed_test_url.clone_from(&guard.speed_test_url);
+    next.speed_test_max_secs = guard.speed_test_max_secs;
+    next.show_exit_ip = guard.show_exit_ip;
     keep_backend_owned(&mut next, &guard);
     let snapshot = next.clone();
     // Persist before publishing the snapshot in memory, so a failed write cannot
@@ -935,6 +957,31 @@ fn patch_settings_blocking(
     let mut guard = lock_guard.clone();
     let mut modified = false;
     if let serde_json::Value::Object(map) = patch {
+        for field in ["dns_nameservers", "dns_fallbacks"] {
+            if let Some(value) = map.get(field) {
+                let _: Option<Vec<String>> =
+                    serde_json::from_value(value.clone()).map_err(|_error| {
+                        format!("Invalid {field}: expected an array of strings or null")
+                    })?;
+            }
+        }
+        for field in ["latency_test_url", "speed_test_url"] {
+            if let Some(value) = map.get(field) {
+                if !value.is_string() && !value.is_null() {
+                    return Err(format!("Invalid {field}: expected a string or null"));
+                }
+            }
+        }
+        if let Some(value) = map.get("speed_test_max_secs") {
+            let _: Option<u32> = serde_json::from_value(value.clone()).map_err(|_error| {
+                "Invalid speed_test_max_secs: expected a nonnegative integer or null".to_owned()
+            })?;
+        }
+        if let Some(value) = map.get("show_exit_ip") {
+            if !value.is_boolean() && !value.is_null() {
+                return Err("Invalid show_exit_ip: expected a boolean or null".to_owned());
+            }
+        }
         // Validate encrypt_configs before mutating state to prevent inconsistent in-memory state
         if let Some(v) = map.get("encrypt_configs") {
             if matches!(serde_json::from_value::<bool>(v.clone()), Ok(true))
@@ -977,9 +1024,9 @@ fn patch_settings_blocking(
                         emit_warn!(
                             Core,
                             CORE_START_FAILED,
-                            "failed to deserialize field '{}': {:?}",
+                            "failed to deserialize field '{}' as {}",
                             stringify!($field),
-                            v
+                            std::any::type_name_of_val(&guard.$field)
                         );
                     }
                 }
@@ -995,6 +1042,13 @@ fn patch_settings_blocking(
         patch_field!(auto_update_client);
         patch_field!(autostart);
         patch_field!(hide_timeout_nodes);
+        patch_field!(latency_test_url);
+        patch_field!(speed_test_url);
+        patch_field!(speed_test_max_secs);
+        if let Some(value) = map.get("show_exit_ip") {
+            guard.show_exit_ip = value.as_bool().unwrap_or(false);
+            modified = true;
+        }
         patch_field!(custom_args);
         // A non-null mode was already rejected during validation, so only an
         // explicit null (Restore Defaults) reaches here: it is an intentional
@@ -1034,6 +1088,16 @@ fn patch_settings_blocking(
         patch_field!(allow_lan);
         patch_field!(unified_delay);
         patch_field!(dns_rewrite_enabled);
+        patch_field!(dns_nameservers);
+        patch_field!(dns_fallbacks);
+        if let Some(value) = map.get("ui_scale") {
+            let scale = value
+                .as_f64()
+                .filter(|scale| (0.5..=2.0).contains(scale))
+                .ok_or_else(|| "Scale must be between 0.5 and 2.0".to_owned())?;
+            guard.ui_scale = scale;
+            modified = true;
+        }
         patch_field!(theme_mode);
         patch_field!(app_opacity);
         patch_field!(node_scroll);
@@ -2044,6 +2108,10 @@ pub fn run() {
                             // Lightweight mode: destroy the WebView to free memory.
                             // The app stays alive in the tray because we prevent
                             // exit on ExitRequested. Tray click recreates the window.
+                            if window.label() == "main" {
+                                speed_test::speed_test_cancel(None);
+                                speed_test::lookup_exit_ip_cancel();
+                            }
                             let _ = window.destroy();
                         } else {
                             let _ = window.hide();
@@ -2067,7 +2135,11 @@ pub fn run() {
                     // actually gone.  This prevents an asynchronous destroy
                     // event from the old window from invalidating the
                     // heartbeat of a newly recreated window.
-                    if window.app_handle().get_webview_window("main").is_none() {
+                    if window.label() == "main"
+                        && window.app_handle().get_webview_window("main").is_none()
+                    {
+                        speed_test::speed_test_cancel(None);
+                        speed_test::lookup_exit_ip_cancel();
                         invalidate_heartbeat(window.app_handle());
                     }
                 }
@@ -2260,6 +2332,17 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_third_party_licenses,
+            runtime_dns::apply_runtime_dns,
+            runtime_dns::switch_proxy_node,
+            speed_test::speed_test_port,
+            speed_test::speed_test_generation,
+            speed_test::speed_test_ready_generation,
+            speed_test::speed_test_group_owned,
+            speed_test::speed_test_select_node,
+            speed_test::speed_test_cancel,
+            speed_test::speed_test_download,
+            speed_test::lookup_exit_ip,
+            speed_test::lookup_exit_ip_cancel,
             get_portable_mode,
             set_ui_scale,
             start_core,
@@ -2310,6 +2393,7 @@ pub fn run() {
             fetch_text,
             restart_core_as_root_cmd,
             set_tun_enabled,
+            core_manager::core::tun_manager::apply_runtime_tun,
             record_tun_enabled,
             kill_all_mihomo_as_root_cmd,
             disable_tun_cmd,

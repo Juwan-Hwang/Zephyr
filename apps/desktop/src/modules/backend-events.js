@@ -7,7 +7,8 @@
 //  Fatal/Error events trigger immediate Toast notifications.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { listen } from '../api.js';
+import { listen, clearProviderCache, isIpcAvailable } from '../api.js';
+import { Bus, Events } from '../ui/events.js';
 import { showNotification } from '../ui/notifications.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -26,6 +27,64 @@ let _prismEventUnlisten = null;
 
 /** @type {(() => Promise<void>) | null} */
 let _backendEventUnlisten = null;
+/** @type {(() => Promise<void>) | null} */
+let _diagnosticsUnlisten = null;
+let _diagnosticsEpoch = 0;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let _diagnosticsRetry = null;
+/** @type {Promise<void> | null} */
+let _diagnosticsRegistration = null;
+const DIAGNOSTICS_REGISTRATION_TIMEOUT_MS = 5000;
+
+function ensureDiagnosticsListener() {
+    if (!isIpcAvailable()) return null;
+    if (_diagnosticsUnlisten !== null || _diagnosticsRegistration !== null) return _diagnosticsRegistration;
+    if (_diagnosticsRetry !== null) clearTimeout(_diagnosticsRetry);
+    _diagnosticsRetry = null;
+    const epoch = _diagnosticsEpoch;
+    const attempt = (async () => {
+        const registration = listen('diagnostics-invalidated', (event) => {
+            if (epoch !== _diagnosticsEpoch) return;
+            clearProviderCache();
+            Bus.emit(Events.DIAGNOSTICS_INVALIDATED, event?.payload);
+            // Only confirmed background config replacement requests DNS
+            // restoration. The DNS overlay's own invalidation must not loop.
+            if (event?.payload?.restoreRuntime === true) Bus.emit(Events.CONFIG_UPDATED, { reloaded: true });
+            else if (event?.payload?.reloadUnconfirmed === true) Bus.emit(Events.CONFIG_UPDATED, { reloaded: false, restoreRuntime: true });
+        });
+        /** @type {ReturnType<typeof setTimeout> | undefined} */
+        let timer;
+        try {
+            // The bridge cannot cancel a pending registration. Warn once but
+            // keep its slot until it settles, rather than leaking callbacks on retries.
+            timer = setTimeout(() => {
+                if (epoch === _diagnosticsEpoch) logger.warn('Diagnostic listener registration is still pending');
+            }, DIAGNOSTICS_REGISTRATION_TIMEOUT_MS);
+            const unlisten = await registration;
+            if (epoch !== _diagnosticsEpoch) { await unlisten?.(); return; }
+            _diagnosticsUnlisten = unlisten;
+            // Reload notifications may have been emitted before registration
+            // completed, including a successful first attempt.
+            clearProviderCache();
+            Bus.emit(Events.DIAGNOSTICS_INVALIDATED);
+        } catch (error) {
+            logger.warn('Diagnostic reload listener could not be registered', error);
+            if (epoch === _diagnosticsEpoch) {
+                _diagnosticsRetry = setTimeout(() => {
+                    _diagnosticsRetry = null;
+                    if (epoch === _diagnosticsEpoch) void ensureDiagnosticsListener();
+                }, 3000);
+            }
+        } finally {
+            clearTimeout(timer);
+        }
+    })();
+    _diagnosticsRegistration = attempt;
+    void attempt.finally(() => {
+        if (_diagnosticsRegistration === attempt) _diagnosticsRegistration = null;
+    });
+    return attempt;
+}
 
 /** @type {Set<(entry: { type: string, message: string, timestamp: string, source?: string, data?: any }) => void>} */
 const _eventSubscribers = new Set();
@@ -286,9 +345,11 @@ export function clearExtLogEvents() {
  */
 export async function initBackendEventListeners() {
     // Already initialized
-    if (_backendEventUnlisten && _prismEventUnlisten) return;
+    if (_backendEventUnlisten && _prismEventUnlisten && _diagnosticsUnlisten) return;
+    // Diagnostic recovery must not depend on logging listener availability.
+    void ensureDiagnosticsListener();
 
-    // backend-event listener — registered FIRST and awaited directly.
+    // backend-event listener — awaited directly so failures reach the caller.
     //
     // This is the critical path: without it, all frontend logs forwarded
     // via forwardToBackend() are permanently lost (emit_to_main() dispatches
@@ -318,11 +379,16 @@ export async function initBackendEventListeners() {
  * @returns {void}
  */
 export function cleanupBackendEventListeners() {
-    for (const unlisten of [_prismEventUnlisten, _backendEventUnlisten]) {
+    _diagnosticsEpoch++;
+    if (_diagnosticsRetry !== null) clearTimeout(_diagnosticsRetry);
+    _diagnosticsRetry = null;
+    _diagnosticsRegistration = null;
+    for (const unlisten of [_prismEventUnlisten, _backendEventUnlisten, _diagnosticsUnlisten]) {
         unlisten?.().catch((/** @type {unknown} */ err) => {
             logger.warn('unlisten failed:', err);
         });
     }
     _prismEventUnlisten = null;
     _backendEventUnlisten = null;
+    _diagnosticsUnlisten = null;
 }

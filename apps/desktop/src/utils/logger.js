@@ -257,7 +257,7 @@ export const advancedLogger   = createLogger('Advanced',     'info');
 export const sysproxyLogger   = createLogger('SysProxy',     'info');
 
 /** Node wheel / selector */
-export const nodeWheelLogger  = createLogger('NodeWheel',    'info');
+export const homeNodePickerLogger = createLogger('HomeNodePicker', 'info');
 
 /** Proxy memory */
 export const proxyMemoryLogger = createLogger('ProxyMemory', 'info');

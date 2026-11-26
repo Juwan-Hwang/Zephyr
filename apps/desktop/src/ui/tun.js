@@ -4,7 +4,7 @@
  * Extracted from ui.js for modularity.
  */
 
-import { patchConfig, closeAllConnections, invoke, restartCore, setSecret, getConfig, getCurrentWindow, whileCoreReplaced } from '../api.js';
+import { closeAllConnections, invoke, restartCore, setSecret, getConfig, getCurrentWindow, whileCoreReplaced } from '../api.js';
 import { tunLogger } from '../utils/logger.js';
 import { setWsSecret } from '../websocket.js';
 import { showNotification, showConfirmModal } from './notifications.js';
@@ -14,6 +14,7 @@ import { COMMANDS } from '@zephyr/shared';
 import { postRestartRecovery, restartedProfile } from './lifecycle.js';
 import { currentProfile } from './active-profile.js';
 import { renderTunStatus } from './tun-status.js';
+import { Bus, Events } from './events.js';
 
 /**
  * The backend's answer when the user stopped the core before a root restart
@@ -251,6 +252,9 @@ export function initTunToggle() {
                             setSecret(result);
                             setWsSecret(result);
                         }
+                        // This privileged replacement bypasses restartCore's
+                        // event. Restore runtime overlays using the new secret.
+                        Bus.emit(Events.CORE_RESTARTED);
                     } catch (authErr) {
                         // A stop of the user's during the restart is no failure.
                         if (authErr !== CORE_STOPPED_BEFORE_START && authErr !== CORE_STOPPED_MEANWHILE) {
@@ -345,8 +349,8 @@ export function initTunToggle() {
                     }
                 }
             } else {
-                // Non-macOS: use API to update config
-                await patchConfig({ tun: { enable } });
+                // Share the native config lock with full DNS overlay reloads.
+                await invoke(COMMANDS.APPLY_RUNTIME_TUN, { enable });
 
                 const _coreConfig = await invoke(COMMANDS.READ_CONFIG).catch(() => null);
                 const config = await getConfig();
@@ -435,7 +439,7 @@ export function initTunToggle() {
                             //
                             // The restart regenerates `run_config.yaml` from the
                             // stored preference, and `prepare_runtime_config`
-                            // lets `tun_enabled` override whatever `patchConfig`
+                            // lets `tun_enabled` override whatever the live patch
                             // wrote. So with this write failed, restarting would
                             // set `tun.enable: false` and bring the core up
                             // without TUN — the restart would undo the change it
