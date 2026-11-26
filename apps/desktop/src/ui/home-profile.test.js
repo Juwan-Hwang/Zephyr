@@ -1,0 +1,157 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('./cache.js', () => ({
+    getConfigsCached: vi.fn(async () => [
+        { name: 'config.yaml', is_active: true, sub_info: `upload=0; download=${5 * 1073741824}; total=${50 * 1073741824}` },
+        { name: 'work.yml' },
+    ]),
+    getSettingsCached: vi.fn(async () => ({ last_config: 'config.yaml' })),
+    invalidateConfigsCache: vi.fn(),
+}));
+vi.mock('../i18n.js', () => ({ t: (/** @type {string} */ k) => k }));
+vi.mock('./tray.js', () => ({ switchProfile: vi.fn(async () => {}) }));
+const store = { noSubscription: false };
+vi.mock('./state.js', () => ({ appStore: { get: (/** @type {string} */ k) => /** @type {any} */ (store)[k] } }));
+
+const { initHomeProfile, profileLabel } = await import('./home-profile.js');
+const { getSettingsCached } = await import('./cache.js');
+const { Bus, Events } = await import('./events.js');
+
+const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+
+describe('home profile menu', () => {
+    beforeEach(() => { document.body.innerHTML = '<div id="home-profile"></div>'; });
+
+    it('drops the file extension', () => {
+        expect(profileLabel('a.yaml')).toBe('a');
+        expect(profileLabel('b.YML')).toBe('b');
+        expect(profileLabel('c')).toBe('c');
+    });
+
+    it('shows the current profile and switches to another', async () => {
+        const switchTo = vi.fn(async () => {});
+        const stop = initHomeProfile({ switchTo });
+        await flush();
+        const btn = /** @type {HTMLButtonElement} */ (document.getElementById('home-profile-btn'));
+        expect(btn.textContent).toContain('config');
+        btn.click();
+        await flush();
+        const items = document.querySelectorAll('[role="menuitemradio"]');
+        expect(items).toHaveLength(2);
+        expect(items[0].getAttribute('aria-checked')).toBe('true');
+        // Usage under each name; none reported reads as such.
+        expect(items[0].querySelector('.home-profile-usage')?.textContent).toBe('5 GB / 50 GB');
+        expect(items[1].querySelector('.home-profile-usage')?.textContent).toBe('homeProfileNoUsage');
+        expect(btn.getAttribute('aria-expanded')).toBe('true');
+        /** @type {HTMLElement} */ (items[1]).click();
+        await flush();
+        expect(switchTo).toHaveBeenCalledWith('work.yml');
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+        stop();
+    });
+
+    it('switches to the active profile again only while the minimal config runs instead', async () => {
+        const switchTo = vi.fn(async () => {});
+        const stop = initHomeProfile({ switchTo });
+        await flush();
+        const btn = /** @type {HTMLButtonElement} */ (document.getElementById('home-profile-btn'));
+        const pickActive = async () => {
+            btn.click();
+            await flush();
+            /** @type {HTMLElement} */ (document.querySelectorAll('[role="menuitemradio"]')[0]).click();
+            await flush();
+        };
+        await pickActive();
+        expect(switchTo).not.toHaveBeenCalled();
+        store.noSubscription = true;
+        try {
+            await pickActive();
+            expect(switchTo).toHaveBeenCalledWith('config.yaml');
+        } finally {
+            store.noSubscription = false;
+            stop();
+        }
+    });
+
+    it('closes on Escape without switching', async () => {
+        const switchTo = vi.fn(async () => {});
+        const stop = initHomeProfile({ switchTo });
+        await flush();
+        const btn = /** @type {HTMLButtonElement} */ (document.getElementById('home-profile-btn'));
+        btn.click();
+        await flush();
+        expect(document.querySelector('[role="menu"]')).not.toBeNull();
+        expect(btn.getAttribute('aria-expanded')).toBe('true');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+        expect(switchTo).not.toHaveBeenCalled();
+        stop();
+    });
+
+    it('can open again before a cancelled settings read finishes', async () => {
+        const stop = initHomeProfile();
+        await flush();
+        const btn = /** @type {HTMLButtonElement} */ (document.getElementById('home-profile-btn'));
+        /** @type {(settings: any) => void} */
+        let release = () => {};
+        vi.mocked(getSettingsCached).mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+        btn.click();
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        btn.click();
+        await flush();
+        expect(btn.getAttribute('aria-expanded')).toBe('true');
+        release({ last_config: 'obsolete.yaml' });
+        await flush();
+        expect(btn.textContent).toContain('config');
+        expect(btn.getAttribute('aria-expanded')).toBe('true');
+        stop();
+    });
+
+    it('a second click cancels a menu still waiting for settings', async () => {
+        const stop = initHomeProfile();
+        await flush();
+        const btn = /** @type {HTMLButtonElement} */ (document.getElementById('home-profile-btn'));
+        /** @type {(settings: any) => void} */
+        let release = () => {};
+        vi.mocked(getSettingsCached).mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+        btn.click();
+        btn.click();
+        release({ last_config: 'config.yaml' });
+        await flush();
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+        btn.click();
+        await flush();
+        expect(btn.getAttribute('aria-expanded')).toBe('true');
+        stop();
+    });
+
+    it('does not label an unconfirmed profile when the post-switch read fails', async () => {
+        const stop = initHomeProfile({ switchTo: async () => {} });
+        await flush();
+        const btn = /** @type {HTMLButtonElement} */ (document.getElementById('home-profile-btn'));
+        btn.click();
+        await flush();
+        vi.mocked(getSettingsCached).mockRejectedValueOnce(new Error('settings unavailable'));
+        /** @type {HTMLElement} */ (document.querySelectorAll('[role="menuitemradio"]')[1]).click();
+        await flush();
+        expect(btn.textContent).toContain('homeProfile');
+        expect(btn.textContent).not.toContain('work');
+        stop();
+    });
+
+    it('closes stale checked menu items when a refresh cannot read the current profile', async () => {
+        const stop = initHomeProfile();
+        await flush();
+        const btn = /** @type {HTMLButtonElement} */ (document.getElementById('home-profile-btn'));
+        btn.click();
+        await flush();
+        expect(document.querySelector('[role="menu"]')).not.toBeNull();
+        vi.mocked(getSettingsCached).mockRejectedValueOnce(new Error('settings unavailable'));
+        Bus.emit(Events.CONFIG_UPDATED);
+        await flush();
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+        expect(document.activeElement).toBe(btn);
+        expect(btn.textContent).toContain('homeProfile');
+        stop();
+    });
+});

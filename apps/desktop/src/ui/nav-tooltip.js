@@ -99,6 +99,15 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
         clearShowTimer();
         const label = getNavLabel(btn);
         if (!label) return;
+        // An expanded sidebar already shows each label beside its icon; only
+        // a label cut off by the sidebar width still gets the tooltip.
+        if (document.documentElement.classList.contains('sidebar-expanded')) {
+            const text = btn.querySelector('.nav-label');
+            if (!(text instanceof HTMLElement) || text.scrollWidth <= text.clientWidth) {
+                hide();
+                return;
+            }
+        }
         tip.textContent = label;
         position(btn);
         current = btn;
@@ -251,6 +260,12 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
         if (current && current.isConnected) show(current);
     };
 
+    const onSidebarChange = () => {
+        hide();
+        const btn = focusedNavBtn() || (hovered !== suppressed ? hovered : null);
+        if (btn?.isConnected) show(btn);
+    };
+
     nav.addEventListener('pointerover', onPointerOver);
     nav.addEventListener('pointerout', onPointerOut);
     nav.addEventListener('focusin', onFocusIn);
@@ -258,6 +273,8 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
     nav.addEventListener('pointerdown', onPointerDown);
     nav.addEventListener('click', onClick);
     document.addEventListener('keydown', onKeyDown);
+    // Expanding or collapsing the sidebar changes which labels need a tooltip.
+    document.addEventListener('zephyr:sidebar-change', onSidebarChange);
     window.addEventListener('resize', onViewportChange);
     window.addEventListener('blur', onViewportChange);
     nav.addEventListener('scroll', onViewportChange, { capture: true, passive: true });
@@ -272,6 +289,7 @@ export function initNavTooltips(nav = document.getElementById('sidebar-nav')) {
         nav.removeEventListener('pointerdown', onPointerDown);
         nav.removeEventListener('click', onClick);
         document.removeEventListener('keydown', onKeyDown);
+        document.removeEventListener('zephyr:sidebar-change', onSidebarChange);
         window.removeEventListener('resize', onViewportChange);
         window.removeEventListener('blur', onViewportChange);
         nav.removeEventListener('scroll', onViewportChange, { capture: true });

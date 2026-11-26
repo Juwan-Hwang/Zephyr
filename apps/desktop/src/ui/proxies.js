@@ -7,14 +7,14 @@
  */
 
 import { decideGroupMismatch } from './group-mismatch.js';
-import { switchProxyResult, SWITCH_BUSY, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies, getProxiesMerged, SPECIAL_PROXY_NAMES, proxySwitchMark, proxySwitchedSince, isLatestSwitch, coreReplacements } from '../api.js';
+import { switchProxyResult, SWITCH_BUSY, testProxy, abortLatencyTests, closeAllConnections, getConfig, invoke, getLatencyTestSignal, resetLatencyTestController, restartCore, getProxies, getProxiesMerged, SPECIAL_PROXY_NAMES, proxySwitchMark, proxySwitchedSince, isLatestSwitch, coreReplacements, clearProviderCache } from '../api.js';
 import { noNetworkChangeSince } from './network-change.js';
 import { proxyLogger } from '../utils/logger.js';
 import { getDelayColorClass } from '../utils/format.js';
 import { buildLatencyPriorityQueue } from '../utils/array.js';
 import { debounce } from '../utils/debounce.js';
 import { translations, currentLang, t, t as tFmt, getDirection } from '../i18n.js';
-import { showNotification } from './notifications.js';
+import { showNotification, showConfirmModal } from './notifications.js';
 import { SVG_ICONS } from './icons.js';
 import { setup3DEffect } from './3d-effect.js';
 import { createRovingTabindex, setItemTabStop } from '../utils/roving-tabindex.js';
@@ -34,6 +34,7 @@ import { readRunningProfile } from './running-profile.js';
 import { startObservedGroupWatcher, stopObservedGroupWatcher, resetObservedGroup } from './observed-group.js';
 import { renderTunStatus } from './tun-status.js';
 import { updateModeUI } from './modes.js';
+import { onSpeedTestChange, speedOf, isSpeedTestRunning, speedTestProgress, speedTestFraction, startSpeedTest, stopSpeedTest, sortBySpeed, readSpeedTestSettings, maxTrafficBytes } from './speed-test.js';
 
 /**
  * The profile a node switch is filed under, read live when it is clicked
@@ -646,12 +647,15 @@ function setActiveNode(card, _container) {
  * Re-exported for use by other modules.
  */
 export async function syncCoreConfig() {
+    const coreAtRead = coreReplacements();
     // A mode switch that lands while this GET is in flight owns the newer
     // value; writing this (older) response afterwards would roll the store
     // and the tray back to the previous mode.
     const modeBeforeFetch = appStore.get('currentOutboundMode');
+    // Likewise a node switch made meanwhile: its own sync draws the pill.
+    const switchMark = proxySwitchMark();
     const config = await getConfig();
-    if (!config) return;
+    if (!config || coreReplacements() !== coreAtRead) return;
 
     // Sync Mode
     if ((/** @type {any} */ (config)).mode && appStore.get('currentOutboundMode') === modeBeforeFetch) {
@@ -681,6 +685,7 @@ export async function syncCoreConfig() {
     try {
         const preferredGroupName = appStore.get('uiGroupName') || null;
         const proxyGroupsResult = await fetchProxyGroupsShared({ existingConfig: config, preferredGroupName });
+        if (coreReplacements() !== coreAtRead) return;
         let currentNode = 'Direct';
         if (proxyGroupsResult) {
             // Use the resolved uiGroupName for accurate current node display
@@ -707,7 +712,7 @@ export async function syncCoreConfig() {
             // Resolve to leaf node and display with suffix if needed
             const leafNode = resolveLeafNode(currentNode, proxyMap);
             const currentNodeEl = document.getElementById('current-node-name');
-            if (currentNodeEl) {
+            if (currentNodeEl && !proxySwitchedSince(switchMark)) {
                 // Store the group name in data attribute for robust observed node updates
                 currentNodeEl.dataset.group = currentNode;
                 currentNodeEl.textContent = formatNodeDisplayName(currentNode, leafNode);
@@ -715,7 +720,7 @@ export async function syncCoreConfig() {
         } else {
             // Fallback to Direct when no proxy groups available
             const currentNodeEl = document.getElementById('current-node-name');
-            if (currentNodeEl) {
+            if (currentNodeEl && !proxySwitchedSince(switchMark)) {
                 delete currentNodeEl.dataset.group;
                 currentNodeEl.textContent = 'Direct';
             }
@@ -743,12 +748,15 @@ export async function updateSysProxyUI() {
 
         if (!statusText) return;
 
+        // data-i18n follows the state, so a language switch keeps it (as ui/sysproxy.js does).
+        const key = isActive ? 'stateOn' : (appStore.get('noSubscription') ? 'sysProxyNeedsSubscription' : 'stateOff');
+        statusText.dataset.i18n = key;
         if (isActive) {
-            statusText.textContent = /** @type {any} */ (translations)[currentLang].proxyStatusActive || 'Proxy Active';
+            statusText.textContent = t('stateOn');
             statusText.classList.remove('text-[var(--text-muted)]');
             statusText.classList.add('text-accent');
         } else {
-            statusText.textContent = appStore.get('noSubscription') ? t('sysProxyNeedsSubscription') : t('proxyStatusReady');
+            statusText.textContent = appStore.get('noSubscription') ? t('sysProxyNeedsSubscription') : t('stateOff');
             statusText.classList.remove('text-accent');
             statusText.classList.add('text-[var(--text-muted)]');
         }
@@ -770,7 +778,7 @@ export function initProxyControls() {
     // Init sort label
     if (sortLabel) {
         const t = /** @type {any} */ (translations)[currentLang];
-        const labels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency, smart: t.sortSmart };
+        const labels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency, smart: t.sortSmart, speed: t.sortSpeed };
         sortLabel.textContent = (/** @type {any} */ (labels))[appStore.get('currentSortMode')] || labels['default'];
     }
 
@@ -807,12 +815,16 @@ export function initProxyControls() {
             });
         }
 
+        initSpeedTestButton();
+
         testBtn.onclick = async () => {
             // While a test runs the button reads "Stop · 8/19": a second click stops it.
             if (appStore.get('isTestingLatency')) {
                 abortLatencyTests();
                 return;
             }
+            // One test at a time: a download test shares the nodes and the bandwidth.
+            if (isSpeedTestRunning()) return;
             resetLatencyTestController();  // Reset controller before starting
             appStore.set('isTestingLatency', true);
             appStore.set('latencyTestStartTime', Date.now());
@@ -1601,6 +1613,245 @@ const DIRECT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 
 /** Circular arrow: re-test one node. */
 const RETEST_ICON = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>';
+/** Arrow into a tray: download speed. */
+const SPEED_ICON = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>';
+
+/**
+ * Show a node's download speed (or its place in a running test) where the
+ * card shows its protocol; put the protocol back when there is no result.
+ * @param {HTMLElement} card
+ * @param {string} name
+ */
+function paintCardSpeed(card, name) {
+    const meta = /** @type {HTMLElement|null} */ (card.querySelector('.proxy-meta'));
+    if (!meta || meta.dataset.groupNow === '1') return;
+    const e = speedOf(name);
+    const testing = e?.state === 'testing';
+    card.classList.toggle('is-speed-testing', testing);
+    let bar = /** @type {HTMLElement|null} */ (card.querySelector('.proxy-speed-progress'));
+    if (testing) {
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.className = 'proxy-speed-progress';
+            bar.setAttribute('role', 'progressbar');
+            bar.dataset.i18nAriaLabel = 'speedTesting';
+            bar.setAttribute('aria-label', t('speedTesting'));
+            bar.setAttribute('aria-valuemin', '0');
+            bar.setAttribute('aria-valuemax', '100');
+            bar.appendChild(document.createElement('span'));
+            card.appendChild(bar);
+        }
+        const pct = Math.round(speedTestFraction(name) * 100);
+        bar.setAttribute('aria-valuenow', String(pct));
+        /** @type {HTMLElement} */ (bar.firstElementChild).style.width = `${pct}%`;
+    } else {
+        bar?.remove();
+    }
+    if (!e) {
+        if (meta.dataset.speed) {
+            meta.textContent = meta.dataset.label || '';
+            delete meta.dataset.speed;
+        }
+        return;
+    }
+    const key = `${e.state}:${e.mbps ?? ''}`;
+    if (meta.dataset.speed === key) return;
+    meta.dataset.speed = key;
+    const span = document.createElement('span');
+    if (e.state === 'done' || (testing && typeof e.mbps === 'number')) {
+        span.className = testing ? 'proxy-speed is-live' : 'proxy-speed';
+        // eslint-disable-next-line no-unsanitized/property -- static SVG constant
+        span.innerHTML = SPEED_ICON; // nosemgrep: js-innerhtml-assignment — static markup
+        span.append(`${(e.mbps ?? 0).toFixed(1)} MB/s`);
+    } else {
+        span.className = testing ? 'proxy-speed is-live' : 'proxy-speed is-muted';
+        const labelKey = { waiting: 'speedWaiting', testing: 'speedTesting', skipped: 'speedSkipped', failed: 'speedFailed', done: '' }[e.state];
+        span.textContent = t(labelKey);
+        // A language switch retranslates it in place.
+        if (labelKey) span.dataset.i18n = labelKey;
+    }
+    meta.replaceChildren(span);
+}
+
+/** Repaint every card on screen and the header button. */
+function paintSpeedTest() {
+    paintFocusedSpeedAction();
+    document.querySelectorAll('#proxies-list [data-name]').forEach((w) => {
+        const wrapper = /** @type {HTMLElement} */ (w);
+        const card = /** @type {HTMLElement|null} */ (wrapper.querySelector('.proxy-card'));
+        if (card && wrapper.dataset.name) paintCardSpeed(card, wrapper.dataset.name);
+    });
+    const btn = document.getElementById('speed-test-btn');
+    const label = document.getElementById('speed-test-label');
+    const testBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('test-all-btn'));
+    const p = speedTestProgress();
+    if (btn && label) {
+        btn.classList.toggle('is-running', !!p);
+        btn.classList.toggle('hidden', _proxyToolsHidden && !p);
+        if (p) {
+            delete label.dataset.i18n;
+            delete btn.dataset.i18nTitle;
+            const text = `${t('speedTestStop')} ${p.done}/${p.total}`;
+            // Unchanged on most ticks: rewriting it would only re-run the header fit.
+            if (label.textContent !== text) label.textContent = text;
+            if (btn.title !== text) btn.title = text;
+            btn.setAttribute('aria-keyshortcuts', 'Escape');
+        } else {
+            label.dataset.i18n = 'speedTestAll';
+            btn.dataset.i18nTitle = 'speedTestAll';
+            label.textContent = t('speedTestAll');
+            btn.title = t('speedTestAll');
+            btn.removeAttribute('aria-keyshortcuts');
+        }
+        btn.toggleAttribute('disabled', !p && !!appStore.get('isTestingLatency'));
+    }
+    // One test at a time: latency and download share the nodes and the bandwidth.
+    if (testBtn) testBtn.toggleAttribute('disabled', !!p);
+}
+
+/**
+ * Test the download speed of `names`; `confirmFirst` asks before a run over a
+ * whole group, saying how much traffic it may use.
+ * @param {string[]} names
+ * @param {boolean} confirmFirst
+ */
+async function runSpeedTest(names, confirmFirst) {
+    if (!names.length) {
+        showNotification(t('notifNoNodesForSelection'), 'info');
+        return;
+    }
+    // A profile, mode or TUN change is under way: the core is about to change.
+    if (appStore.get('isNetworkUpdating')) {
+        showNotification(t('consoleSubUpdateBusy'), 'info');
+        return;
+    }
+    // The core these names were read from; another one (a profile switch,
+    // even with the same group and node names) runs other nodes.
+    const coreAtStart = coreReplacements();
+    /** @type {Awaited<ReturnType<typeof readSpeedTestSettings>> | undefined} */
+    let confirmed;
+    if (confirmFirst) {
+        // The group the names came from (the list's own state, not the
+        // header, which a render updates first): the prompt names that group.
+        const listGroup = () => currentSpeedTestCandidates()?.group || '';
+        const group = listGroup();
+        // The header may already name a group picked since (its list not drawn yet).
+        const label = group || document.getElementById('proxy-group-label')?.textContent?.trim() || '';
+        // The run uses exactly the settings the prompt shows.
+        confirmed = await readSpeedTestSettings();
+        const { maxSecs, file } = confirmed;
+        const bytes = maxTrafficBytes(names.length, file);
+        const vars = { count: String(names.length), group: label, secs: String(maxSecs) };
+        let msg = t('speedTestConfirmBody', vars);
+        msg += ` ${t(file ? 'speedTestConfirmTraffic' : 'speedTestConfirmTrafficMax', { size: formatTraffic(bytes) })}`;
+        const ok = await showConfirmModal(t('speedTestConfirmTitle', vars), msg, { confirmText: t('speedTestStart') });
+        // Another group or another core (profile) now: these are not its nodes.
+        // A group picked from the menu meanwhile (its list not drawn yet) is not this one either.
+        const picked = appStore.get('uiGroupName');
+        if (!ok || listGroup() !== group || (picked && picked !== group) || coreReplacements() !== coreAtStart || appStore.get('isNetworkUpdating')) return;
+        const currentNames = currentSpeedTestCandidates()?.names || [];
+        if (currentNames.length !== names.length || currentNames.some((name, i) => name !== names[i])) return;
+        if (isSpeedTestRunning() || appStore.get('isTestingLatency') || _retestsInFlight.size > 0) return;
+    }
+    const out = await startSpeedTest(names, confirmed);
+    if (out === 'unavailable') showNotification(t('speedTestUnavailable'), 'warning');
+    if (appStore.get('currentSortMode') === 'speed') await refreshProxies();
+}
+
+/** @param {number} bytes */
+function formatTraffic(bytes) {
+    const gb = bytes / (1024 ** 3);
+    // Rounded up: the confirmation must not understate the data used.
+    return gb >= 1 ? `${(Math.ceil(gb * 10) / 10).toFixed(1)} GB` : `${Math.ceil(bytes / (1024 ** 2))} MB`;
+}
+
+let _speedWired = false;
+/** The whole resolved group, before search and timeout filters. */
+/** @type {{ group: string, names: string[], core: number } | null} */
+let _speedTestCandidates = null;
+function currentSpeedTestCandidates() {
+    const picked = appStore.get('uiGroupName');
+    const candidate = _speedTestCandidates;
+    if (!candidate || candidate.core !== coreReplacements() || (picked && picked !== candidate.group)) return null;
+    return candidate;
+}
+let _focusedSpeedNode = '';
+function paintFocusedSpeedAction() {
+    const button = /** @type {HTMLButtonElement|null} */ (document.getElementById('focused-node-speed-test'));
+    if (!button) return;
+    const valid = !!currentSpeedTestCandidates()?.names.includes(_focusedSpeedNode);
+    button.hidden = !valid;
+    button.disabled = isSpeedTestRunning() || !!appStore.get('isTestingLatency') || !!appStore.get('isNetworkUpdating');
+    const label = `${t('speedTestNode')}: ${_focusedSpeedNode}`;
+    if (button.textContent !== label) button.textContent = label;
+}
+function clearSpeedTestCandidates() {
+    _speedTestCandidates = null;
+    paintFocusedSpeedAction();
+}
+
+/** A separate action remains discoverable outside the listbox's options. */
+function initFocusedSpeedAction() {
+    const list = document.getElementById('proxies-list');
+    if (!list || document.getElementById('focused-node-speed-test')) return;
+    const button = document.createElement('button');
+    button.id = 'focused-node-speed-test';
+    button.type = 'button';
+    button.className = 'btn-ghost proxy-focused-speed-action';
+    button.hidden = true;
+    list.insertAdjacentElement('afterend', button);
+    list.addEventListener('focusin', (event) => {
+        const node = event.target instanceof Element ? /** @type {HTMLElement|null} */ (event.target.closest('[data-name]')) : null;
+        _focusedSpeedNode = node?.dataset.name || '';
+        paintFocusedSpeedAction();
+    });
+    button.addEventListener('click', () => {
+        if (button.disabled || _retestsInFlight.size || !currentSpeedTestCandidates()?.names.includes(_focusedSpeedNode)) return;
+        void runSpeedTest([_focusedSpeedNode], false);
+    });
+}
+function initSpeedTestButton() {
+    const btn = document.getElementById('speed-test-btn');
+    if (!btn || _speedWired) return;
+    _speedWired = true;
+    initFocusedSpeedAction();
+    btn.addEventListener('click', () => {
+        if (isSpeedTestRunning()) { void stopSpeedTest(); return; }
+        if (appStore.get('isTestingLatency') || _retestsInFlight.size > 0) return;
+        const candidate = currentSpeedTestCandidates();
+        if (!candidate) return; // the current group has not finished loading
+        const names = [...candidate.names];
+        void runSpeedTest(names, true);
+    });
+    // Esc stops a run, unless something else (a dialog, a field) wants it.
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' || e.defaultPrevented || !isSpeedTestRunning()) return;
+        // Only on the Nodes page: an Esc elsewhere closes that page's own things.
+        const list = document.getElementById('proxies-list');
+        if (!list || list.closest('.hidden, [hidden]')) return;
+        const target = /** @type {Element|null} */ (e.target instanceof Element ? e.target : null);
+        if (target?.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')) return;
+        if ([...document.querySelectorAll('[aria-modal="true"]')].some((el) => !el.closest('.hidden, [hidden]'))) return;
+        e.preventDefault();
+        void stopSpeedTest();
+    });
+    onSpeedTestChange(paintSpeedTest);
+    Bus.on(Events.I18N_APPLIED, () => {
+        document.querySelectorAll('#proxies-list [data-name] .node-retest-btn').forEach((el) => {
+            const button = /** @type {HTMLButtonElement} */ (el);
+            const name = /** @type {HTMLElement|null} */ (button.closest('[data-name]'))?.dataset.name || '';
+            const label = t(button.classList.contains('node-speed-btn') ? 'speedTestNode' : 'retestNode');
+            button.title = label;
+            button.setAttribute('aria-label', `${label}: ${name}`);
+        });
+        paintSpeedTest();
+    });
+    appStore.subscribe('isTestingLatency', paintSpeedTest);
+    appStore.subscribe('isNetworkUpdating', paintFocusedSpeedAction);
+    appStore.subscribe('uiGroupName', paintFocusedSpeedAction);
+    paintSpeedTest();
+}
+
 
 /** Results of the running full test, so a re-render mid-test (search, sort) keeps them instead of re-pending. */
 const _testRunResults = new Map();
@@ -1684,7 +1935,8 @@ function applyNodeLatency(name, delay) {
  * @param {HTMLButtonElement} btn
  */
 async function retestSingleNode(name, latVal, btn) {
-    if (btn.disabled) return;
+    // A download test is measuring through these nodes: a latency request now would skew it.
+    if (btn.disabled || isSpeedTestRunning()) return;
     btn.disabled = true;
     btn.classList.add('is-spinning');
     try {
@@ -1896,7 +2148,9 @@ async function switchToFastest(testedGroup, node, testedProfile = null) {
             // Sent and unanswered: the core may run the node, so the pages
             // re-read what it runs, as the card and wheel paths do.
             if (result.maybeApplied) invalidateProxiesCache();
-            notifySwitchFailed(result.reason, result.maybeApplied);
+            if (!notifySwitchFailed(result.reason, result.maybeApplied)) {
+                void syncCoreConfig().catch((e) => proxyLogger.warn('Config sync after refused switch failed', e));
+            }
             return;
         }
         invalidateProxiesCache();
@@ -1991,13 +2245,14 @@ function toggleSortMenu(sortBtn, sortLabel) {
     const tr = /** @type {any} */ (translations)[currentLang] || {};
     const smartEnabled = document.documentElement.style.getPropertyValue('--smart-enabled') === '1';
     if (!smartEnabled && appStore.get('currentSortMode') === 'smart') appStore.set('currentSortMode', 'default');
-    const modes = smartEnabled ? ['default', 'name', 'latency', 'smart'] : ['default', 'name', 'latency'];
+    const modes = smartEnabled ? ['default', 'name', 'latency', 'speed', 'smart'] : ['default', 'name', 'latency', 'speed'];
     /** @type {Record<string, [string, string]>} */
     const text = {
         default: [tr.sortDefault, tr.sortDefaultDesc],
         name: [tr.sortName, tr.sortNameDesc],
         latency: [tr.sortLatency, tr.sortLatencyDesc],
         smart: [tr.sortSmart, tr.sortSmartDesc],
+        speed: [tr.sortSpeed, tr.sortSpeedDesc],
     };
     const menu = document.createElement('div');
     menu.className = 'proxy-group-menu proxy-sort-menu rounded-lg shadow-2xl border border-[var(--zephyr-border-default)]';
@@ -2129,10 +2384,17 @@ function setProxyHeaderMeta(meta) {
 const ALERT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
 
 /** Sort / test-all mean nothing when no node is used (direct mode). */
+/** No node list to act on (direct mode, no nodes): the list tools are hidden. */
+let _proxyToolsHidden = false;
+
 function setProxyToolsHidden(/** @type {boolean} */ hidden) {
+    if (hidden) clearSpeedTestCandidates();
+    _proxyToolsHidden = hidden;
     for (const id of ['sort-btn', 'test-all-btn']) {
         document.getElementById(id)?.classList.toggle('hidden', hidden);
     }
+    // A run still going keeps its Stop.
+    document.getElementById('speed-test-btn')?.classList.toggle('hidden', hidden && !speedTestProgress());
     // Search means nothing without a node list (direct mode / no nodes).
     const search = /** @type {HTMLElement|null} */ (document.querySelector('label.proxy-search'));
     if (search) search.style.display = hidden ? 'none' : '';
@@ -2732,6 +2994,7 @@ async function handleCoreRestart(btn, context) {
  * @param {string} loadingText
  */
 function renderProxiesLoading(container, loadingText) {
+    clearSpeedTestCandidates();
     clearLoadingTimeout();
     container.replaceChildren();
     const loading = document.createElement('div');
@@ -2777,6 +3040,7 @@ function renderProxiesLoading(container, loadingText) {
  * @param {any} tObj - i18n translations object
  */
 function renderProviderPollExhausted(container, tObj) {
+    clearSpeedTestCandidates();
     clearLoadingTimeout();
     container.replaceChildren();
     const wrap = document.createElement('div');
@@ -2924,9 +3188,16 @@ async function updateProxiesInPlace(container, proxies, data, current) {
     const existingWrappers = Array.from(container.children);
     const existingNames = new Set(existingWrappers.map(w => (/** @type {HTMLElement} */ (w)).dataset.name));
     const newNames = new Set(proxies);
+    // A same-named entry that changed between node and group (or DIRECT-like)
+    // gains or loses its download button and speed line: draw it anew.
+    const sameKinds = existingWrappers.every((w) => {
+        const name = /** @type {string} */ ((/** @type {HTMLElement} */ (w)).dataset.name);
+        return !!w.querySelector('.node-speed-btn') === isRealOutboundNode(name, (/** @type {any} */ (data)).proxies?.[name]);
+    });
     const canUpdateInPlace = existingWrappers.length > 0 &&
         existingWrappers.length === proxies.length &&
-        [...existingNames].every(name => newNames.has(/** @type {string} */ (name)));
+        [...existingNames].every(name => newNames.has(/** @type {string} */ (name))) &&
+        sameKinds;
 
     if (!canUpdateInPlace) return false;
 
@@ -2963,9 +3234,12 @@ async function updateProxiesInPlace(container, proxies, data, current) {
             const meta = /** @type {HTMLElement | null} */ (card.querySelector('.proxy-meta'));
             if (meta) {
                 meta.textContent = proxyMetaLabel(proxy, groupNow);
+                meta.dataset.label = meta.textContent;
+                delete meta.dataset.speed;
                 meta.title = proxy?.type || '';
                 if (groupNow) meta.dataset.groupNow = '1';
                 else delete meta.dataset.groupNow;
+                paintCardSpeed(/** @type {HTMLElement} */ (card), name);
             }
             const delayColor = getDelayColorClass(shownDelay);
             const latVal = card.querySelector('[id^="latency-"]');
@@ -3112,6 +3386,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
         // Group: "→ node". Otherwise protocol + transport, e.g. "SS · TCP", "Hy2 · QUIC";
         // types without a known transport (DIRECT/REJECT, future types) show the protocol only.
         metaText.textContent = proxyMetaLabel(proxy, groupNow);
+        metaText.dataset.label = metaText.textContent;
         if (isGroup) metaText.dataset.groupNow = '1';
         metaText.title = proxy.type || '';
         left.appendChild(dot);
@@ -3145,6 +3420,23 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
             void retestSingleNode(name, latVal, retest);
         });
         right.appendChild(retest);
+        // Test this node's download speed (leaf nodes only: a group has no speed of its own).
+        if (isRealOutboundNode(name, proxy)) {
+            const speedBtn = document.createElement('button');
+            speedBtn.type = 'button';
+            speedBtn.className = 'node-retest-btn node-speed-btn';
+            speedBtn.tabIndex = -1;
+            speedBtn.title = t('speedTestNode');
+            speedBtn.setAttribute('aria-label', `${t('speedTestNode')}: ${name}`);
+            // eslint-disable-next-line no-unsanitized/property -- static SVG constant
+            speedBtn.innerHTML = SPEED_ICON; // nosemgrep: js-innerhtml-assignment — static markup
+            speedBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (isSpeedTestRunning() || appStore.get('isTestingLatency') || _retestsInFlight.size > 0) return;
+                void runSpeedTest([name], false);
+            });
+            right.appendChild(speedBtn);
+        }
         right.appendChild(latVal);
 
         bottom.appendChild(left);
@@ -3161,6 +3453,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
 
 
         card.appendChild(bottom);
+        paintCardSpeed(card, name);
 
         // --- Click handler: switch proxy ---
         card.onclick = async () => {
@@ -3207,6 +3500,7 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                 restoreLatency();
                 if (switchRejection === SWITCH_BUSY) {
                     showNotification(t('consoleSubUpdateBusy'), 'info');
+                    void syncCoreConfig().catch((err) => proxyLogger.warn('Failed to sync after a deferred switch', err));
                     return;
                 }
 
@@ -3270,7 +3564,9 @@ function buildProxyWrappers(container, proxies, data, current, mainGroup) {
                     notifySwitched(name);
                     void syncCoreConfig().catch((err) => proxyLogger.warn('Failed to sync core after proxy switch', err));
                 } else {
-                    notifySwitchFailed(switchRejection, switchMaybeApplied);
+                    if (!notifySwitchFailed(switchRejection, switchMaybeApplied)) {
+                        void syncCoreConfig().catch((err) => proxyLogger.warn('Failed to sync after a refused switch', err));
+                    }
                 }
             } catch (err) {
                 card.classList.remove('opacity-50', 'pointer-events-none');
@@ -3337,8 +3633,9 @@ export function refreshProxies() {
  * hasn't changed (for smooth latency re-testing) and full re-renders.
  */
 export async function renderProxies() {
+    const coreAtRender = coreReplacements();
     const container = document.getElementById('proxies-list');
-    if (!container) return;
+    if (!container) { clearSpeedTestCandidates(); return; }
 
     // Render generation token — must be incremented before any async work
     // so that early-return paths (no data, direct mode, no groups) also
@@ -3378,7 +3675,7 @@ export async function renderProxies() {
     }
 
     // Guard: if a newer render started while fetching, abort — the newer render takes precedence.
-    if (_renderGen !== _renderGeneration) return;
+    if (_renderGen !== _renderGeneration || coreAtRender !== coreReplacements()) return;
 
     // Clear loading timeout — data fetch completed (success or failure)
     clearLoadingTimeout();
@@ -3573,6 +3870,12 @@ export async function renderProxies() {
         if (searchEl) searchEl.value = '';
     }
     const groupTotal = proxies.length;
+    _speedTestCandidates = {
+        group: uiGroupName || '',
+        names: [...new Set(proxies)].filter((name) => isRealOutboundNode(name, data?.proxies?.[name])),
+        core: coreAtRender,
+    };
+    paintFocusedSpeedAction();
     let hiddenTimeoutCount = 0;
     if (settings?.hide_timeout_nodes && !_showHiddenTimeouts) {
         const preFilterCount = proxies.length;
@@ -3615,12 +3918,14 @@ export async function renderProxies() {
         proxies.sort((/** @type {string} */ a, /** @type {string} */ b) => a.localeCompare(b));
     } else if (appStore.get('currentSortMode') === 'latency') {
         sortProxiesByLatency(proxies, data);
+    } else if (appStore.get('currentSortMode') === 'speed') {
+        sortBySpeed(proxies);
     }
 
     // Sync sort label with current mode (may be reset by applyTranslations)
     const sortLabelEl = document.getElementById('sort-label');
     if (sortLabelEl) {
-        const sortLabels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency, smart: t.sortSmart };
+        const sortLabels = { default: t.sortDefault, name: t.sortName, latency: t.sortLatency, smart: t.sortSmart, speed: t.sortSpeed };
         sortLabelEl.textContent = (/** @type {any} */ (sortLabels))[appStore.get('currentSortMode')] || sortLabels['default'];
     }
 
@@ -3719,13 +4024,21 @@ async function syncSmartUiVisibility() {
 
 // --- Event Bus: react to config updates from other modules (e.g. settings.js) ---
 
-Bus.on(Events.CONFIG_UPDATED, async () => {
+Bus.on(Events.CONFIG_UPDATED, async (/** @type {any} */ data) => {
+    if (data?.reloaded) {
+        clearSpeedTestCandidates();
+        _renderGeneration += 1;
+    }
+    // A reload can move a node to another provider under the same name.
+    if (data?.reloaded) clearProviderCache();
     invalidateRunConfigCache();
     await syncSmartUiVisibility();
     void refreshProxies();
 });
 
 Bus.on(Events.CORE_RESTARTED, () => {
+    clearSpeedTestCandidates();
+    _renderGeneration += 1;
     invalidateRunConfigCache();
     invalidateProxiesCache();
     // Do NOT reset uiGroupName here — restoreProxySelection depends on it
@@ -3915,8 +4228,9 @@ const _autoTest = {
     /** Run a single auto-test cycle for all nodes in the current proxy group. */
     async _runOnce() {
         if (!this._isEnabled() || this._running) return;
-        // A full test is running: try again later instead of ending the schedule.
-        if (appStore.get('isTestingLatency')) {
+        // A full test or a download test is running: try again later instead
+        // of ending the schedule (probes would share the download's bandwidth).
+        if (appStore.get('isTestingLatency') || isSpeedTestRunning()) {
             this._scheduleNext(AUTO_TEST_BUSY_RETRY_MS);
             return;
         }
@@ -3956,7 +4270,8 @@ const _autoTest = {
             let idx = 0;
             const workers = Array.from({ length: concurrency }, async () => {
                 while (idx < validProxies.length) {
-                    if (passSignal.aborted || getLatencyTestSignal() !== passSignal || stopped()) break;
+                    // A download test started meanwhile: leave the rest to the next pass.
+                    if (passSignal.aborted || getLatencyTestSignal() !== passSignal || stopped() || isSpeedTestRunning()) break;
                     const name = validProxies[idx++];
                     if (!(await autoTestProbe(name, stopped, passSignal))) break;
                 }

@@ -54,7 +54,30 @@ pub fn prism_status(state: State<PrismState>) -> Result<serde_json::Value, Strin
 }
 
 #[tauri::command]
-pub fn prism_list_rules(state: State<PrismState>) -> Result<serde_json::Value, String> {
+pub fn prism_list_rules(
+    state: State<PrismState>,
+    with_running_rules: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    if with_running_rules.unwrap_or(false) {
+        // Keep the annotations and runtime file together while writers are
+        // excluded. The caller also checks their indices against the file:
+        // a script can change rules without refreshing Prism's annotations.
+        let _config = crate::prism::pipeline::RUN_CONFIG_LOCK
+            .lock()
+            .map_err(|error| format!("Run config lock poisoned: {error}"))?;
+        if crate::prism::pipeline::core_start_in_progress() {
+            return Err("Rule details unavailable while the core is starting".to_owned());
+        }
+        return state.with_ext(|ext| {
+            let groups = ext.list_rules()?;
+            let paths = crate::core_manager::ensure_app_storage(&state.app)?;
+            let content = std::fs::read_to_string(paths.core_dir.join("run_config.yaml"))
+                .map_err(|error| format!("Failed to read running rules: {error}"))?;
+            let config: serde_json::Value = serde_yaml::from_str(&content)
+                .map_err(|error| format!("Failed to parse running rules: {error}"))?;
+            Ok(serde_json::json!({ "groups": groups, "rules": config.get("rules") }))
+        });
+    }
     state.with_ext(|ext| {
         let rules = ext.list_rules()?;
         serde_json::to_value(rules).map_err(|e| format!("Serialize failed: {e}"))
@@ -293,10 +316,10 @@ pub async fn prism_rebuild(
         // re-reads the endpoint just before injecting it; the lock order
         // here — run-config lock, then the core-state lock — matches that
         // path.)
-        let current_secret = {
+        let (current_secret, core_running) = {
             let mihomo = tauri::Manager::state::<crate::core_manager::MihomoState>(&app);
             let lock = lock_critical(&mihomo.0, BackendModule::Core, codes::CORE_LOCK_FAILED)?;
-            lock.last_secret().to_owned()
+            (lock.last_secret().to_owned(), lock.last_port().is_some())
         };
         // Captures the core's answer to the reload `ext.apply` triggers
         // (set by `ZephyrPrismHost::apply_config` on this thread).
@@ -309,12 +332,21 @@ pub async fn prism_rebuild(
 
             // Use prepare_runtime_config to inject secret + external-controller
             // into the raw profile, just like start_core does.
-            let (prepared, _api_port, _proxy_port) = core_process::prepare_runtime_config(
-                &raw_profile,
-                &current_secret,
-                global_prefs.as_ref(),
-            )
-            .ok_or_else(|| "Failed to prepare runtime config".to_owned())?;
+            // The running core keeps its speed-test listener where it is:
+            // a reload that fails must not leave this file naming a port
+            // the core never opened.
+            let held_port = core_running
+                .then(|| crate::speed_test::held_port(&app))
+                .flatten();
+            let (prepared, _api_port, _proxy_port) =
+                crate::speed_test::with_running_port(held_port, || {
+                    core_process::prepare_runtime_config(
+                        &raw_profile,
+                        &current_secret,
+                        global_prefs.as_ref(),
+                    )
+                })
+                .ok_or_else(|| "Failed to prepare runtime config".to_owned())?;
             // Atomic: an override dry run (`override_test`) reads this file
             // without the run-config lock and must not see it half written.
             crate::core_manager::core::secure_io::write_file_secure_atomic(
