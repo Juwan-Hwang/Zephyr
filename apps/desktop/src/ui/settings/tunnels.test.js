@@ -288,6 +288,18 @@ describe('tunnel list saves', () => {
         expect(unsavedRow(tunnelsList)).toBeNull();
     });
 
+    it('does not make an unconfirmed reset the baseline for a later failed edit', async () => {
+        const save = vi.fn(async () => false);
+        const { tunnelsList, api } = mount(save);
+        const result = await api.saveAfterPending(async () => 'unconfirmed', 'a.yaml');
+        expect(api.resetAfterSave(result)).toBe(true);
+        expect(deleteButtons(tunnelsList)).toHaveLength(0);
+        const row = unsavedRow(tunnelsList);
+        expect(row).not.toBeNull();
+        await row.querySelector('button').onclick();
+        expect(deleteButtons(tunnelsList)).toHaveLength(2);
+    });
+
     it('saves of a list read from one profile go out checked against that profile', async () => {
         const save = vi.fn(async () => true);
         const { tunnelsList, api } = mount(save);

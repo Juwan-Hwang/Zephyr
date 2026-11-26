@@ -44,4 +44,9 @@ vi.mock('../utils/logger.js', () => {
 });
 vi.mock('./cache.js', () => ({ trayMenuCache: {}, TRAY_CACHE_TTL: 0, invalidateProxiesCache: vi.fn() }));
 vi.mock('./run-config-cache.js', () => ({ invalidateRunConfigCache: vi.fn() }));
-vi.mock('@zephyr/shared', () => ({ COMMANDS: { GET_SETTINGS: 'get_settings', UPDATE_TRAY_MENU: 'update_tray_menu' } }));
+vi.mock('@zephyr/shared', () => ({ COMMANDS: {
+    GET_SETTINGS: 'get_settings',
+    LIST_CONFIGS: 'list_configs',
+    UPDATE_TRAY_MENU: 'update_tray_menu',
+    UPDATE_TRAY_FULL_MENU: 'update_tray_full_menu',
+} }));

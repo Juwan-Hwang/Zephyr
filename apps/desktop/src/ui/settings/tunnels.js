@@ -95,7 +95,7 @@ function isValidAddress(addr) {
  * @param {any[]} opts.initialTunnels - The initial tunnel list from core config.
  * @param {boolean} [opts.initialKnown=true] - Whether initialTunnels is the list the
  *   core runs; when not, nothing is saved until setTunnels() brings that list.
- * @param {(patch: Record<string, any>, expectProfile?: string|null) => Promise<boolean|'restart'|'partial'>} opts.saveConfigToCore - Callback to save config patch to core;
+ * @param {(patch: Record<string, any>, expectProfile?: string|null) => Promise<boolean|'restart'|'partial'|'unconfirmed'>} opts.saveConfigToCore - Callback to save config patch to core;
  *   with `expectProfile`, the backend refuses it once the core runs another profile.
  * @param {(() => Promise<unknown>)|null} [opts.readFromCore] - Reads the core's list again
  *   (and publishes it with setTunnels) when the first read failed, or when
@@ -252,7 +252,7 @@ export function initTunnelSettings({
      * already runs it) but marks it unsaved, so the list offers a retry. A
      * newer save that failed took nothing, so it does not hide an older
      * partial save.
-     * @returns {Promise<boolean|'restart'|'partial'>}
+     * @returns {Promise<boolean|'restart'|'partial'|'unconfirmed'>}
      */
     async function saveTunnels() {
         const seq = ++saveSeq;
@@ -272,7 +272,7 @@ export function initTunnelSettings({
             const result = await saveConfigToCore({ tunnels: list }, profile);
             // Saves run in start order: the latest one the core took sets the
             // list it runs, while the page still shows that profile's list.
-            if (result && listProfile === profile) confirmed = list;
+            if (result && result !== 'unconfirmed' && listProfile === profile) confirmed = list;
             return result;
         });
         // Not sent: the page reads the replacement core's list instead.
@@ -290,7 +290,7 @@ export function initTunnelSettings({
         if (listProfile !== profile) return ok;
         if (ok && seq > appliedSeq) {
             appliedSeq = seq;
-            profileUnsaved = ok === 'partial';
+            profileUnsaved = ok === 'partial' || ok === 'unconfirmed';
         }
         if (!ok && !supersededSince(seq)) {
             // The newest save failed: show what the core runs, which also
@@ -512,6 +512,8 @@ export function initTunnelSettings({
                 };
                 /** @param {KeyboardEvent} e */
                 const onProtocolKey = (e) => {
+                    // The shared radio-group keys (ui/tablist-keys.js) already moved it.
+                    if (e.defaultPrevented) return;
                     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
                     const from = protocolButtons.indexOf(/** @type {HTMLElement} */ (e.currentTarget));
                     if (!step || from < 0) return;
@@ -670,7 +672,7 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
                 // the list of the profile the save was checked against; with
                 // none known, a save of it could reach any profile, so it is
                 // read again first.
-                if (result) {
+                if (result && result !== 'unconfirmed') {
                     confirmed = [];
                     listProfile = profile;
                     listCore = coreAtSave;
@@ -686,7 +688,7 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
          * profile did not ('partial'). A failed reset that no newer save
          * follows shows the list the core still runs, which also brings back
          * what a save that failed while the reset waited tried to change.
-         * @param {boolean|'restart'|'partial'} result
+         * @param {boolean|'restart'|'partial'|'unconfirmed'} result
          * @returns {boolean} whether the list was emptied
          */
         resetAfterSave(result) {
@@ -704,7 +706,7 @@ contentArea.querySelector('#tunnel-target-paste-btn')?.addEventListener('click',
             // flag until a newer save lands. One still to come decides it
             // then: when it fails, the profile still holds the old list.
             appliedSeq = seq;
-            profileUnsaved = result === 'partial';
+            profileUnsaved = result === 'partial' || result === 'unconfirmed';
             renderTunnels();
             if (supersededSince(seq)) return false;
             currentTunnels = [];

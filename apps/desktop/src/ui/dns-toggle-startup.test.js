@@ -58,7 +58,7 @@ describe('DNS rewrite switch at startup', () => {
         }
     });
 
-    it('a failed startup re-apply of the saved rewrite is retried, then saved through the checked write', async () => {
+    it.each([false, true])('restores saved DNS even when the profile enables DNS (enabled=%s)', async (enabled) => {
         vi.resetModules();
         vi.useFakeTimers();
         try {
@@ -66,11 +66,12 @@ describe('DNS rewrite switch at startup', () => {
             const toggle = /** @type {HTMLInputElement} */ (document.getElementById('dns-rewrite-toggle'));
             const { initDnsRewriteToggle } = await import('./dns-shared.js');
             getConfig.mockReset();
-            getConfig.mockResolvedValue({ dns: { enable: false } });
+            getConfig.mockResolvedValue({ dns: { enable: enabled } });
             getSetting.mockImplementation(async (key, fallback) => (key === 'dns_rewrite_enabled' ? true : fallback));
+            patchConfig.mockClear();
             patchConfig.mockRejectedValueOnce(new Error('core not ready'));
             await initDnsRewriteToggle();
-            expect(toggle.checked).toBe(false);
+            expect(toggle.checked).toBe(enabled);
             expect(toggle.disabled).toBe(true);
             await vi.advanceTimersByTimeAsync(1000);
             expect(toggle.disabled).toBe(false);
