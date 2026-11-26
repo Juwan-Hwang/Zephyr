@@ -99,7 +99,7 @@ function syncSysProxyHint(on) {
     const status = document.getElementById('proxy-status-text');
     // While the system proxy is on, the status shows "Proxy Active" (sysproxy.js).
     if (!status || appStore.get('isSysProxyEnabled')) return;
-    status.textContent = t(on ? 'sysProxyNeedsSubscription' : 'proxyStatusReady');
+    status.textContent = t(on ? 'sysProxyNeedsSubscription' : 'stateOff');
 }
 
 /** Render (or clear) the empty state in every host currently in the DOM. */

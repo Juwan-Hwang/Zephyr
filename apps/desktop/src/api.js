@@ -1,4 +1,5 @@
 // @ts-check
+import { DEFAULT_LATENCY_TEST_URL } from './latency-defaults.js';
 import { setWsBaseUrl, setWsSecret } from './websocket.js';
 import { COMMANDS } from '@zephyr/shared';
 import { apiLogger } from './utils/logger.js';
@@ -418,7 +419,29 @@ function isMissingAutostartEntryError(err) {
  */
 export async function getProxies() {
   const res = await apiFetch('/proxies');
-  return res.json();
+  return stripSpeedTestGroup(await res.json());
+}
+
+/** Hidden group the app adds to every runtime config for the download speed test. */
+export const SPEED_TEST_GROUP = 'ZEPHYR-SPEED-TEST';
+
+/**
+ * Remove the speed-test group from a `/proxies` body: it is plumbing, never
+ * something to show or pick, and GLOBAL would otherwise list it as a card.
+ * @template T
+ * @param {T} data
+ * @returns {T}
+ */
+export function stripSpeedTestGroup(data) {
+  const proxies = /** @type {any} */ (data)?.proxies;
+  if (!proxies || typeof proxies !== 'object' || !hasOwn(proxies, SPEED_TEST_GROUP)) return data;
+  delete proxies[SPEED_TEST_GROUP];
+  for (const entry of Object.values(proxies)) {
+    if (Array.isArray(entry?.all) && entry.all.includes(SPEED_TEST_GROUP)) {
+      entry.all = entry.all.filter((/** @type {string} */ n) => n !== SPEED_TEST_GROUP);
+    }
+  }
+  return data;
 }
 
 /**
@@ -1161,6 +1184,24 @@ export function abortLatencyTests() {
   for (const controller of liveLatencyControllers.keys()) controller.abort();
 }
 
+export { DEFAULT_LATENCY_TEST_URL };
+let _latencyTestUrl = DEFAULT_LATENCY_TEST_URL;
+
+/**
+ * Address the latency test asks for through each node. Empty or invalid falls
+ * back to the built-in default; only http(s) addresses are taken.
+ * @param {string|null|undefined} url
+ */
+export function setLatencyTestUrl(url) {
+  const v = typeof url === 'string' ? url.trim() : '';
+  _latencyTestUrl = /^https?:\/\/[^\s/]+/i.test(v) ? v : DEFAULT_LATENCY_TEST_URL;
+}
+
+/** @returns {string} */
+export function getLatencyTestUrl() {
+  return _latencyTestUrl;
+}
+
 /**
  * 测试指定代理节点的延迟
  *
@@ -1183,7 +1224,7 @@ export async function testProxy(name, customTimeout = 5000) {
   globalController.signal.addEventListener('abort', onGlobalAbort, { once: true });
 
   try {
-    const testUrl = 'https://www.gstatic.com/generate_204';
+    const testUrl = _latencyTestUrl;
     const apiUrl = `/proxies/${encodeURIComponent(name)}/delay?timeout=${customTimeout}&url=${encodeURIComponent(testUrl)}`;
 
     // The test's own timeout and Stop keep aborting the request while the
@@ -1364,4 +1405,59 @@ export async function restartCore(configPath, customArgs = []) {
  */
 export async function readCoreLog(offset = 0, limit = 500) {
   return invoke(COMMANDS.READ_LOG, { offset, limit });
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Download speed test / exit IP (see src-tauri/src/speed_test.rs)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Port of the speed-test listener in the running config, or null when this
+ * profile has none (it already uses the reserved names, or no core runs).
+ * @returns {Promise<number|null>}
+ */
+export async function speedTestPort() {
+  try {
+    const p = await invoke(COMMANDS.SPEED_TEST_PORT);
+    return typeof p === 'number' && p > 0 ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Point the hidden speed-test group at `node`.
+ * @param {string} node
+ */
+export async function selectSpeedTestNode(node) {
+  await apiFetch(`/proxies/${encodeURIComponent(SPEED_TEST_GROUP)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name: node }),
+  });
+}
+
+/**
+ * Download `url` through the speed-test listener.
+ * @param {{ url: string, maxSecs: number, maxBytes?: number|null, id: string }} opts
+ * @returns {Promise<{ bytes: number, elapsedMs: number, peakBps: number, cancelled: boolean }>}
+ */
+export function speedTestDownload({ url, maxSecs, maxBytes = null, id }) {
+  return invoke(COMMANDS.SPEED_TEST_DOWNLOAD, { url, maxSecs, maxBytes, id });
+}
+
+/** Stop every download the speed test is running. */
+export async function speedTestCancel() {
+  try { await invoke(COMMANDS.SPEED_TEST_CANCEL); } catch { /* nothing running */ }
+}
+
+/**
+ * The address sites see for traffic through the local proxy port, with
+ * whatever location and network details the lookup service returned
+ * (see ui/exit-ip.js). Never sent anywhere but through that port.
+ * @param {number} port
+ * @returns {Promise<{ ip: string, country: string, source?: string } & Record<string, unknown>>}
+ */
+export function lookupExitIp(port) {
+  return invoke(COMMANDS.LOOKUP_EXIT_IP, { port });
 }

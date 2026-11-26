@@ -74,3 +74,52 @@ describe('tablist keyboard', () => {
         expect(() => syncTablist(null)).not.toThrow();
     });
 });
+
+describe('radiogroup keyboard (segmented radios, choice cards)', () => {
+    beforeEach(() => {
+        document.body.innerHTML = `
+            <div role="radiogroup" id="g">
+                <button role="radio" id="r1" aria-checked="false">1</button>
+                <button role="radio" id="r2" aria-checked="true">2</button>
+                <button role="radio" id="r3" aria-checked="false">3</button>
+                <button role="radio" id="r4" aria-checked="false">4</button>
+            </div>`;
+        document.querySelectorAll('[role="radio"]').forEach(r => {
+            r.addEventListener('click', () => {
+                document.querySelectorAll('[role="radio"]').forEach(x => x.setAttribute('aria-checked', String(x === r)));
+            });
+        });
+        cleanup = initTablistKeys();
+    });
+    afterEach(() => { cleanup(); document.body.innerHTML = ''; });
+
+    it('keeps only the checked radio in the Tab order', () => {
+        expect(el('r2').getAttribute('tabindex')).toBe('0');
+        expect(el('r1').getAttribute('tabindex')).toBe('-1');
+    });
+
+    it('all four arrows, Home and End move and check', () => {
+        el('r2').focus();
+        press('r2', 'ArrowRight');
+        expect(el('r3').getAttribute('aria-checked')).toBe('true');
+        press('r3', 'ArrowDown');
+        expect(el('r4').getAttribute('aria-checked')).toBe('true');
+        press('r4', 'ArrowDown');
+        expect(el('r1').getAttribute('aria-checked')).toBe('true');
+        press('r1', 'ArrowUp');
+        expect(el('r4').getAttribute('aria-checked')).toBe('true');
+        press('r4', 'Home');
+        expect(el('r1').getAttribute('aria-checked')).toBe('true');
+        expect(document.activeElement).toBe(el('r1'));
+        press('r1', 'End');
+        expect(el('r4').getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('Up/Down still do nothing in a tablist', () => {
+        document.body.innerHTML = '<div role="tablist"><button role="tab" id="t1" aria-selected="true">A</button><button role="tab" id="t2" aria-selected="false">B</button></div>';
+        el('t1').addEventListener('click', () => {});
+        el('t2').addEventListener('click', () => el('t2').setAttribute('aria-selected', 'true'));
+        press('t1', 'ArrowDown');
+        expect(el('t2').getAttribute('aria-selected')).toBe('false');
+    });
+});

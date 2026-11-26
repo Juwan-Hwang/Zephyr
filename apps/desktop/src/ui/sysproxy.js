@@ -28,11 +28,11 @@ export async function updateSysProxyUI() {
         if (!statusText) return;
 
         if (isActive) {
-            statusText.textContent = /** @type {Record<string, string>} */ (/** @type {any} */ (translations)[currentLang]).proxyStatusActive || 'Proxy Active';
+            statusText.textContent = t('stateOn');
             statusText.classList.remove('text-[var(--text-muted)]');
             statusText.classList.add('text-accent');
         } else {
-            statusText.textContent = appStore.get('noSubscription') ? t('sysProxyNeedsSubscription') : t('proxyStatusReady');
+            statusText.textContent = appStore.get('noSubscription') ? t('sysProxyNeedsSubscription') : t('stateOff');
             statusText.classList.remove('text-accent');
             statusText.classList.add('text-[var(--text-muted)]');
         }

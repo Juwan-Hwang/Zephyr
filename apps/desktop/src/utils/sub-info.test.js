@@ -1,0 +1,29 @@
+import { describe, it, expect } from 'vitest';
+import { parseSubInfo, formatSubUsage } from './sub-info.js';
+
+const GB = 1073741824;
+const days = (/** @type {number} */ d) => `${d} days left`;
+
+describe('subscription usage', () => {
+    it('parses the userinfo fields', () => {
+        expect(parseSubInfo('upload=1; download=2; total=3; expire=4')).toEqual({ upload: 1, download: 2, total: 3, expire: 4 });
+        expect(parseSubInfo('')).toEqual({ upload: 0, download: 0, total: 0, expire: 0 });
+    });
+
+    it('formats used / total and days left', () => {
+        const now = 1_700_000_000_000;
+        const info = `upload=${Math.round(1.8 * GB)}; download=${60 * GB}; total=${200 * GB}; expire=${now / 1000 + 23 * 86400 + 60}`;
+        expect(formatSubUsage(info, days, now)).toBe('61.8 GB / 200 GB · 23 days left');
+    });
+
+    it('leaves out days left when there is no expiry or it has passed', () => {
+        const now = 1_700_000_000_000;
+        expect(formatSubUsage(`download=${GB}; total=${100 * GB}`, days, now)).toBe('1 GB / 100 GB');
+        expect(formatSubUsage(`download=${GB}; total=${100 * GB}; expire=${now / 1000 - 10}`, days, now)).toBe('1 GB / 100 GB');
+    });
+
+    it('is null without a total', () => {
+        expect(formatSubUsage(undefined, days)).toBeNull();
+        expect(formatSubUsage('upload=5; download=6', days)).toBeNull();
+    });
+});

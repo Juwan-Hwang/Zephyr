@@ -1213,3 +1213,18 @@ describe('getProxiesMerged', () => {
         expect(result.proxies['missing-node']).toBeUndefined();
     });
 });
+
+describe('stripSpeedTestGroup', async () => {
+    const { stripSpeedTestGroup, SPEED_TEST_GROUP } = await import('./api.js');
+    it('drops the hidden speed-test group and its GLOBAL entry', () => {
+        const data = { proxies: { [SPEED_TEST_GROUP]: { all: ['a'] }, GLOBAL: { all: ['Proxy', SPEED_TEST_GROUP] }, Proxy: { all: ['a'] }, a: {} } };
+        stripSpeedTestGroup(data);
+        expect(Object.keys(data.proxies)).toEqual(['GLOBAL', 'Proxy', 'a']);
+        expect(data.proxies.GLOBAL.all).toEqual(['Proxy']);
+    });
+    it('leaves other bodies alone', () => {
+        const data = { proxies: { GLOBAL: { all: ['Proxy'] } } };
+        expect(stripSpeedTestGroup(data)).toBe(data);
+        expect(stripSpeedTestGroup(null)).toBeNull();
+    });
+});

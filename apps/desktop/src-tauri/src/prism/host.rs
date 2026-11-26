@@ -762,6 +762,8 @@ None => "Config saved. Failed to apply via core REST API (connection or response
                     .filter(|n| {
                         // Skip internal/special groups
                         !matches!(n.as_str(), "GLOBAL" | "DIRECT" | "REJECT" | "PASS")
+                            // Zephyr's hidden download-test group is never a routing target.
+                            && n != crate::speed_test::SPEED_TEST_GROUP
                     })
                     .collect();
 

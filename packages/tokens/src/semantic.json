@@ -2,8 +2,8 @@
   "text": {
     "primary":   { "value": "rgba(255, 255, 255, 0.95)", "lightValue": "rgba(24, 24, 28, 0.95)" },
     "secondary": { "value": "rgba(255, 255, 255, 0.6)",  "lightValue": "rgba(24, 24, 28, 0.65)" },
-    "tertiary":  { "value": "rgba(255, 255, 255, 0.4)",  "lightValue": "rgba(24, 24, 28, 0.4)" },
-    "muted":     { "value": "#71717a" },
+    "tertiary":  { "value": "rgba(255, 255, 255, 0.52)", "lightValue": "rgba(24, 24, 28, 0.64)" },
+    "muted":     { "value": "#8e8e98", "lightValue": "#5b5b65" },
     "danger":    { "value": "#ef4444",  "lightValue": "#dc2626" },
     "warning":   { "value": "#f59e0b",  "lightValue": "#d97706" },
     "success":   { "value": "#4ade80",  "lightValue": "#16a34a" },

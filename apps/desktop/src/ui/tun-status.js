@@ -23,7 +23,7 @@ const MUTED_CLASS = 'text-[var(--text-muted)]';
  */
 export function renderTunStatus(el, enabled) {
     if (!el) return;
-    const key = enabled ? 'tunActive' : 'tunInactive';
+    const key = enabled ? 'stateOn' : 'stateOff';
     const all = /** @type {Record<string, Record<string, unknown>>} */ (/** @type {unknown} */ (translations));
     const localized = all[currentLang]?.[key];
     const fallback = all.en?.[key];
