@@ -36,6 +36,7 @@ let _timer = null;
 let _polling = false;
 let _active = false;
 let _consecutiveCount = 0;
+let _observationGeneration = 0;
 /** @type {string|null} */
 let _lastCandidate = null;
 /** @type {Record<string, any> | null} Module-level cache for static proxy group structures */
@@ -44,6 +45,7 @@ let _staticProxiesCache = null;
 // Invalidate cache on config/core changes
 Bus.on(Events.CONFIG_UPDATED, () => { _staticProxiesCache = null; });
 Bus.on(Events.CORE_RESTARTED, () => { _staticProxiesCache = null; });
+appStore.subscribe('uiGroupName', resetObservedGroup);
 
 /**
  * The first visible writable group on a connection's chain (exit first), skipping DIRECT-style
@@ -180,6 +182,7 @@ export function stopObservedGroupWatcher() {
  * Reset consecutive counter (e.g., on profile/config change).
  */
 export function resetObservedGroup() {
+    _observationGeneration++;
     _consecutiveCount = 0;
     _lastCandidate = null;
     if (appStore.get('observedGroupName')) {
@@ -204,11 +207,13 @@ function _scheduleNext() {
 async function _poll() {
     if (_polling) return;
     _polling = true;
+    const generation = _observationGeneration;
     try {
         const [connData, proxiesData] = await Promise.all([
             getConnections(),
             _getProxiesData(),
         ]);
+        if (generation !== _observationGeneration) return;
 
         const connections = connData?.connections || connData || [];
         /** @type {Record<string, any>} */
