@@ -1504,12 +1504,12 @@ function showConnDetail(conn, mode, openerRow = null) {
             </button>
         </div>
 
-        <!-- Rule & Chains -->
-        <div class="flex items-center gap-3 mb-5">
+        <!-- Rule & Chains (replaced by the rule card once the rule's source is known) -->
+        <div id="conn-rule-slot" class="mb-5"><div class="flex items-center gap-3">
             <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${ruleColorClass}">${rule}</span>
             ${conn.rulePayload ? `<span class="text-xs font-mono text-[var(--text-primary)] truncate">${_esc(conn.rulePayload)}</span>` : ''}
             <span class="text-xs text-[var(--text-secondary)] truncate">→ ${chains}</span>
-        </div>
+        </div></div>
 
         <!-- Stats Grid -->
         <div class="grid grid-cols-2 gap-3 mb-5">
@@ -1651,6 +1651,16 @@ function showConnDetail(conn, mode, openerRow = null) {
     document.getElementById('detail-dismiss-btn')?.focus({ preventScroll: true });
 
     document.getElementById('detail-dismiss-btn')?.addEventListener('click', () => dismiss());
+    // The rule card (where the matched rule comes from, Edit / Add) needs the
+    // rule library's list; the plain rule line stays until it arrives.
+    const ruleSlot = document.getElementById('conn-rule-slot');
+    if (ruleSlot) {
+        import('../ui/conn-rule.js')
+            // Focus goes back to the row first: the rule dialog returns it
+            // there, not to this panel's hidden button.
+            .then((m) => m.mountRuleCard(ruleSlot, conn, () => dismiss()))
+            .catch((e) => connectionsLogger.debug('rule card failed', e));
+    }
     bg.onclick = (e) => { if (e.target === bg) dismiss(); };
 
     // Close connection button (only active)

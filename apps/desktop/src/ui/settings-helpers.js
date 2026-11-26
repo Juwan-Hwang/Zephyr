@@ -96,6 +96,20 @@ export function saveSettingsChecked(patch) {
 }
 
 /**
+ * Run `fn` in the settings write queue: after every save queued before it,
+ * before every save queued after. For a whole-settings read and write (Restore
+ * Defaults) that a queued patch must not land in the middle of.
+ * @template T
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export function inSettingsSaveQueue(fn) {
+    const run = saveQueue.then(fn);
+    saveQueue = run.then(() => {}, () => {});
+    return run;
+}
+
+/**
  * Read a single field from settings.json.
  *
  * @template T

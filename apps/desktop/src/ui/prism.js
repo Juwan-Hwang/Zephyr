@@ -12,6 +12,8 @@
 
 import { invoke } from '../api.js';
 import { COMMANDS } from '@zephyr/shared';
+import { Bus, Events } from './events.js';
+import { invalidateProxiesCache, invalidateConfigCache } from './cache.js';
 
 /** @type {string[]} Cached trace from the last apply() call. Updated automatically. */
 let _lastTrace = [];
@@ -269,6 +271,16 @@ export async function apply(/** @type {object|undefined} */ options = undefined)
     if (Array.isArray(result?.trace)) {
         _lastTrace = result.trace;
     }
+    // The core reloaded the written config: what lives only in the running
+    // core (the DNS rewrite) is put back before this reports.
+    const reloaded = result?.status?.hot_reload_success ?? result?.hot_reload_success;
+    if (result && reloaded === true && !(await restoreAfterReload())) {
+        return {
+            ...result,
+            hot_reload_success: false,
+            ...(result.status && typeof result.status === 'object' ? { status: { ...result.status, hot_reload_success: false } } : {}),
+        };
+    }
     return result;
 }
 
@@ -334,7 +346,61 @@ export async function toggleGroup(/** @type {string} */ groupId, /** @type {bool
  *  This produces a clean result — previously appended rules from disabled/skipped
  *  patches are properly removed. */
 export async function rebuild(/** @type {object|undefined} */ options = undefined) {
-    return invoke(COMMANDS.PRISM.REBUILD, { options: options ?? null });
+    /** @type {any} */
+    const result = await invoke(COMMANDS.PRISM.REBUILD, { options: options ?? null });
+    // The cached trace described the files before this rebuild: replaced by
+    // its own when it has one, else dropped so "View Impact" reads afresh.
+    _lastTrace = Array.isArray(result?.trace) ? result.trace : [];
+    return result;
+}
+
+/**
+ * Rebuild, then run the enabled override scripts again: the rebuild starts
+ * from the profile, so a JavaScript override's changes (groups, DNS, rules)
+ * would otherwise be gone until the next restart. An override that fails
+ * reports the result as not fully running (`hot_reload_success: false`).
+ * @param {object|undefined} [options]
+ * @returns {Promise<any>} the rebuild result
+ */
+export async function rebuildWithOverrides(options = undefined) {
+    /** @type {any} */
+    const result = await rebuild(options);
+    if (!result) return result;
+    /** @param {any} r */
+    const notRunning = (r) => ({
+        ...r,
+        hot_reload_success: false,
+        ...(r.status && typeof r.status === 'object' ? { status: { ...r.status, hot_reload_success: false } } : {}),
+    });
+    // Nothing was rebuilt (no active profile): saved, but not running yet.
+    if (result.skipped) return notRunning(result);
+    let ok = true;
+    try {
+        const logs = await overrideApplyAll();
+        if (Array.isArray(logs) && logs.some((l) => !l?.success)) ok = false;
+    } catch {
+        ok = false;
+    }
+    // The core reloaded the config: what lives only in the running core (the
+    // DNS rewrite) is put back, as after a restart, before this reports.
+    if (!(await restoreAfterReload())) ok = false;
+    return ok ? result : notRunning(result);
+}
+
+/**
+ * Tell the pages the running config was replaced, and wait for what they
+ * restore on it (the DNS rewrite). False when some of it could not be restored.
+ * @returns {Promise<boolean>}
+ */
+async function restoreAfterReload() {
+    /** @type {Promise<unknown>[]} */
+    const restoring = [];
+    // Its groups, nodes and settings may have changed: no page may read the old ones.
+    invalidateProxiesCache();
+    invalidateConfigCache();
+    Bus.emit(Events.CONFIG_UPDATED, { reloaded: true, waitFor: (/** @type {Promise<unknown>} */ p) => { restoring.push(p); } });
+    const settled = await Promise.allSettled(restoring);
+    return settled.every((r) => r.status === 'fulfilled' && r.value !== false);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
