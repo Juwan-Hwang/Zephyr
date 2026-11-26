@@ -50,6 +50,20 @@ describe('with js-yaml available', () => {
             });
         });
 
+        it('keeps both lists of a file that has $prepend and $append', () => {
+            const original = 'rules:\n  $prepend:\n    - DOMAIN,a.com,DIRECT\n  $append:\n    - DOMAIN,b.com,Proxy\n';
+            expect(parseRulesFromYaml(original)).toEqual(['DOMAIN,a.com,DIRECT', 'DOMAIN,b.com,Proxy']);
+            // Edited in the library: a.com changed, c.com added after b.com.
+            const out = yaml.load(rebuildYamlWithRules(original, ['DOMAIN,a2.com,DIRECT', 'DOMAIN,b.com,Proxy', 'DOMAIN,c.com,Proxy']));
+            expect(out).toEqual({ rules: { $prepend: ['DOMAIN,a2.com,DIRECT'], $append: ['DOMAIN,b.com,Proxy', 'DOMAIN,c.com,Proxy'] } });
+        });
+
+        it('keeps an edited first $append rule appended', () => {
+            const original = 'rules:\n  $prepend:\n    - DOMAIN,a.com,DIRECT\n  $append:\n    - DOMAIN,b.com,Proxy\n';
+            const out = yaml.load(rebuildYamlWithRules(original, ['DOMAIN,a.com,DIRECT', 'DOMAIN,b2.com,Proxy']));
+            expect(out).toEqual({ rules: { $prepend: ['DOMAIN,a.com,DIRECT'], $append: ['DOMAIN,b2.com,Proxy'] } });
+        });
+
         it('keeps $append when the original used it', () => {
             const original = 'rules:\n  $append:\n    - MATCH,DIRECT\n';
             const out = yaml.load(rebuildYamlWithRules(original, ['MATCH,Proxy']));

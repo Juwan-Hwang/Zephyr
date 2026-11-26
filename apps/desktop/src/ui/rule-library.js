@@ -527,6 +527,14 @@ function buildFileCard(file, _fileMap) {
 }
 
 /**
+ * Whether a rebuild's result says the change is saved but not running.
+ * @param {any} result
+ */
+function notRunning(result) {
+    return (result?.status?.hot_reload_success ?? result?.hot_reload_success) === false;
+}
+
+/**
  * Enable / disable a rule file (the engine parks it as `.disabled`), then rebuild the config.
  * @param {(typeof ruleFiles)[number]} file
  * @param {boolean} enabled
@@ -539,7 +547,10 @@ async function handleToggleFile(file, enabled, input) {
         const changed = await prism.toggleGroup(file.filename, enabled);
         if (changed === false) throw new Error(`${file.filename}: ${t.ruleLibraryToggleFailed || 'could not change state'}`);
         // Rebuild from the profile so a disabled file's rules are actually removed.
-        try { await prism.rebuild(); } catch (e) {
+        try {
+            // Saved and rebuilt, but not running (an override failed, the core refused the reload).
+            if (notRunning(await prism.rebuildWithOverrides())) showNotification(t.requireRestart || 'Changes saved. Restart the core to take effect.', 'warning');
+        } catch (e) {
             rulesLogger.warn('[prism] rebuild failed, falling back to apply:', e);
             // Apply only adds patches: a disabled file's rules stay until a rebuild works, so say so.
             if (!enabled) showNotification(String(e), 'error');
@@ -1241,9 +1252,12 @@ async function handleDeleteRule(filename, enabled = true) {
             if (!enabled) await prism.toggleGroup(filename, false).catch(() => {});
             throw delErr;
         }
-        showNotification(`${t.ruleLibraryDeleteRule}: ${filename}`, 'success');
         // Rebuild so the deleted file's rules leave the running config (apply only adds).
-        try { await prism.rebuild(); } catch (e) {
+        try {
+            const rebuilt = await prism.rebuildWithOverrides();
+            if (notRunning(rebuilt)) showNotification(t.requireRestart || 'Changes saved. Restart the core to take effect.', 'warning');
+            else showNotification(`${t.ruleLibraryDeleteRule}: ${filename}`, 'success');
+        } catch (e) {
             rulesLogger.warn('[prism] rebuild failed, falling back to apply:', e);
             showNotification(String(e), 'error');
             try { await prism.apply(); } catch (error_) { rulesLogger.warn('[prism] apply failed:', error_); }
