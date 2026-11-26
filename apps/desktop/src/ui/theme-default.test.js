@@ -66,6 +66,22 @@ describe('default theme', () => {
         expect(document.documentElement.style.getPropertyValue('--accent-primary')).toBe('#8b5cf6');
     });
 
+    it('keeps white button text readable for bright custom accents', async () => {
+        const { applyTheme } = await import('./theme.js');
+        for (const accent of ['#ff8800', '#fff', '#ffff00', '#34c759']) {
+            applyTheme(accent);
+            expect(document.documentElement.style.getPropertyValue('--accent-primary')).toBe(accent);
+            for (const property of ['--accent-button-bg', '--accent-button-hover-light', '--accent-button-hover-dark']) {
+                const color = document.documentElement.style.getPropertyValue(property);
+                const channels = (color.match(/\d+/g) || []).map(Number);
+                expect(channels).toHaveLength(3);
+                const linear = channels.map((c) => c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4);
+                const luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+                expect(1.05 / (luminance + 0.05)).toBeGreaterThanOrEqual(4.5);
+            }
+        }
+    });
+
     it('app store migrates a persisted purple theme to blue and writes it back', async () => {
         localStorage.setItem('zephyr.app', JSON.stringify({ currentTheme: 'purple' }));
         localStorage.setItem('appTheme', 'purple');

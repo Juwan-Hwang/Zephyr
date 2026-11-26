@@ -64,6 +64,7 @@ import { testProxy, getLatencyTestSignal, resetLatencyTestController } from '../
 import { appStore } from './state.js';
 import { showNotification } from './notifications.js';
 import { t } from '../i18n.js';
+import * as speedTest from './speed-test.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -576,6 +577,38 @@ describe('Console Dashboard Width Threshold and Notification', () => {
             scheduleLatencyRetry(cancelled)();
             await vi.advanceTimersByTimeAsync(250);
             expect(cancelled).not.toHaveBeenCalled();
+        });
+
+        it.each([false, true])('waits for the stopped download route before retrying (cancelled=%s)', async (cancelled) => {
+            /** @type {() => void} */
+            let changed = () => {};
+            /** @type {() => void} */
+            let release = () => {};
+            const running = vi.spyOn(speedTest, 'isSpeedTestRunning').mockReturnValue(true);
+            const listen = vi.spyOn(speedTest, 'onSpeedTestChange').mockImplementation((callback) => {
+                changed = callback;
+                return () => {};
+            });
+            const barrier = vi.spyOn(speedTest, 'withSpeedTestGroup').mockImplementation(() => new Promise((resolve) => {
+                release = () => resolve(undefined);
+            }));
+            try {
+                const run = vi.fn();
+                const stop = scheduleLatencyRetry(run);
+                running.mockReturnValue(false);
+                changed();
+                await Promise.resolve();
+                expect(run).not.toHaveBeenCalled();
+                if (cancelled) stop();
+                release();
+                await Promise.resolve(); await Promise.resolve();
+                expect(run).toHaveBeenCalledTimes(cancelled ? 0 : 1);
+                stop();
+            } finally {
+                running.mockRestore();
+                listen.mockRestore();
+                barrier.mockRestore();
+            }
         });
 
         it('keeps a usable delay even if a stop lands right after it', async () => {

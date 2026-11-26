@@ -22,11 +22,13 @@ export function parseRulesFromYaml(yamlContent) {
             if (parsed && Array.isArray(parsed.rules)) {
                 return parsed.rules.map(String);
             }
-            // Handle Prism DSL: rules: { $append: [...] } or { $prepend: [...] }
+            // Handle Prism DSL: rules: { $append: [...] } and/or { $prepend: [...] }
+            // (both: the $prepend rules first, as they apply).
             if (parsed && parsed.rules && typeof parsed.rules === 'object' && !Array.isArray(parsed.rules)) {
-                const dslRules = parsed.rules.$append || parsed.rules.$prepend;
-                if (Array.isArray(dslRules)) {
-                    return dslRules.map(String);
+                const before = parsed.rules.$prepend;
+                const after = parsed.rules.$append;
+                if (Array.isArray(before) || Array.isArray(after)) {
+                    return [...(Array.isArray(before) ? before : []), ...(Array.isArray(after) ? after : [])].map(String);
                 }
             }
         } catch {
@@ -68,6 +70,24 @@ export function parseRulesFromYaml(yamlContent) {
         .filter((line) => line && !line.startsWith('#'))
         .map((line) => unquoteYamlScalar(stripYamlComment(line.replace(/^-\s+/, '').trim())))
         .filter((line) => line && line.includes(','));
+}
+
+/** Count rule entries in block or flow YAML, including structured rows.
+ * @param {string} content
+ * @returns {number}
+ */
+export function countRulesInYaml(content) {
+    if (typeof jsyaml !== 'undefined') {
+        try {
+            const parsed = jsyaml.load(content);
+            const rules = parsed?.rules;
+            if (Array.isArray(rules)) return rules.length;
+            if (rules && typeof rules === 'object') {
+                return ['$prepend', '$append', '$override'].reduce((count, key) => count + (Array.isArray(rules[key]) ? rules[key].length : 0), 0);
+            }
+        } catch { /* Raw rule text uses the existing fallback parser. */ }
+    }
+    return parseRulesFromYaml(content).length;
 }
 
 /**
@@ -421,12 +441,207 @@ function buildFallbackPrismYaml(rules, originalContent = '') {
 }
 
 /**
+ * The `rules` value for `rules`, keeping the DSL operator of `oldRules`. A
+ * file with both lists keeps both (the editor shows `$prepend` then
+ * `$append`): a rule from either list stays in it. A new or edited rule takes
+ * the list of the row it replaced (the rows gone between the same unchanged
+ * neighbours, in order), whatever the count; past those, or with none gone,
+ * it joins the list of the rule before it (`$prepend` at the top).
+ * @param {any} oldRules
+ * @param {string[]} rules
+ * @param {RuleOp[] | null} [operators]
+ * @returns {Record<string, any>}
+ */
+function dslRulesFor(oldRules, rules, operators = null) {
+    // Override replaces the whole rule array and cannot coexist with list
+    // operators. The library uses YAML mode for these files.
+    if (oldRules && typeof oldRules === 'object' && Object.hasOwn(oldRules, '$override')) return { $override: rules };
+    const lists = dslListsFor(oldRules, rules, operators);
+    if (!oldRules || typeof oldRules !== 'object' || Array.isArray(oldRules)) return lists;
+    // The editor only replaces the inserted lists. Every other operator,
+    // including ones this version does not know, stays as it was.
+    const kept = { ...oldRules };
+    delete kept.$prepend;
+    delete kept.$append;
+    return { ...kept, ...lists };
+}
+
+/** @typedef {'$prepend' | '$append'} RuleOp */
+/** @typedef {{ r: string, op: RuleOp }} RuleRow */
+
+/**
+ * Keep each displayed row's list through edits, deletion and reordering.
+ * Null means there is no mixed list whose boundary needs preserving.
+ * @param {string} content
+ * @returns {RuleOp[] | null}
+ */
+export function mixedRuleOperators(content) {
+    if (typeof jsyaml === 'undefined') return null;
+    try {
+        const rules = jsyaml.load(content)?.rules;
+        if (!Array.isArray(rules?.$prepend) || !Array.isArray(rules?.$append)) return null;
+        return [...rules.$prepend.map(() => /** @type {RuleOp} */ ('$prepend')), ...rules.$append.map(() => /** @type {RuleOp} */ ('$append'))];
+    } catch {
+        return null;
+    }
+}
+
+/** Structured entries cannot be represented by the visual string editor.
+ * @param {string} content
+ */
+export function hasStructuredRules(content) {
+    if (typeof jsyaml === 'undefined') return true;
+    try {
+        const rules = jsyaml.load(content)?.rules;
+        if (rules !== undefined && (rules === null || typeof rules !== 'object')) return true;
+        if (rules && !Array.isArray(rules) && Object.hasOwn(rules, '$override')) return true;
+        if (rules && !Array.isArray(rules) && ['$prepend', '$append'].some((op) => Object.hasOwn(rules, op) && rules[op] !== null && !Array.isArray(rules[op]))) return true;
+        const lists = Array.isArray(rules) ? [rules] : [rules?.$prepend, rules?.$append].filter(Array.isArray);
+        return lists.some((list) => list.some((/** @type {unknown} */ rule) => typeof rule !== 'string'));
+    } catch {
+        return true;
+    }
+}
+
+/**
+ * Match each kept rule to one old row, consuming duplicates in order.
+ * @param {RuleRow[]} old
+ * @param {string[]} rules
+ */
+function matchOldRuleRows(old, rules) {
+    const used = old.map(() => false);
+    /** @type {Map<string, { rows: number[], next: number }>} */
+    const rowsOf = new Map();
+    old.forEach((row, index) => {
+        const entry = rowsOf.get(row.r);
+        if (entry) entry.rows.push(index);
+        else rowsOf.set(row.r, { rows: [index], next: 0 });
+    });
+    const match = rules.map((rule) => {
+        const entry = rowsOf.get(rule);
+        // Advancing a cursor keeps repeated rules linear; shifting the array
+        // would move every remaining duplicate on each match.
+        const index = entry && entry.next < entry.rows.length ? entry.rows[entry.next++] : -1;
+        if (index >= 0) used[index] = true;
+        return index;
+    });
+    return { match, used };
+}
+
+/**
+ * Fill new or edited rows between two matches from the removed rows there.
+ * @param {RuleOp[]} want
+ * @param {RuleRow[]} old
+ * @param {boolean[]} used
+ * @param {{ start: number, end: number, prevOld: number, nextOld: number }} gap
+ * @param {RuleOp} previous
+ * @returns {RuleOp}
+ */
+function fillRuleGap(want, old, used, gap, previous) {
+    /** @type {RuleOp[]} */
+    const gone = [];
+    for (let k = gap.prevOld + 1; k < gap.nextOld; k++) {
+        if (!used[k]) gone.push(old[k].op);
+    }
+    for (let k = gap.start; k < gap.end; k++) {
+        previous = gone[k - gap.start] ?? previous;
+        want[k] = previous;
+    }
+    return previous;
+}
+
+/**
+ * Infer the original list of each row without changing the displayed order.
+ * @param {RuleRow[]} old
+ * @param {number[]} match
+ * @param {boolean[]} used
+ * @returns {RuleOp[]}
+ */
+function wantedRuleOperators(old, match, used) {
+    /** @type {RuleOp[]} */
+    const want = [];
+    let prevOld = -1;
+    /** @type {RuleOp} */
+    let prevOp = '$prepend';
+    let i = 0;
+    while (i < match.length) {
+        if (match[i] >= 0) {
+            prevOld = match[i];
+            prevOp = old[prevOld].op;
+            want[i++] = prevOp;
+            continue;
+        }
+        let j = i;
+        while (j < match.length && match[j] < 0) j++;
+        const nextOld = j < match.length ? match[j] : old.length;
+        prevOp = fillRuleGap(want, old, used, { start: i, end: j, prevOld, nextOld }, prevOp);
+        i = j;
+    }
+    return want;
+}
+
+/**
+ * Split at the fewest list changes, preferring the later split on a tie.
+ * @param {RuleOp[]} want
+ * @returns {number}
+ */
+function bestRuleSplit(want) {
+    let cost = want.filter((op) => op === '$prepend').length;
+    let best = cost;
+    let split = 0;
+    for (let k = 0; k < want.length; k++) {
+        cost += want[k] === '$append' ? 1 : -1;
+        if (cost <= best) {
+            best = cost;
+            split = k + 1;
+        }
+    }
+    return split;
+}
+
+/**
+ * The `$prepend` / `$append` lists for `rules` (see dslRulesFor).
+ * @param {any} oldRules
+ * @param {string[]} rules
+ * @param {RuleOp[] | null} [operators] row identities kept by the visual editor
+ * @returns {Record<string, string[]>}
+ */
+function dslListsFor(oldRules, rules, operators = null) {
+    if (operators && operators.length === rules.length) {
+        const split = bestRuleSplit(operators);
+        return { $prepend: rules.slice(0, split), $append: rules.slice(split) };
+    }
+    if (!oldRules || typeof oldRules !== 'object' || Array.isArray(oldRules)) return { $append: rules };
+    const hasBefore = oldRules.$prepend !== undefined;
+    if (hasBefore && Array.isArray(oldRules.$append)) {
+        /** @type {RuleRow[]} */
+        const old = [
+            ...(Array.isArray(oldRules.$prepend) ? oldRules.$prepend : []).map((/** @type {any} */ r) => ({ r: String(r), op: /** @type {RuleOp} */ ('$prepend') })),
+            ...oldRules.$append.map((/** @type {any} */ r) => ({ r: String(r), op: /** @type {RuleOp} */ ('$append') })),
+        ];
+        const { match, used } = matchOldRuleRows(old, rules);
+        const want = wantedRuleOperators(old, match, used);
+        // The editor shows one list, so the saved order is the shown order:
+        // `$prepend` takes a prefix and `$append` the rest. A rule moved
+        // across the boundary would otherwise snap back on save; split where
+        // the fewest rules change list (none when nothing crossed). On a tie
+        // the later split: a rule moved above `$prepend` rules joins them
+        // rather than pushing them after the profile's rules.
+        const split = bestRuleSplit(want);
+        const out = { $prepend: rules.slice(0, split), $append: rules.slice(split) };
+        return out.$append.length ? out : { $prepend: out.$prepend };
+    }
+    return { [hasBefore ? '$prepend' : '$append']: rules };
+}
+
+/**
  * Rebuild YAML content with new rules, preserving metadata from original.
  * @param {string} originalContent
  * @param {string[]} rules
+ * @param {RuleOp[] | null} [operators]
  * @returns {string}
  */
-export function rebuildYamlWithRules(originalContent, rules) {
+export function rebuildYamlWithRules(originalContent, rules, operators = null) {
     // Try to parse original as YAML to preserve metadata
     if (typeof jsyaml !== 'undefined') {
         try {
@@ -437,14 +652,9 @@ export function rebuildYamlWithRules(originalContent, rules) {
                 const oldRules = parsed.rules;
                 delete newObj.rules;
 
-                // Preserve the original DSL operator ($prepend/$append) if present
-                if (oldRules && typeof oldRules === 'object' && !Array.isArray(oldRules)) {
-                    const op = oldRules.$prepend !== undefined ? '$prepend' : '$append';
-                    newObj.rules = { [op]: rules };
-                } else {
-                    // Plain array or no rules -- default to $append
-                    newObj.rules = { $append: rules };
-                }
+                // Preserve the original DSL operator(s); a plain array or no
+                // rules defaults to $append.
+                newObj.rules = dslRulesFor(oldRules, rules, operators);
                 return jsyaml.dump(newObj, { lineWidth: -1, quotingType: "'", forceQuotes: false });
             }
         } catch {
@@ -474,14 +684,7 @@ export function wrapRulesAsPrismYaml(rawRulesText, originalYaml) {
             const parsed = jsyaml.load(originalYaml);
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
                 // Preserve metadata, keep original DSL operator if present
-                const oldRules = parsed.rules;
-                let newRules;
-                if (oldRules && typeof oldRules === 'object' && !Array.isArray(oldRules)) {
-                    const op = oldRules.$prepend !== undefined ? '$prepend' : '$append';
-                    newRules = { [op]: rules };
-                } else {
-                    newRules = { $append: rules };
-                }
+                const newRules = dslRulesFor(parsed.rules, rules);
                 const result = { ...parsed, rules: newRules };
                 return jsyaml.dump(result, { lineWidth: -1, quotingType: "'", forceQuotes: false });
             }

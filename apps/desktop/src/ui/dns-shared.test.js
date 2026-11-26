@@ -207,6 +207,44 @@ describe('createDnsReapply', () => {
         expect(onError).toHaveBeenCalledTimes(1);
     });
 
+    it('does not confirm an unapplied saved choice when a newer toggle supersedes the read', async () => {
+        const saved = deferred();
+        const apply = vi.fn();
+        const r = createDnsReapply({ isSaved: () => saved.promise, apply, persist: vi.fn(), setChecked: vi.fn() });
+        const restore = r.run();
+        await Promise.resolve();
+        const change = r.userChange(async () => false);
+        saved.resolve(true);
+        await expect(restore).resolves.toBe(false);
+        await change;
+        expect(apply).not.toHaveBeenCalled();
+    });
+
+    it.each(['read', 'apply'])('releases the restore queue after a stuck %s and ignores late completion', async (stalled) => {
+        vi.useFakeTimers();
+        const pending = deferred();
+        const apply = vi.fn((signal) => stalled === 'apply' ? pending.promise : Promise.resolve(signal));
+        const persist = vi.fn();
+        const setChecked = vi.fn();
+        const next = vi.fn(async () => {});
+        const r = createDnsReapply({ isSaved: () => stalled === 'read' ? pending.promise : Promise.resolve(true), apply, persist, setChecked });
+        try {
+            const restore = r.run();
+            await vi.advanceTimersByTimeAsync(0);
+            const queued = r.serversChange(next);
+            await vi.advanceTimersByTimeAsync(25_000);
+            await expect(restore).resolves.toBe(false);
+            await queued;
+            expect(next).toHaveBeenCalledOnce();
+            if (stalled === 'apply') expect(apply.mock.calls[0][0].aborted).toBe(true);
+            pending.resolve(true);
+            await vi.advanceTimersByTimeAsync(0);
+            if (stalled === 'read') expect(apply).not.toHaveBeenCalled();
+            expect(persist).not.toHaveBeenCalled();
+            expect(setChecked).not.toHaveBeenCalled();
+        } finally { vi.useRealTimers(); }
+    });
+
     it('keeps the switch on when only saving the choice fails', async () => {
         const apply = vi.fn(async () => {});
         const setChecked = vi.fn();
