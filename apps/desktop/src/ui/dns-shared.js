@@ -8,7 +8,7 @@
  * @module ui/dns-shared
  */
 
-import { patchConfig, closeAllConnections, getConfig, invoke } from '../api.js';
+import { closeAllConnections, getConfig, invoke } from '../api.js';
 import { dnsLogger } from '../utils/logger.js';
 import { showNotification } from './notifications.js';
 import { invalidateSettingsCache } from './cache.js';
@@ -16,7 +16,7 @@ import { translations, currentLang } from '../i18n.js';
 import { COMMANDS } from '@zephyr/shared';
 import { createFocusTrap } from '../utils/focus-trap.js';
 import { Bus, Events } from './events.js';
-import { getSetting, saveSetting, saveSettingChecked } from './settings-helpers.js';
+import { getSetting, saveSetting, saveSettingChecked, saveSettingsChecked } from './settings-helpers.js';
 import { pasteWithFeedback } from '../utils/clipboard.js';
 import { queueSmartConfigWrite } from './settings/auto-switch.js';
 import { createSerialQueue } from '../utils/sequential.js';
@@ -81,16 +81,20 @@ async function isDnsRewriteSavedEnabled() {
  * rewrite back on, or saves it as on, after the user turned it off.
  * @param {{
  *   isSaved: () => Promise<boolean>,
- *   apply: () => Promise<unknown>,
- *   persist: () => Promise<unknown>,
+ *   apply: (signal: AbortSignal, beforeDispatch: () => void) => Promise<unknown>,
+ *   persist: (signal: AbortSignal) => Promise<unknown>,
  *   setChecked: (checked: boolean) => void,
+ *   readEnabled?: () => Promise<boolean | null>,
  *   onError?: (err: unknown) => void,
  *   wait?: (ms: number) => Promise<unknown>,
  * }} deps
  */
-export function createDnsReapply({ isSaved, apply, persist, setChecked, onError = () => {}, wait = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+export function createDnsReapply({ isSaved, apply, persist, setChecked, readEnabled, onError = () => {}, wait = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
     const queue = createSerialQueue();
     let generation = 0;
+    /** @type {AbortController | null} */
+    let activeRestore = null;
+    let restoreWriting = false;
     return {
         /**
          * Run a user toggle: cancels pending re-applies, then waits its turn.
@@ -102,6 +106,9 @@ export function createDnsReapply({ isSaved, apply, persist, setChecked, onError 
          */
         userChange(fn) {
             generation += 1;
+            // Cancel reads/retries promptly. A dispatched runtime write must
+            // finish before the user's write; native admission and HTTP are bounded.
+            if (!restoreWriting) activeRestore?.abort();
             const gen = generation;
             return /** @type {Promise<T>} */ (queue.run(() => fn(() => gen === generation)));
         },
@@ -134,43 +141,75 @@ export function createDnsReapply({ isSaved, apply, persist, setChecked, onError 
          */
         run() {
             const gen = generation;
-            const current = () => gen === generation;
             return /** @type {Promise<boolean>} */ (queue.run(async () => {
-                if (!current()) return true;
-                let saved;
-                try {
-                    saved = await isSaved();
-                } catch (err) {
-                    // Without the saved choice there is nothing to re-apply;
-                    // the next restart or reload tries again.
-                    onError(err);
+                const controller = new AbortController();
+                activeRestore = controller;
+                const current = () => gen === generation && !controller.signal.aborted;
+                const cancelled = new Promise((resolve) => {
+                    controller.signal.addEventListener('abort', () => { if (!restoreWriting) resolve(false); }, { once: true });
+                });
+                let timer;
+                const deadline = new Promise((resolve) => {
+                    timer = setTimeout(() => {
+                        controller.abort();
+                        onError(new Error('DNS restoration timed out'));
+                        if (!restoreWriting) resolve(false);
+                    }, 25_000);
+                });
+                const restoring = (async () => {
+                    if (!current()) return false;
+                    let saved;
+                    try {
+                        saved = await isSaved();
+                    } catch (err) {
+                        // Without the saved choice there is nothing to re-apply;
+                        // the next restart or reload tries again.
+                        if (!controller.signal.aborted) onError(err);
+                        return false;
+                    }
+                    if (!current()) return false;
+                    if (!saved) {
+                        if (readEnabled) {
+                            const enabled = await readEnabled();
+                            if (!current()) return false;
+                            if (typeof enabled === 'boolean') setChecked(enabled);
+                        }
+                        return true;
+                    }
+                    let lastErr;
+                    for (let i = 0; i < 5; i++) {
+                        try {
+                            try { await apply(controller.signal, () => { restoreWriting = true; }); }
+                            finally { if (activeRestore === controller) restoreWriting = false; }
+                        } catch (err) {
+                            lastErr = err;
+                            if (!current()) return false;
+                            await wait(500);
+                            if (!current()) return false;
+                            continue;
+                        }
+                        if (!current()) return false;
+                        setChecked(true);
+                        // The rewrite is live; a failed preference save is logged.
+                        try {
+                            await persist(controller.signal);
+                        } catch (err) {
+                            if (!controller.signal.aborted) onError(err);
+                        }
+                        return true;
+                    }
+                    setChecked(false);
+                    onError(lastErr);
                     return false;
-                }
-                if (!saved || !current()) return true;
-                let lastErr;
-                for (let i = 0; i < 5; i++) {
-                    try {
-                        await apply();
-                    } catch (err) {
-                        lastErr = err;
-                        await wait(500);
-                        if (!current()) return true;
-                        continue;
+                })();
+                try { return await Promise.race([restoring, deadline, cancelled]); }
+                finally {
+                    clearTimeout(timer);
+                    if (activeRestore === controller) {
+                        activeRestore = null;
+                        restoreWriting = false;
                     }
-                    if (!current()) return true;
-                    setChecked(true);
-                    // Persist the decision so future checks won't hit null. The
-                    // rewrite is already live, so a failed save is only logged.
-                    try {
-                        await persist();
-                    } catch (err) {
-                        onError(err);
-                    }
-                    return true;
                 }
-                setChecked(false);
-                onError(lastErr);
-                return false;
             }).catch((/** @type {unknown} */ err) => { onError(err); return false; }));
         },
     };
@@ -375,18 +414,22 @@ export async function buildDnsRewritePayload(servers) {
 }
 
 /**
- * Apply the DNS rewrite payload to the core via API only.
+ * Apply the DNS overlay through the native full-configuration reload.
  * Does NOT persist to the original profile file — DNS rewrite is a runtime
  * overlay that must not corrupt subscription-specific DNS configurations.
  *
  * @returns {Promise<boolean>}
  * @param {{ nameserver: string[], fallback: string[] }} [servers] the servers to
  *   apply; the saved ones when left out
+ * @param {AbortSignal} [signal]
+ * @param {() => void} [beforeDispatch]
  */
-export async function applyDnsRewrite(servers) {
+export async function applyDnsRewrite(servers, signal, beforeDispatch) {
     try {
         const dnsRewritePayload = await buildDnsRewritePayload(servers);
-        await patchConfig(dnsRewritePayload);
+        if (signal?.aborted) throw new Error('DNS restoration cancelled');
+        beforeDispatch?.();
+        await invoke(COMMANDS.APPLY_RUNTIME_DNS, { enabled: true, dns: /** @type {any} */ (dnsRewritePayload).dns });
         return true;
     } catch (err) {
         dnsLogger.error('Failed to apply DNS rewrite', err);
@@ -493,7 +536,7 @@ async function setDnsRewrite(box, enabled, isLatest) {
         };
     try {
         if (enabled) await applyDnsRewrite();
-        else await patchConfig({ dns: { enable: false }, sniffing: false });
+        else await invoke(COMMANDS.APPLY_RUNTIME_DNS, { enabled: false, dns: null });
         await closeConnectionsAfterDnsChange();
     } catch (err) {
         if (!enabled) dnsLogger.error('Failed to disable DNS rewrite', err);
@@ -534,14 +577,18 @@ export async function initDnsRewriteToggle() {
     const reapply = createDnsReapply({
         // A choice the switch could not save wins over the stale setting.
         isSaved: dnsRewriteWanted,
-        apply: applyDnsRewrite,
+        apply: (signal, beforeDispatch) => applyDnsRewrite(undefined, signal, beforeDispatch),
         // Through the settings write queue, as the switch saves it: a whole
         // settings snapshot read before this write must not land after it.
-        persist: async () => {
-            await queueSmartConfigWrite(() => saveSettingChecked('dns_rewrite_enabled', true));
-            forgetUnsavedDnsChoice();
+        persist: async (signal) => {
+            await queueSmartConfigWrite(() => saveSettingsChecked({ dns_rewrite_enabled: true }, () => !signal.aborted));
+            if (!signal.aborted) forgetUnsavedDnsChoice();
         },
         setChecked: (checked) => { toggle.checked = checked; },
+        readEnabled: async () => {
+            const enabled = /** @type {any} */ (await getConfig())?.dns?.enable;
+            return typeof enabled === 'boolean' ? enabled : null;
+        },
         onError: (/** @type {unknown} */ err) => dnsLogger.warn('DNS rewrite re-apply could not finish', err),
     });
     // Until the startup sync has read the core, the switch stays disabled;
@@ -555,7 +602,7 @@ export async function initDnsRewriteToggle() {
         if (!startupSynced) void reapply.initial(syncFromCore);
     });
     Bus.on(Events.CONFIG_UPDATED, (/** @type {any} */ data) => {
-        if (!data?.reloaded) return;
+        if (!data?.reloaded && !data?.restoreRuntime) return;
         const done = reapply.run();
         if (typeof data.waitFor === 'function') data.waitFor(done);
         else void done;
@@ -583,15 +630,15 @@ export async function initDnsRewriteToggle() {
             // Defaults save) wins over the stored setting, as for re-applies.
             const savedEnabled = await dnsRewriteWanted();
 
-            // If user previously enabled DNS rewrite but core restarted without it,
-            // re-apply automatically.
-            if (savedEnabled && !isEnabled) {
+            // An enabled DNS section may still be the profile's servers rather
+            // than the saved rewrite. Restore the complete saved payload.
+            if (savedEnabled) {
                 try {
                     await applyDnsRewrite();
                 } catch (err) {
                     // The core may not be ready yet: the switch shows what
                     // runs, and the apply is retried like a failed read.
-                    toggle.checked = false;
+                    toggle.checked = coreEnabled;
                     if (retryStartupSync()) return;
                     dnsLogger.warn('DNS rewrite could not be re-applied at startup', err);
                     finishStartupSync();

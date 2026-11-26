@@ -36,14 +36,16 @@ let _timer = null;
 let _polling = false;
 let _active = false;
 let _consecutiveCount = 0;
+let _observationGeneration = 0;
 /** @type {string|null} */
 let _lastCandidate = null;
 /** @type {Record<string, any> | null} Module-level cache for static proxy group structures */
 let _staticProxiesCache = null;
 
 // Invalidate cache on config/core changes
-Bus.on(Events.CONFIG_UPDATED, () => { _staticProxiesCache = null; });
-Bus.on(Events.CORE_RESTARTED, () => { _staticProxiesCache = null; });
+Bus.on(Events.CONFIG_UPDATED, () => { _staticProxiesCache = null; resetObservedGroup(); });
+Bus.on(Events.CORE_RESTARTED, () => { _staticProxiesCache = null; resetObservedGroup(); });
+appStore.subscribe('uiGroupName', resetObservedGroup);
 
 /**
  * The first visible writable group on a connection's chain (exit first), skipping DIRECT-style
@@ -180,6 +182,7 @@ export function stopObservedGroupWatcher() {
  * Reset consecutive counter (e.g., on profile/config change).
  */
 export function resetObservedGroup() {
+    _observationGeneration++;
     _consecutiveCount = 0;
     _lastCandidate = null;
     if (appStore.get('observedGroupName')) {
@@ -204,11 +207,13 @@ function _scheduleNext() {
 async function _poll() {
     if (_polling) return;
     _polling = true;
+    const generation = _observationGeneration;
     try {
         const [connData, proxiesData] = await Promise.all([
             getConnections(),
-            _getProxiesData(),
+            _getProxiesData(generation),
         ]);
+        if (generation !== _observationGeneration) return;
 
         const connections = connData?.connections || connData || [];
         /** @type {Record<string, any>} */
@@ -252,6 +257,7 @@ async function _poll() {
             }
         }
     } catch (err) {
+        if (generation !== _observationGeneration) return;
         observedGroupLogger.debug('Observed group poll failed:', err);
         if (appStore.get('observedGroupName')) {
             appStore.set('observedGroupName', null);
@@ -264,13 +270,15 @@ async function _poll() {
     }
 }
 
-async function _getProxiesData() {
+/** @param {number} generation */
+async function _getProxiesData(generation) {
     if (_staticProxiesCache) return _staticProxiesCache;
     try {
         // Cache proxy data at module level to avoid redundant API calls during 2s polling
         // Proxy group structures are static and only change on config/core updates
-        _staticProxiesCache = await getProxiesCached();
-        return _staticProxiesCache;
+        const data = await getProxiesCached();
+        if (generation === _observationGeneration) _staticProxiesCache = data;
+        return data;
     } catch {
         return null;
     }
