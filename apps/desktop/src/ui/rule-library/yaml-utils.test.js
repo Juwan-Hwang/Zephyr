@@ -50,6 +50,55 @@ describe('with js-yaml available', () => {
             });
         });
 
+        it('keeps $filter / $remove / $transform beside the edited lists', () => {
+            const original = "rules:\n  $filter: \"!x.includes('ads')\"\n  $remove: \"x.startsWith('MATCH')\"\n  $append:\n    - DOMAIN,b.com,Proxy\n";
+            const out = yaml.load(rebuildYamlWithRules(original, ['DOMAIN,c.com,Proxy']));
+            expect(out).toEqual({ rules: { $filter: "!x.includes('ads')", $remove: "x.startsWith('MATCH')", $append: ['DOMAIN,c.com,Proxy'] } });
+            const wrapped = yaml.load(wrapRulesAsPrismYaml('DOMAIN,d.com,Proxy', original));
+            expect(wrapped.rules.$filter).toBe("!x.includes('ads')");
+            expect(wrapped.rules.$append).toEqual(['DOMAIN,d.com,Proxy']);
+        });
+
+        it('keeps both lists of a file that has $prepend and $append', () => {
+            const original = 'rules:\n  $prepend:\n    - DOMAIN,a.com,DIRECT\n  $append:\n    - DOMAIN,b.com,Proxy\n';
+            expect(parseRulesFromYaml(original)).toEqual(['DOMAIN,a.com,DIRECT', 'DOMAIN,b.com,Proxy']);
+            // Edited in the library: a.com changed, c.com added after b.com.
+            const out = yaml.load(rebuildYamlWithRules(original, ['DOMAIN,a2.com,DIRECT', 'DOMAIN,b.com,Proxy', 'DOMAIN,c.com,Proxy']));
+            expect(out).toEqual({ rules: { $prepend: ['DOMAIN,a2.com,DIRECT'], $append: ['DOMAIN,b.com,Proxy', 'DOMAIN,c.com,Proxy'] } });
+        });
+
+        it('keeps an edited first $append rule appended', () => {
+            const original = 'rules:\n  $prepend:\n    - DOMAIN,a.com,DIRECT\n  $append:\n    - DOMAIN,b.com,Proxy\n';
+            const out = yaml.load(rebuildYamlWithRules(original, ['DOMAIN,a.com,DIRECT', 'DOMAIN,b2.com,Proxy']));
+            expect(out).toEqual({ rules: { $prepend: ['DOMAIN,a.com,DIRECT'], $append: ['DOMAIN,b2.com,Proxy'] } });
+        });
+
+        it('keeps an edited $append rule appended when the count changes', () => {
+            const original = 'rules:\n  $prepend:\n    - DOMAIN,a.com,DIRECT\n  $append:\n    - DOMAIN,b.com,Proxy\n    - DOMAIN,c.com,Proxy\n';
+            // b.com edited and c.com deleted in one save.
+            let out = yaml.load(rebuildYamlWithRules(original, ['DOMAIN,a.com,DIRECT', 'DOMAIN,b2.com,Proxy']));
+            expect(out).toEqual({ rules: { $prepend: ['DOMAIN,a.com,DIRECT'], $append: ['DOMAIN,b2.com,Proxy'] } });
+            // b.com edited and d.com added after it.
+            out = yaml.load(rebuildYamlWithRules(original, ['DOMAIN,a.com,DIRECT', 'DOMAIN,b2.com,Proxy', 'DOMAIN,d.com,Proxy', 'DOMAIN,c.com,Proxy']));
+            expect(out).toEqual({ rules: { $prepend: ['DOMAIN,a.com,DIRECT'], $append: ['DOMAIN,b2.com,Proxy', 'DOMAIN,d.com,Proxy', 'DOMAIN,c.com,Proxy'] } });
+            // A rule added right after a.com joins its list.
+            out = yaml.load(rebuildYamlWithRules(original, ['DOMAIN,a.com,DIRECT', 'DOMAIN,x.com,DIRECT', 'DOMAIN,b.com,Proxy', 'DOMAIN,c.com,Proxy']));
+            expect(out).toEqual({ rules: { $prepend: ['DOMAIN,a.com,DIRECT', 'DOMAIN,x.com,DIRECT'], $append: ['DOMAIN,b.com,Proxy', 'DOMAIN,c.com,Proxy'] } });
+        });
+
+        it('saves the shown order when a rule is moved across the list boundary', () => {
+            const original = 'rules:\n  $prepend:\n    - DOMAIN,a.com,REJECT\n    - DOMAIN,x.com,DIRECT\n  $append:\n    - DOMAIN,b.com,DIRECT\n    - DOMAIN,c.com,Proxy\n';
+            // b.com moved to the top: it now matches before a.com.
+            const out = yaml.load(rebuildYamlWithRules(original, ['DOMAIN,b.com,DIRECT', 'DOMAIN,a.com,REJECT', 'DOMAIN,x.com,DIRECT', 'DOMAIN,c.com,Proxy']));
+            expect(out).toEqual({ rules: { $prepend: ['DOMAIN,b.com,DIRECT', 'DOMAIN,a.com,REJECT', 'DOMAIN,x.com,DIRECT'], $append: ['DOMAIN,c.com,Proxy'] } });
+        });
+
+        it('keeps an untouched $prepend rule there when a rule moves above it (tie)', () => {
+            const original = 'rules:\n  $prepend:\n    - DOMAIN,a.com,REJECT\n  $append:\n    - DOMAIN,b.com,DIRECT\n    - DOMAIN,c.com,Proxy\n';
+            const out = yaml.load(rebuildYamlWithRules(original, ['DOMAIN,b.com,DIRECT', 'DOMAIN,a.com,REJECT', 'DOMAIN,c.com,Proxy']));
+            expect(out).toEqual({ rules: { $prepend: ['DOMAIN,b.com,DIRECT', 'DOMAIN,a.com,REJECT'], $append: ['DOMAIN,c.com,Proxy'] } });
+        });
+
         it('keeps $append when the original used it', () => {
             const original = 'rules:\n  $append:\n    - MATCH,DIRECT\n';
             const out = yaml.load(rebuildYamlWithRules(original, ['MATCH,Proxy']));

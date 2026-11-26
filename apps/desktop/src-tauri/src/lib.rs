@@ -26,6 +26,7 @@ pub mod network_coordinator;
 pub mod os_notification;
 pub mod prism;
 pub mod process_icon;
+pub mod speed_test;
 pub mod sys_proxy;
 pub mod tray;
 pub mod updater;
@@ -181,6 +182,20 @@ pub(crate) struct Settings {
     /// Hide proxy nodes that are unavailable (timeout) in the proxy list.
     #[serde(default)]
     hide_timeout_nodes: bool,
+    /// Address the latency test asks for through each node; `None` uses the
+    /// built-in default.
+    #[serde(default)]
+    latency_test_url: Option<String>,
+    /// File the download speed test fetches; `None` uses the built-in default.
+    #[serde(default)]
+    speed_test_url: Option<String>,
+    /// Longest a download speed test runs for one node, in seconds.
+    #[serde(default)]
+    speed_test_max_secs: Option<u32>,
+    /// Show the address sites see (looked up through the proxy) beside the
+    /// current node.
+    #[serde(default)]
+    show_exit_ip: bool,
     // --- Global user preferences (applied to all profiles) ---
     /// Proxy mode: rule, global, or direct.
     #[serde(default)]
@@ -995,6 +1010,10 @@ fn patch_settings_blocking(
         patch_field!(auto_update_client);
         patch_field!(autostart);
         patch_field!(hide_timeout_nodes);
+        patch_field!(latency_test_url);
+        patch_field!(speed_test_url);
+        patch_field!(speed_test_max_secs);
+        patch_field!(show_exit_ip);
         patch_field!(custom_args);
         // A non-null mode was already rejected during validation, so only an
         // explicit null (Restore Defaults) reaches here: it is an intentional
@@ -2260,6 +2279,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_third_party_licenses,
+            speed_test::speed_test_port,
+            speed_test::speed_test_cancel,
+            speed_test::speed_test_download,
+            speed_test::lookup_exit_ip,
+            speed_test::lookup_exit_ip_cancel,
             get_portable_mode,
             set_ui_scale,
             start_core,

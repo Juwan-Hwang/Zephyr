@@ -12,6 +12,7 @@ const prismMock = {
     insertRuleStr: vi.fn(async () => 0),
     apply: vi.fn(async () => ({})),
     rebuild: vi.fn(async () => ({})),
+    rebuildWithOverrides: vi.fn(async () => ({})),
     toggleGroup: vi.fn(async () => true),
     traceReportText: vi.fn(async () => 'trace body'),
 };
@@ -81,7 +82,7 @@ describe('rule library page', () => {
         toggle.dispatchEvent(new Event('change'));
         await flush();
         expect(prismMock.toggleGroup).toHaveBeenCalledWith('ads.prism.yaml', true);
-        expect(prismMock.rebuild).toHaveBeenCalled();
+        expect(prismMock.rebuildWithOverrides).toHaveBeenCalled();
     });
 
     it('editor: Add rule keeps the list and inserts on ✓; rows edit in place', async () => {

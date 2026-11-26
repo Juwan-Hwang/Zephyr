@@ -201,8 +201,7 @@ html.is-mac .dz-switch-node-btn {
   padding-top: 4px;
   padding-bottom: 2px;
 }
-html.is-mac #node-wheel-trigger,
-html.is-mac #node-wheel-list [role="option"] {
+html.is-mac .home-current {
   padding-top: 7px;
   padding-bottom: 5px;
 }
@@ -415,20 +414,6 @@ input[type="range"],
     animation: node-marquee var(--marquee-duration, 4s) linear infinite alternate;
 }
 
-/* Hide scrollbar on node wheel dropdown */
-#node-wheel-scroll::-webkit-scrollbar {
-    display: none;
-}
-#node-wheel-scroll {
-    -ms-overflow-style: none;
-}
-/* Keyboard focus on a wheel node (options are tabindex=-1, so the global ring skips them) */
-#node-wheel-list [role="option"]:focus { outline: none; }
-#node-wheel-list [role="option"]:focus-visible {
-    /* box-shadow follows the rounded corners of the scaled option (outline left corner slivers) */
-    outline: 2px solid transparent;
-    box-shadow: 0 0 0 2px var(--color-accent), 0 0 0 5px var(--zephyr-focus-ring);
-}
 
 
 :root {
@@ -1689,11 +1674,12 @@ button:focus-visible:not(:disabled, [disabled]),
 /* ============================================
    Proxies Page — Auto-fill grid
    Columns are added/removed automatically based on
-   available width. Minimum card width 180px.
+   available width. Minimum card width 200px, so a
+   long node name and its latency still fit on one row.
    Unlimited max columns.
    ============================================ */
 #proxies-list {
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     /* .proxy-wrapper reaches 8px past the grid's right edge by design (room
        for the selection badge); with only overflow-y set, the horizontal axis
        computes to auto and those 8px surface as a useless horizontal
@@ -1893,7 +1879,7 @@ html.dark #fullscreen-editor-output {
 @keyframes dz-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
 /* ── KPI indicator strip ── */
-.dz-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; flex-shrink: 0; min-width: 0; }
+.dz-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; flex-shrink: 0; min-width: 0; }
 .dz-kpi { padding: 16px; display: flex; flex-direction: column; gap: 6px; position: relative; overflow: hidden; min-width: 0; }
 .dz-kpi-top { display: flex; align-items: center; justify-content: space-between; }
 .dz-kpi-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--zephyr-text-muted); display: flex; align-items: center; gap: 6px; }
@@ -2118,9 +2104,8 @@ html:not(.dark) #mode-slider { background: #fff; }
 /* Responsive - switch to single-column on narrow viewports */
 @media (max-width: 1080px) {
     /* 2 + 3: download/upload are the primary metrics (3 of 6 columns each), the rest share the second row */
-    .dz-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-    .dz-kpi:nth-child(-n + 2) { grid-column: span 3; }
-    .dz-kpi:nth-child(n + 3) { grid-column: span 2; }
+    /* 2 × 2 */
+    .dz-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .dz-grid-main, .dz-grid-bottom { grid-template-columns: minmax(0, 1fr); }
     /* Single-column: let sections take natural height, cap inner lists */
     .dz-grid-main { flex-shrink: 1; }
@@ -2129,6 +2114,41 @@ html:not(.dark) #mode-slider { background: #fff; }
     .dz-log-list { max-height: 200px; }
 }
 
+
+/* Console home, final layout: the switch strip takes the page title's place;
+   wide windows use one 4-column grid (1081–1279 px: 3 columns) so the three
+   rows' vertical edges line up. */
+.dz-content > .dz-strip { flex-shrink: 0; }
+.dz-strip .dz-mode-seg { margin-top: 0; height: 40px; border-radius: var(--radius-full); }
+.dz-strip .dz-mode-seg .dz-mode-slider { border-radius: var(--radius-full); }
+.dz-kpi-link { cursor: pointer; transition: border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out); }
+.dz-kpi-link:hover { border-color: var(--zephyr-border-default) !important; }
+.dz-kpi-link:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.dz-kpi-link .dz-kpi-label { display: inline-flex; align-items: center; gap: 4px; }
+.dz-kpi-arrow { width: 14px; height: 14px; color: var(--text-tertiary); flex: 0 0 14px; }
+[dir="rtl"] .dz-kpi-arrow { transform: scaleX(-1); }
+.dz-node-ip { margin-top: 4px; }
+.dz-node-ip[hidden] { display: none; }
+.dz-node-alts { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--zephyr-border-subtle); }
+.dz-node-alts[hidden] { display: none; }
+.dz-node-alts > p { font-size: 12px; font-weight: 500; color: var(--text-secondary); margin: 0 0 6px; }
+.dz-alt { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; margin-inline: -8px; width: calc(100% + 16px); border-radius: 10px; text-align: start; }
+.dz-alt[hidden] { display: none; }
+.dz-alt:hover { background: var(--zephyr-bg-muted); }
+.dz-alt:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: -2px; }
+.dz-profile { margin-bottom: 8px; align-self: flex-start; }
+.dz-profile .proxy-sort-menu { top: auto; bottom: calc(100% + 6px); }
+@media (min-width: 1081px) {
+    .dz-grid-main { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .dz-grid-main > .dz-traffic-card { grid-column: span 2; }
+    .dz-grid-bottom { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1280px) {
+    .dz-grid-main { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .dz-grid-main > .dz-traffic-card { grid-column: span 3; }
+    .dz-grid-bottom { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .dz-grid-bottom > .glass-card:first-child { grid-column: span 2; }
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Minimal home hero: speed read-out layered over a full-width live area chart
@@ -2306,6 +2326,126 @@ html:not(.dark) .home-hero-chart { opacity: .6; }
   box-shadow: none;
 }
 
+/* Sidebar: icon + short label, collapsible to icons only (ui/sidebar.js).
+   Buttons are start-aligned with a fixed start padding in both states, so the
+   icons never move; only the sidebar width changes. Labels are clipped, never
+   wrapped, while the width animates. Expanding: width first, label fades in
+   80ms later. Collapsing: label fades out first, width follows 40ms later. */
+:root {
+  --sidebar-w-collapsed: 80px;
+  --sidebar-w-expanded: 160px;
+}
+/* Longer labels outside CJK ("Subscriptions", "Connections") */
+html:not(:lang(zh)):not(:lang(ja)):not(:lang(ko)) { --sidebar-w-expanded: 192px; }
+#sidebar-nav {
+  width: var(--sidebar-drag-w, var(--sidebar-w-collapsed));
+  flex: 0 0 auto;
+  align-items: stretch;
+  padding-inline: 16px;
+  transition: width var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out) 40ms,
+              margin var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out) 40ms,
+              background-color var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out),
+              box-shadow var(--zephyr-time-standard) var(--zephyr-easing-ease-in-out);
+}
+.sidebar-expanded #sidebar-nav {
+  width: var(--sidebar-drag-w, var(--sidebar-w-expanded));
+  transition-delay: 0s;
+}
+#sidebar-nav .nav-btn {
+  width: 100%;
+  justify-content: flex-start;
+  padding-inline-start: 12px;
+  gap: 12px;
+  overflow: hidden;
+  box-shadow: none;
+  --un-ring-width: 0px;
+}
+#sidebar-nav .nav-btn .icon { flex: 0 0 24px; }
+#sidebar-nav .nav-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: inherit;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity var(--zephyr-time-micro) var(--zephyr-easing-ease-out),
+              transform var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+[dir='rtl'] .nav-label { transform: translateX(4px); }
+.sidebar-expanded .nav-label {
+  opacity: 1;
+  transform: none;
+  transition-delay: 80ms;
+}
+/* Selected item: a flat tint, like the system sidebars, not a raised box */
+.nav-indicator { box-shadow: 0 0 0 1px var(--zephyr-border-subtle); }
+html:not(.dark) .nav-indicator { background: rgb(0 0 0 / .06); }
+html.dark .nav-indicator { background: rgb(255 255 255 / .1); }
+html.dark #sidebar-nav .nav-btn:not(.is-active) { color: rgb(255 255 255 / .74); }
+html.dark #sidebar-nav .nav-btn:not(.is-active):hover { color: var(--text-primary); }
+
+/* Edge handle: a thin accent line shows on hover; drag or double-click it */
+/* Inside the nav's edge: #sidebar-nav clips what overhangs it (overflow-x: hidden). */
+.sidebar-edge {
+  position: absolute;
+  inset-block: 16px;
+  inset-inline-end: 0;
+  width: 8px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sidebar-edge::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 1px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent-primary);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease-out) 120ms;
+}
+.sidebar-edge:hover::after,
+.sidebar-dragging .sidebar-edge::after { opacity: .7; }
+.sidebar-dragging, .sidebar-dragging * { cursor: col-resize !important; user-select: none !important; }
+.sidebar-dragging #sidebar-nav,
+.sidebar-dragging .nav-label,
+.sidebar-instant #sidebar-nav,
+.sidebar-instant .nav-label { transition: none !important; }
+/* Narrow window: expanding lays the sidebar over the content */
+/* `html.` so it outranks the themed `html.dark` / `html:not(.dark) #sidebar-nav` backgrounds. */
+html.sidebar-overlay #sidebar-nav {
+  margin-inline-end: calc(var(--sidebar-w-collapsed) - var(--sidebar-drag-w, var(--sidebar-w-expanded)));
+  z-index: 40;
+  background: color-mix(in srgb, var(--zephyr-bg-elevated) 92%, transparent);
+  box-shadow: var(--zephyr-shadow-md);
+}
+.sidebar-menu-kbd {
+  margin-inline-start: auto;
+  padding-inline-start: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-height: 600px) {
+  #sidebar-nav { gap: 12px; padding-block: 20px; }
+  #sidebar-nav .nav-btn { flex-shrink: 0; min-height: 40px; }
+}
+/* A short window at a large UI scale: the items scroll rather than push
+   Settings (the way back to a smaller scale) out of reach. */
+#sidebar-nav { overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
+#sidebar-nav::-webkit-scrollbar { display: none; }
+#sidebar-nav .nav-btn { flex-shrink: 0; }
+@media (prefers-reduced-motion: reduce) {
+  #sidebar-nav { transition: none; }
+  .nav-label { transition: opacity var(--zephyr-time-micro) linear; transform: none; }
+}
+
 /* Background glows cross-fade (opacity only); hidden ones stop painting once faded out */
 .page-glow {
   opacity: 0;
@@ -2325,6 +2465,219 @@ html:not(.dark) .home-hero-chart { opacity: .6; }
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   Minimal home layout: switch strip → traffic card → current-node bar
+   ═══════════════════════════════════════════════════════════════════════════ */
+[data-page="home"] { padding-bottom: 16px; }
+.home-strip { display: flex; align-items: center; gap: 0; padding: 12px 16px; min-height: 72px; }
+/* The strip's own width decides (UI scale shrinks it without changing the
+   window's): first the icons go, then the three switches take a row each.
+   Wrapping never happens while the cells keep their zero basis. */
+.home-strip { container: home-strip / inline-size; flex-wrap: wrap; row-gap: 10px; }
+.home-strip-cell { display: flex; align-items: center; gap: 12px; flex: 1 1 0; min-width: 0; }
+.home-strip-cell.is-mode { flex: 1.25 1 0; }
+.home-strip-sep { width: 1px; align-self: stretch; margin: 4px 16px; background: var(--zephyr-border-subtle); flex: 0 0 1px; }
+.home-strip-icon { width: 32px; height: 32px; flex: 0 0 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; border: 1px solid transparent; }
+/* After the base rules above, which they narrow. */
+@container home-strip (max-width: 600px) {
+  .home-strip-icon { display: none; }
+  .home-strip-cell { gap: 8px; }
+  .home-strip-sep { margin-inline: 8px; }
+}
+@container home-strip (max-width: 400px) {
+  .home-strip-sep { display: none; }
+  .home-strip-cell, .home-strip-cell.is-mode { flex: 1 1 100%; }
+}
+.home-strip-icon.is-accent { color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 10%, transparent); border-color: color-mix(in srgb, var(--accent-primary) 20%, transparent); }
+.home-strip-icon.is-rose { color: rgb(251 113 133); background: rgb(244 63 94 / .1); border-color: rgb(244 63 94 / .2); }
+.home-strip-text { flex: 1 1 auto; min-width: 0; }
+.home-strip-title { font-size: 13px; font-weight: 600; line-height: 18px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-strip-sub { display: flex; align-items: center; gap: 6px; margin-top: 1px; font-size: 12px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; min-width: 0; }
+.home-strip-sub.home-status-text, .home-strip-sub .home-status-text { color: var(--text-secondary) !important; }
+/* Narrow windows: the subtitles go first, then the labels shorten */
+@media (max-width: 860px) { .home-strip-sub { display: none; } .home-strip-sep { margin-inline: 12px; } }
+
+.home-hero-body { padding-top: 64px; justify-content: flex-start; }
+.home-hero-speeds { top: 0; align-items: flex-start; }
+.home-hero-head { position: absolute; top: 16px; inset-inline: 16px; z-index: calc(var(--z-sticky, 100) + 5); display: flex; align-items: center; justify-content: space-between; gap: 12px; pointer-events: none; }
+.home-hero-head > * { pointer-events: auto; }
+.home-profile-btn { display: inline-flex; align-items: center; gap: 8px; height: 32px; max-width: 200px; padding: 0 10px 0 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 500; color: var(--text-primary); background: var(--zephyr-surface-input, var(--zephyr-bg-muted)); border: 1px solid var(--zephyr-border-default); transition: border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out); }
+.home-profile-btn svg { color: var(--text-muted); }
+.home-profile-btn:hover { border-color: var(--zephyr-border-strong); }
+.home-profile-menu { min-width: 220px; max-width: 300px; max-height: 280px; overflow-y: auto; }
+.home-profile-menu .proxy-sort-title, .home-profile-usage { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-profile-usage { font-variant-numeric: tabular-nums; }
+.home-conn-link { display: inline-flex; align-items: center; gap: 2px; height: 32px; padding: 0 8px 0 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 500; color: var(--text-secondary); white-space: nowrap; transition: background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), color var(--zephyr-time-micro) var(--zephyr-easing-ease-out); }
+.home-conn-link b { font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.home-conn-link:hover { background: var(--zephyr-bg-muted); color: var(--text-primary); }
+[dir="rtl"] .home-conn-link svg { transform: scaleX(-1); }
+.home-total { margin-top: 10px; font-size: 12px; font-weight: 500; color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+:is(.home-conn-link, .home-alt, .home-profile-btn):focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+
+.home-node { display: flex; align-items: center; padding: 12px; min-height: 72px; }
+.home-node-pick { position: relative; flex: 0 1 auto; min-width: 0; max-width: 60%; }
+.home-current { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; padding: 6px 10px 6px 6px; border-radius: 16px; text-align: start; }
+/* The bar's hit area sits under its content; only the IP button takes clicks of its own. */
+.home-current-hit { position: absolute; inset: 0; border-radius: inherit; transition: background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out); }
+.home-current > :not(.home-current-hit) { position: relative; pointer-events: none; }
+.home-current:hover .home-current-hit { background: var(--zephyr-bg-muted); }
+.home-ip-btn { pointer-events: auto; display: inline-flex; align-items: center; min-width: 0; max-width: 100%; margin: -2px -4px; padding: 2px 4px; border-radius: 6px; color: inherit; font: inherit; white-space: nowrap; overflow: hidden; cursor: pointer; }
+.home-ip-btn > span { flex-shrink: 0; }
+.home-ip-btn > .home-ip-place { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.home-ip-btn:hover, .home-ip-btn[aria-expanded="true"] { background: color-mix(in srgb, var(--text-primary) 8%, transparent); color: var(--text-primary); }
+.home-ip-btn:focus-visible, .home-current-hit:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.home-node-sub > .home-ip-btn { flex-shrink: 1; }
+/* Node details card (opens from the IP line) */
+.nd-pop { position: fixed; z-index: 9999; width: 300px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 12px 12px 10px; border-radius: var(--zephyr-radius-md); background: var(--zephyr-bg-elevated); border: 1px solid var(--zephyr-border-default); box-shadow: var(--zephyr-shadow-dialog); animation: home-picker-pop var(--motion-base) var(--motion-ease-out); }
+html:not(.dark) .nd-pop { background: rgba(255,255,255,.97); }
+.nd-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.nd-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.nd-icon-btn { flex: 0 0 auto; width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: 6px; color: var(--text-muted); }
+.nd-icon-btn svg { width: 14px; height: 14px; }
+.nd-icon-btn:hover:not(:disabled) { background: var(--zephyr-bg-muted); color: var(--text-primary); }
+.nd-icon-btn:disabled { opacity: .5; }
+.nd-icon-btn:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 1px; }
+.nd-pop[aria-busy="true"] .nd-head .nd-icon-btn svg { animation: btn-spin 1s linear infinite; }
+.nd-rows { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; row-gap: 6px; margin: 0; font-size: 12px; line-height: 18px; }
+.nd-rows dt { color: var(--text-muted); white-space: nowrap; }
+.nd-rows dd { margin: 0; display: flex; align-items: flex-start; gap: 4px; min-width: 0; color: var(--text-primary); }
+.nd-value { min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.nd-rows dd .nd-icon-btn { width: 18px; height: 18px; margin-top: 0; }
+.nd-rows dd .nd-icon-btn svg { width: 12px; height: 12px; }
+.nd-empty { font-size: 12px; color: var(--text-secondary); }
+.nd-foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--zephyr-border-subtle); font-size: 11px; line-height: 15px; color: var(--text-tertiary); }
+@media (prefers-reduced-motion: reduce) { .nd-pop { animation: none; } }
+.home-flag { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-family: 'Zephyr Country Flags', sans-serif; font-size: 20px; background: var(--zephyr-bg-muted); border: 1px solid var(--zephyr-border-subtle); }
+.home-flag.is-empty::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--text-tertiary); }
+.home-current-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.home-node-name { display: block; font-size: 14px; font-weight: 600; line-height: 20px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-node-sub { display: flex; align-items: center; margin-top: 2px; font-size: 12px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; min-height: 16px; }
+.home-node-sub > span { flex-shrink: 0; }
+.home-node-sub > span:last-child { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
+.home-sep { margin-inline: 6px; color: var(--text-tertiary); }
+.home-ms { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.home-dot { width: 6px; height: 6px; border-radius: 50%; background: rgb(16 185 129); box-shadow: 0 0 0 3px rgb(16 185 129 / .15); }
+.home-ms.is-off::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary); }
+.home-ip { font-variant-numeric: tabular-nums; }
+.home-chev { flex: 0 0 16px; color: var(--text-tertiary); }
+.home-alts { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 6px; padding-inline-start: 16px; margin-inline-start: 12px; border-inline-start: 1px solid var(--zephyr-border-subtle); align-self: stretch; }
+.home-alts.hidden { display: none; }
+.home-alts-label { font-size: 11px; line-height: 14px; font-weight: 500; color: var(--text-secondary); white-space: nowrap; }
+/* As many as fit on one row (1 at 720 wide, 2 at 930, 5 at 1440); the rest wrap out of sight */
+.home-alts-list { min-width: 0; display: flex; flex-wrap: wrap; gap: 8px; height: 32px; overflow: hidden; }
+.home-alt { flex: 1 1 180px; display: flex; align-items: center; gap: 8px; min-width: 0; height: 32px; padding: 0 10px; border-radius: 10px; background: var(--zephyr-bg-muted); border: 1px solid transparent; transition: border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out); }
+.home-alt:hover:not(:disabled) { border-color: var(--zephyr-border-default); }
+.home-alt[hidden] { display: none; }
+.home-alt-flag { font-family: 'Zephyr Country Flags', sans-serif; font-size: 14px; flex: 0 0 auto; }
+.home-alt-name { flex: 1 1 auto; min-width: 0; font-size: 12px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: start; }
+.home-alt-ms { flex: 0 0 auto; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.home-alts.is-disabled { opacity: .45; }
+.home-node.is-stopped .home-dot { background: var(--text-tertiary); box-shadow: none; }
+@media (max-height: 600px) {
+  .home-node { min-height: 64px; padding: 10px; }
+  .home-flag { width: 36px; height: 36px; flex-basis: 36px; }
+  .home-hero-body { padding-top: 56px; }
+  .home-total { margin-top: 6px; }
+}
+/* The node list opens upward from the node bar (it sits at the bottom of the page); same rows as the console's picker. */
+.home-node-picker { position: absolute; bottom: calc(100% + 8px); inset-inline-start: 0; z-index: 40; width: 340px; max-width: calc(100vw - 48px); padding: 6px; border-radius: var(--zephyr-radius-md); background: var(--zephyr-bg-elevated); border: 1px solid var(--zephyr-border-default); box-shadow: var(--zephyr-shadow-dialog); animation: home-picker-pop var(--motion-base) var(--motion-ease-out); }
+html:not(.dark) .home-node-picker { background: rgba(255,255,255,.97); }
+@keyframes home-picker-pop { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+.home-picker-list { max-height: min(296px, calc(100vh - 340px)); min-height: 44px; gap: 2px; }
+.home-picker-node { padding: 6px 8px; }
+.home-picker-node:focus { outline: none; }
+.home-picker-node:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: -2px; }
+.home-picker-flag { flex: 0 0 24px; width: 24px; height: 24px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-family: 'Zephyr Country Flags', sans-serif; font-size: 14px; background: var(--zephyr-bg-muted); }
+.home-picker-flag.is-empty::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary); }
+.home-picker-name { flex: 1 1 auto; min-width: 0; }
+.home-picker-ms { flex: 0 0 auto; font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.home-picker-hint { padding: 10px 8px; font-size: 12px; color: var(--text-muted); text-align: center; }
+.home-picker-hint:focus { outline: none; }
+#home-node-trigger[aria-expanded="true"] { background: var(--zephyr-bg-muted); }
+.home-current:has(> #home-node-trigger[aria-expanded="true"]) .home-chev { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .home-node-picker { animation: none; } }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Window sizes. The default 930×680 and the minimum 720×540 are unchanged
+   (the content just fills them); in bigger windows:
+   minimal home —
+   1. the content column is at most min(available, max(1040px, 70vw), 175vh)
+      wide, centred, so wide screens do not stretch it into a strip;
+   2. the traffic card stops growing at 440 px + 35 px per 100 px of window
+      height (between 0.44 and 0.8 of the column width);
+   3. what height is left goes above and below, 2 : 3, so the visual centre
+      sits a little above the middle;
+   4. past 1040 px the figures, strip and node bar grow with the column
+      (at most about 1.25×); common sizes keep the system font sizes.
+   ═══════════════════════════════════════════════════════════════════════════ */
+[data-page="home"] { container-type: inline-size; }
+[data-page="home"] > * {
+  --home-col: min(100cqw, max(1040px, 70vw), 175vh);
+  --home-k: max(0px, var(--home-col) - 1040px);
+}
+[data-page="home"] > :is(.home-strip, .home-hero, .home-node, #core-error-state) { width: 100%; max-width: var(--home-col); margin-inline: auto; }
+[data-page="home"]::before, [data-page="home"]::after { content: ''; display: block; min-height: 0; }
+[data-page="home"]::before { order: -100; flex: 2 1 0; margin-block-end: calc(-1 * var(--home-gap, 16px)); }
+[data-page="home"]::after { order: 100; flex: 3 1 0; margin-block-start: calc(-1 * var(--home-gap, 16px)); }
+[data-page="home"] { --home-gap: clamp(16px, 16px + (min(100cqw, max(1040px, 70vw), 175vh) - 1040px) * 0.03, 28px); gap: var(--home-gap) !important; }
+[data-page="home"] > .home-hero {
+  flex: 1000 1 0;
+  max-height: min(max(440px + (100vh - 680px) * 0.35, var(--home-col, 1040px) * 0.44), var(--home-col, 1040px) * 0.8);
+}
+.home-hero .home-speed-value { font-size: clamp(40px, min(7.7vh, max(66px, var(--home-col, 1040px) * 0.062)), 100px); }
+.home-hero .home-speed-label, .home-hero .home-total { font-size: calc(12px + var(--home-k, 0px) * 0.006); }
+.home-hero .home-total { margin-top: calc(10px + var(--home-k, 0px) * 0.008); }
+.home-hero .home-hero-speeds { column-gap: calc(clamp(32px, 9vw, 112px) + var(--home-k, 0px) * 0.04); }
+.home-hero-head { top: calc(16px + var(--home-k, 0px) * 0.01); inset-inline: calc(16px + var(--home-k, 0px) * 0.01); }
+.home-hero .home-hero-body { padding-top: calc(64px + var(--home-k, 0px) * 0.03); }
+/* The figures stay at the top; the chart starts 16 px under them and fills the rest,
+   so a taller card only makes the chart taller and the curve never runs behind the numbers. */
+.home-hero .home-hero-chart { inset: var(--home-chart-top, 44%) 0 0 0; }
+.home-strip { min-height: calc(72px + var(--home-k, 0px) * 0.03); }
+.home-strip .home-strip-title { font-size: calc(13px + var(--home-k, 0px) * 0.004); }
+.home-strip .home-strip-sub { font-size: calc(12px + var(--home-k, 0px) * 0.004); }
+/* Low windows keep the compact spacing the rules above would otherwise override. */
+@media (max-height: 600px) {
+  .home-hero .home-hero-body { padding-top: 56px; }
+  .home-hero .home-total { margin-top: 6px; }
+}
+.home-node { min-height: calc(72px + var(--home-k, 0px) * 0.035); padding: calc(12px + var(--home-k, 0px) * 0.008); }
+.home-node .home-node-name { font-size: calc(14px + var(--home-k, 0px) * 0.005); line-height: 1.4; }
+.home-node :is(.home-node-sub, .home-alt-name, .home-alt-ms) { font-size: calc(12px + var(--home-k, 0px) * 0.004); }
+.home-node .home-flag { width: calc(40px + var(--home-k, 0px) * 0.02); height: calc(40px + var(--home-k, 0px) * 0.02); flex-basis: calc(40px + var(--home-k, 0px) * 0.02); font-size: calc(20px + var(--home-k, 0px) * 0.01); }
+.home-node .home-alts-list, .home-node .home-alt { height: calc(32px + var(--home-k, 0px) * 0.012); }
+@media (max-height: 600px) {
+  .home-node { min-height: 64px; padding: 10px; }
+  .home-node .home-flag { width: 36px; height: 36px; flex-basis: 36px; }
+}
+
+/* Console home in wide windows (≥ 1081 px, see placeSubCard in ui/console-home.js):
+   1. when the page fits on one screen, the two card rows share what height
+      is left (1.15 : 1; traffic row 280–560 px, bottom row 288–440 px) and
+      anything more goes above and below; when it does not fit (1280×800),
+      the page scrolls and every card keeps its full height;
+   2. the content is at most min(available, max(1240px, 70vw), 190vh) wide,
+      centred; past 1240 px the figures and padding grow a little. */
+@media (min-width: 1081px) {
+  .dz-wide .dz-content { container-type: inline-size; padding-bottom: 20px; }
+  .dz-wide .dz-content > * { --dz-col: min(100cqw, max(1240px, 70vw), 190vh); --dz-k: max(0px, var(--dz-col) - 1240px); }
+  .dz-wide .dz-content > * { width: 100%; max-width: var(--dz-col); margin-inline: auto; }
+  .dz-wide .dz-content::before, .dz-wide .dz-content::after { content: ''; display: block; min-height: 0; flex: 0.0002 1 0; margin-block-end: -16px; }
+  .dz-wide .dz-content::before { order: -100; }
+  .dz-wide .dz-content::after { order: 100; flex-grow: 0.0003; margin-block: -16px 0; }
+  .dz-wide .dz-content > .dz-grid-main { flex: 1.15 1 0; min-height: 280px; max-height: 560px; }
+  .dz-wide .dz-grid-main > #dz-traffic-card { display: flex; flex-direction: column; }
+  .dz-wide .dz-grid-main > .dz-side { min-height: 0; }
+  .dz-wide .dz-side > .dz-node-wrap { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+  .dz-wide .dz-node-wrap > .glass-card { flex: 1 1 0; min-height: 0; overflow: hidden; }
+  .dz-wide .dz-content > .dz-grid-bottom { flex: 1 1 0; min-height: 288px; max-height: 440px; }
+  .dz-wide .dz-grid-bottom > .glass-card { display: flex; flex-direction: column; min-height: 0; }
+  .dz-wide .dz-chart-wrap { min-height: 120px; }
+  .dz-wide .dz-kpi { padding: calc(16px + var(--dz-k) * 0.006); }
+  .dz-wide .dz-kpi-value b { font-size: calc(24px + var(--dz-k) * 0.008); }
+  .dz-wide .dz-card-pad { padding: calc(20px + var(--dz-k) * 0.006); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    Round-2 polish
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -2337,100 +2690,6 @@ html:not(.dark) .btn-accent,
 html:not(.dark) .btn-ghost.active { color: var(--accent-ink); }
 .text-download-ink, html:not(.dark) .text-download, html:not(.dark) .conn-rate--down { color: var(--download-ink); }
 .text-upload-ink { color: var(--zephyr-color-upload); }
-
-/* Home: TUN status row mirrors the 36px segmented control next to it */
-.home-tun-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 14px;
-  border-radius: var(--radius-full);
-  background: var(--zephyr-bg-muted);
-  border: 1px solid var(--zephyr-border-subtle);
-  min-width: 0;
-}
-
-/* Home: live figures — the hero card's footer row, three equal cells split by hairlines */
-.home-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  flex: 0 0 auto;
-  position: relative;
-  z-index: 2;
-  padding: 12px 0 14px;
-  border-top: 1px solid var(--zephyr-border-subtle);
-  border-end-start-radius: inherit;
-  border-end-end-radius: inherit;
-  background: rgba(255, 255, 255, .025);
-}
-html:not(.dark) .home-stats { background: rgba(15, 30, 60, .018); }
-.home-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 2px;
-  min-width: 0;
-  padding: 0 16px;
-}
-.home-stat + .home-stat { border-inline-start: 1px solid var(--zephyr-border-subtle); }
-.home-stat-label {
-  max-width: 100%;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 16px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.home-stat-value { display: flex; align-items: baseline; justify-content: center; gap: 4px; min-width: 0; max-width: 100%; height: 28px; line-height: 28px; color: var(--text-primary); }
-.home-stat-value b {
-  font-size: 22px;
-  font-weight: 300;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-/* line-height 1 keeps the unit from stretching the row (it pushed the latency footnote 3px low) */
-.home-stat-value small { font-size: 11px; line-height: 1; font-weight: 600; color: var(--text-muted); }
-.home-stat-foot {
-  display: block;
-  max-width: 100%;
-  height: 16px;
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--text-tertiary, var(--zephyr-text-tertiary));
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-html:not(.dark) .home-stat-foot { color: var(--text-muted); }
-
-/* Short windows: drop the per-cell footnote, keep label + figure */
-@media (max-height: 580px) {
-  [data-page="home"] { gap: 12px; }
-  .home-stat-foot { display: none; }
-  .home-stats { padding: 8px 0; }
-  .home-hero-body { padding-top: 52px; padding-bottom: 16px; }
-}
-
-/* While the quick-switch wheel is open it owns the hero: the read-out steps
-   back so the node list is not drawn over the big numbers. */
-.home-hero-speeds { transition: opacity var(--zephyr-time-standard) var(--zephyr-easing-ease-out), filter var(--zephyr-time-standard) var(--zephyr-easing-ease-out); }
-#home-hero:has(#node-wheel-dropdown:not(.opacity-0)) .home-hero-speeds { opacity: .08; filter: blur(3px); }
-@media (prefers-reduced-motion: reduce) {
-  .home-hero-speeds { transition: none; }
-  #home-hero:has(#node-wheel-dropdown:not(.opacity-0)) .home-hero-speeds { filter: none; }
-}
-
-/* Home node quick-switch: the open wheel unfolds downward from the pill and
-   stays inside the hero (its 140px list starts 4px under the hero's top edge
-   instead of being centred on the pill and poking 30px above the card). */
-#node-wheel-dropdown.node-wheel-dropdown { transform-origin: 50% 19%; }
 
 /* Settings: section headings sit on the card's inner content line (20px),
    sentence case — the same line the row icons start on */
@@ -2512,6 +2771,71 @@ html:not(.dark) .seg-tab.active { background: rgba(255, 255, 255, 0.9); }
 /* Full-width tabs inside dialogs get a roomier 40px track */
 .seg-tabs.seg-tabs-lg { height: 40px; padding: 4px; }
 .seg-tabs-lg .seg-tab { font-size: 13px; }
+
+/* Choice cards: single choice among a few options that each need a short
+   explanation line (a name + one line of detail). Use segmented tabs when the
+   labels explain themselves; use choice cards when each option needs a line.
+   Markup: <div class="choice-grid" role="radiogroup">
+             <button type="button" role="radio" aria-checked="true" class="choice-card">
+               <span class="choice-card-title">…</span><span class="choice-card-desc">…</span>
+             </button>…</div>
+   Selected = aria-checked="true" (or .is-selected): accent border, tinted
+   fill and a 3px glow ring. */
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--choice-cols, 2), minmax(0, 1fr));
+  gap: 8px;
+}
+.choice-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--zephyr-border-subtle);
+  background: var(--zephyr-bg-muted);
+  text-align: start;
+  cursor: pointer;
+  transition: border-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), background-color var(--zephyr-time-micro) var(--zephyr-easing-ease-out), box-shadow var(--zephyr-time-micro) var(--zephyr-easing-ease-out);
+}
+.choice-card-title { font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--text-primary); }
+.choice-card-desc { font-size: 11px; line-height: 1.4; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.choice-card:hover:not([aria-checked="true"], .is-selected, :disabled) {
+  border-color: var(--zephyr-border-strong);
+  background: color-mix(in srgb, var(--text-primary) 3%, var(--zephyr-bg-muted));
+}
+.choice-card:is([aria-checked="true"], .is-selected) {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--zephyr-bg-muted));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 10%, transparent);
+}
+.choice-card:is([aria-checked="true"], .is-selected) .choice-card-title { color: var(--accent-ink); }
+.choice-card:focus-visible:not(:disabled) {
+  outline: 2px solid transparent;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--zephyr-focus-ring);
+}
+.choice-card:is([aria-checked="true"], .is-selected):focus-visible { box-shadow: 0 0 0 2px var(--zephyr-bg-elevated), 0 0 0 4px var(--accent-primary); }
+.choice-card:disabled { opacity: .5; cursor: not-allowed; }
+html.dark .choice-card { background: var(--zephyr-bg-subtle); }
+html.dark .choice-card:hover:not([aria-checked="true"], .is-selected, :disabled) { background: var(--zephyr-bg-muted); }
+html.dark .choice-card:is([aria-checked="true"], .is-selected) {
+  border-color: color-mix(in srgb, var(--accent-primary) 65%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+/* The dark selected look must not hide keyboard focus on the selected card. */
+html.dark .choice-card:is([aria-checked="true"], .is-selected):focus-visible { box-shadow: 0 0 0 2px var(--zephyr-bg-elevated), 0 0 0 4px var(--accent-primary); }
+/* Title-only cards: centred, about the height of a segmented control */
+.choice-card.choice-card-compact { align-items: center; justify-content: center; text-align: center; padding-block: 11px; }
+@media (forced-colors: active) {
+  .choice-card:is([aria-checked="true"], .is-selected) { border: 2px solid Highlight; }
+  /* Shadows are dropped here: focus gets an outline apart from the selection border. */
+  .choice-card:focus-visible:not(:disabled) { outline: 2px solid CanvasText; outline-offset: 2px; }
+}
 
 /* Rule library: groups read as quiet section labels (like settings), files
    sit flush on the page edge; groups are 24px apart */
@@ -2599,7 +2923,11 @@ html:not(.dark) .toast { background: rgba(255, 255, 255, 0.95); -webkit-backdrop
 [data-page] > header { gap: 16px; }
 [data-page] > header > * { flex-shrink: 0; }
 [data-page] > header h2 { white-space: nowrap; }
-header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> svg) > span {
+/* Settings dialogs at 150% scale in a small window: the panel scrolls so
+   Save and Cancel stay reachable. */
+.speed-dialog-panel { max-height: calc(100% - 32px); overflow-y: auto; }
+header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> svg):not(.fit-keep-label) > span,
+header.fit-latency #test-all-btn > span {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -2611,7 +2939,8 @@ header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> 
   border: 0;
 }
 /* 14px icon + 2×8px + 1px borders = a 32px square, same height as before */
-header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> svg) { padding-inline: 8px; min-width: 2rem; }
+header.is-compact :is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary):has(> svg):not(.fit-keep-label),
+header.fit-latency #test-all-btn { padding-inline: 8px; min-width: 2rem; }
 header.is-compact-2 :is(#log-line-count, #rl-stats) { display: none; }
 
 /* Proxy group pill: one line, long group names end in an ellipsis */
@@ -2620,10 +2949,14 @@ header.is-compact-2 :is(#log-line-count, #rl-stats) { display: none; }
 /* Last step of the header fit: the group pill gives up width (label ellipsized)
    so a long group name cannot push the search and buttons past the page edge. */
 [data-page="proxies"] > header.is-compact-2 > div:first-child,
-[data-page="proxies"] > header.is-compact-2 #proxy-group-selector { min-width: 0; }
+[data-page="proxies"] > header.is-compact-2 #proxy-group-selector { min-width: 0; flex-shrink: 1; }
 [data-page="proxies"] > header.is-compact-2 #proxy-group-trigger { max-width: 100%; }
-[data-page="proxies"] > header.is-compact-2 > div:first-child > h2,
-[data-page="proxies"] > header.is-compact-2 > div:last-child { flex-shrink: 0; white-space: nowrap; }
+[data-page="proxies"] > header.is-compact-2 > div:first-child > h2 { flex-shrink: 0; white-space: nowrap; }
+/* ...and the search gives up width too, so the buttons after it (Stop
+   included) stay on the page at large UI scales. */
+[data-page="proxies"] > header.is-compact-2 > div:last-child { min-width: 0; flex-shrink: 1; white-space: nowrap; }
+[data-page="proxies"] > header.is-compact-2 > div:last-child > * { flex-shrink: 0; }
+[data-page="proxies"] > header.is-compact-2 > div:last-child > .proxy-search { flex-shrink: 1; min-width: 48px; }
 
 /* Connections table head: a long column name truncates inside its own column
    instead of running into the next one */
@@ -2796,7 +3129,7 @@ button[data-home-mode] {
    the home page stays in place, dimmed and inert (ui/core-error.js). */
 .home-hero.is-core-error .home-hero-body { visibility: hidden; }
 .core-error-card {
-  position: absolute; inset: 0 0 auto 0; bottom: var(--home-stats-h, 96px); z-index: 3;
+  position: absolute; inset: 0 0 auto 0; bottom: var(--home-stats-h, 0px); z-index: 3;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 6px; padding: 16px 24px; text-align: center;
 }
@@ -2841,11 +3174,45 @@ button[data-home-mode] {
 }
 .core-error-retry:focus-visible { box-shadow: 0 0 0 2px var(--accent-primary, #007AFF); }
 .core-error-retry:disabled { opacity: .6; cursor: default; }
-#app-main-container.core-down .home-hero.is-core-error .home-stats,
-#app-main-container.core-down [data-page="home"] > :not(#home-hero),
-#app-main-container.core-down [data-page="console"] {
+#app-main-container.core-down [data-page="home"] > :not(#home-node, #core-error-state),
+#app-main-container.core-down [data-page="console"] .dz-content > :not(#core-error-state) {
   opacity: .45; pointer-events: none; filter: saturate(.6);
 }
+
+/* Core not running: a banner at the very top of the home page. */
+.core-error-card.is-banner {
+  position: relative; inset: auto; z-index: 20; flex-shrink: 0;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
+  gap: 4px 12px; padding: 12px 16px; text-align: start;
+  border-color: color-mix(in srgb, var(--zephyr-color-danger) 30%, transparent) !important;
+}
+.core-error-card.is-banner .core-error-icon { width: 32px; height: 32px; margin: 0; }
+.core-error-card.is-banner .core-error-title { font-size: 13px; line-height: 18px; }
+.core-error-card.is-banner .core-error-sub { margin-top: 1px; }
+.core-error-card.is-banner .core-error-detail { display: inline-block; max-height: 40px; margin-top: 6px; }
+.core-error-card.is-banner .core-error-actions { margin-top: 0; flex-shrink: 0; }
+.core-error-card.is-banner .core-error-log { grid-column: 1 / -1; width: 100%; max-height: 180px; margin-top: 8px; }
+.core-error-card.is-banner.has-log { padding-top: 12px; }
+.core-error-text { min-width: 0; }
+@media (max-width: 760px) {
+  .core-error-card.is-banner { grid-template-columns: auto minmax(0, 1fr); }
+  .core-error-card.is-banner .core-error-actions { grid-column: 2; }
+}
+
+/* Connection detail: the matched rule, with Edit / Add (ui/conn-rule.js) */
+.conn-rule-card { padding: 12px 14px; border-radius: var(--radius-md); background: var(--zephyr-bg-muted); border: 1px solid var(--zephyr-border-subtle); }
+.conn-rule-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.conn-rule-head h4 { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 0; }
+.conn-rule-src { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.conn-rule-line { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
+.conn-rule-type { flex-shrink: 0; padding: 2px 8px; border-radius: var(--radius-full); font-size: 11px; font-weight: 600; color: var(--accent-ink, var(--accent-primary)); background: color-mix(in srgb, var(--accent-primary) 12%, transparent); }
+.conn-rule-payload { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.conn-rule-arrow { color: var(--text-secondary); flex-shrink: 0; }
+[dir="rtl"] .conn-rule-arrow { transform: scaleX(-1); }
+.conn-rule-group { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.conn-rule-note { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+.conn-rule-actions { display: flex; gap: 8px; margin-top: 10px; }
+.conn-rule-btn { height: 30px; padding-inline: 12px; font-size: 12px; border: 1px solid var(--zephyr-border-default); border-radius: var(--radius-md); }
 
 /* No subscription yet: the hero shows one title and the Add button (ui/no-subscription.js). */
 .home-hero.is-empty .home-hero-body { visibility: hidden; }
@@ -2856,7 +3223,7 @@ button[data-home-mode] {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 6px; text-align: center; padding: 0 24px;
 }
-.home-hero > .home-empty-state { bottom: var(--home-stats-h, 96px); }
+.home-hero > .home-empty-state { bottom: var(--home-stats-h, 0px); }
 .home-empty-icon {
   width: 36px; height: 36px; border-radius: 10px; margin-bottom: 6px;
   display: flex; align-items: center; justify-content: center;
@@ -2871,14 +3238,6 @@ button[data-home-mode] {
   border: 1px solid color-mix(in srgb, var(--accent-primary, #007AFF) 30%, transparent);
 }
 .home-empty-btn:focus-visible { box-shadow: 0 0 0 2px var(--accent-primary, #007AFF); }
-.home-hero.is-empty .home-stats { opacity: .5; }
-.home-hero.is-empty .home-stat-value,
-.home-hero.is-empty .home-stat-foot { visibility: hidden; position: relative; }
-.home-hero.is-empty .home-stat-value::before,
-.home-hero.is-empty .home-stat-foot::before {
-  content: "—"; visibility: visible; position: absolute; inset: 0; text-align: center;
-}
-.home-hero.is-empty .home-stat-value::before { font-size: 22px; font-weight: 300; }
 /* Edit subscription: current link shown read-only until "Change"; tall controls throughout. */
 .edit-url-current {
   display: flex; align-items: center; gap: 8px; min-height: 42px; padding-block: 0; padding-inline: 14px 6px;
@@ -3070,6 +3429,11 @@ html:not(.dark) .ctx-menu-root.glass-card { background: rgb(252, 252, 253); }
 .glass-card:hover .node-retest-btn, .glass-card:focus-within .node-retest-btn, .node-retest-btn:focus-visible, .node-retest-btn.is-spinning { opacity: 1; }
 /* No hover on touch / pen: keep the button visible. */
 @media (hover: none) { .node-retest-btn { opacity: 1; } }
+/* While hidden it takes no room, so the card's subtitle is not cut short by
+   an invisible 20px button. */
+@media (hover: hover) {
+  .glass-card:not(:hover):not(:focus-within) .node-retest-btn:not(.is-spinning):not(:focus-visible) { position: absolute; pointer-events: none; }
+}
 .node-retest-btn:hover { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
 .node-retest-btn.is-spinning svg { animation: spin 0.9s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .node-retest-btn.is-spinning svg { animation: none; } }
@@ -3322,3 +3686,72 @@ html:not(.kb-nav) :is(.proxy-search, .settings-search):focus-within {
 .upd-spin { animation: upd-spin 0.9s linear infinite; }
 @keyframes upd-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .upd-progress-bar { transition: none; } }
+
+/* ============================================
+   Contrast (WCAG AA, 4.5:1 for small text)
+   Brand blue #007AFF stays on icons, sliders and selection outlines. Where
+   white text sits on blue, or blue text on a light surface, it uses one step
+   darker (as macOS "Increase contrast" does); dark mode lifts blue and red
+   text one step instead. Tertiary/muted text tokens are raised in
+   packages/tokens/src/semantic.json.
+   ============================================ */
+/* Derived from the chosen accent, so every accent theme keeps the same step
+   (for the default blue: #0066D6, #005ABD, #0058B8, #4DA2FF). */
+:root:not(.dark) .btn-primary { background-color: color-mix(in srgb, var(--accent-primary) 84%, #000); }
+:root:not(.dark) .btn-primary:hover { background-color: color-mix(in srgb, var(--accent-primary) 74%, #000); }
+:root:not(.dark) .btn-ghost.active, :root:not(.dark) .btn-accent span, :root:not(.dark) .sub-in-use,
+:root:not(.dark) .choice-card:is([aria-checked='true'], .is-selected) .choice-card-title { color: color-mix(in srgb, var(--accent-primary) 72%, #000); }
+:root:not(.dark) .btn-danger span { color: #b91c1c; }
+:root:not(.dark) .text-upload { color: #b4232f; }
+:root:not(.dark) .text-download { color: #0058c2; }
+:root:not(.dark) .proxy-card .text-emerald-400 { color: #065f46; }
+:root:not(.dark) .settings-section-desc { color: var(--zephyr-text-muted); }
+html.dark .btn-primary { background-color: color-mix(in srgb, var(--accent-primary) 84%, #000); }
+html.dark .btn-primary:hover { background-color: color-mix(in srgb, var(--accent-primary) 90%, #000); }
+html.dark .btn-accent span, html.dark .sub-in-use, html.dark .row-action, html.dark .row-action span,
+html.dark .choice-card:is([aria-checked='true'], .is-selected) .choice-card-title { color: color-mix(in srgb, var(--accent-primary) 70%, #fff); }
+html.dark .text-download { color: #4da3ff; }
+html.dark .btn-danger span, html.dark .text-\[var\(--zephyr-color-danger\)\] { color: #f87171; }
+
+/* ── Download speed test ──────────────────────────────────────────────────── */
+#speed-test-btn .speed-test-icon-stop { display: none; }
+#speed-test-btn.is-running .speed-test-icon-run { display: none; }
+#speed-test-btn.is-running .speed-test-icon-stop { display: block; }
+#speed-test-btn.is-running { color: var(--accent-ink, var(--color-accent)); }
+#speed-test-label { font-variant-numeric: tabular-nums; }
+/* Proxies header folds in this order (ui/header-fit.js, data-fit-steps):
+   1 download speed test icon-only, 2 the other buttons icon-only while
+   Test Latency keeps its label, 3 the search box narrows, 4 Test Latency
+   icon-only too. Test Latency carries .fit-keep-label for step 2. */
+header.fit-speed #speed-test-btn > span {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+header.fit-speed #speed-test-btn { padding-inline: 8px; min-width: 2rem; }
+header.fit-search .proxy-search { width: 96px; }
+
+/* Node card: result in place of the protocol line, live state while testing */
+.node-speed-btn svg { width: 12px; height: 12px; }
+.proxy-speed { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-secondary); }
+.proxy-speed svg { width: 11px; height: 11px; flex: none; }
+.proxy-speed.is-live { color: var(--accent-ink, var(--color-accent)); }
+.proxy-speed.is-muted { font-weight: 500; color: var(--text-muted); }
+.proxy-card.is-speed-testing { outline: 1.5px solid color-mix(in srgb, var(--color-accent) 70%, transparent); outline-offset: -1.5px; }
+.proxy-speed-progress {
+  position: absolute; inset-inline: 12px; bottom: 6px; height: 2px; border-radius: 2px; overflow: hidden;
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent); pointer-events: none;
+}
+.proxy-speed-progress > span { display: block; height: 100%; background: var(--color-accent); transition: width .25s linear; }
+@media (prefers-reduced-motion: reduce) { .proxy-speed-progress > span { transition: none; } }
+
+/* Settings row whose value opens a dialog (latency test address, download speed test) */
+.settings-value-btn {
+  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; max-width: 260px;
+  font-size: 14px; color: var(--text-muted); border-radius: var(--radius-button, 8px);
+  padding: 2px 2px 2px 6px; transition: color var(--zephyr-time-standard);
+}
+.settings-value-btn:hover { color: var(--text-primary); }
+.settings-value-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--zephyr-focus-ring); }
+@media (forced-colors: active) { .settings-value-btn:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; } }
+[dir="rtl"] .settings-value-btn svg { transform: scaleX(-1); }
+.speed-setting-label { display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; }
