@@ -15,10 +15,80 @@ use super::types::sanitize_filename;
 // ── Thread-confined HTTP status bridge for ext.apply() ───────────────────
 // (WiFi SSID detection now lives in network_coordinator)
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+
+use sha2::{Digest as _, Sha256};
+
+static RULE_ANNOTATIONS_CONFIRMED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+// Captured before ext.apply while RUN_CONFIG_LOCK excludes source
+// writers. A failed/deferred reload leaves these candidates untrusted; only a
+// confirmed reload enables edits against them.
+static COMPILED_RULE_SOURCES: Mutex<BTreeMap<String, [u8; 32]>> = Mutex::new(BTreeMap::new());
+
+fn compiled_rule_sources(app: &tauri::AppHandle) -> Result<BTreeMap<String, [u8; 32]>, String> {
+    let directory = prism_data_dir(app)?;
+    let entries = std::fs::read_dir(&directory)
+        .map_err(|error| format!("Failed to snapshot compiled rule sources: {error}"))?;
+    let mut sources = BTreeMap::new();
+    for result in entries {
+        let entry = result.map_err(|error| format!("Failed to read rule entry: {error}"))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".prism.yaml") && entry.path().is_file() {
+            let content = std::fs::read(entry.path())
+                .map_err(|error| format!("Failed to snapshot rule source '{name}': {error}"))?;
+            sources.insert(name, Sha256::digest(&content).into());
+        }
+    }
+    Ok(sources)
+}
+
+pub(crate) fn rule_source_matches(filename: &str, content: &str) -> Result<bool, String> {
+    let sources = COMPILED_RULE_SOURCES
+        .lock()
+        .map_err(|error| format!("Compiled rule source lock poisoned: {error}"))?;
+    let digest: [u8; 32] = Sha256::digest(content.as_bytes()).into();
+    Ok(rule_annotations_confirmed() && sources.get(filename) == Some(&digest))
+}
+
+pub(crate) fn set_rule_annotations_confirmed(confirmed: bool) {
+    RULE_ANNOTATIONS_CONFIRMED.store(confirmed, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[must_use]
+pub(crate) fn rule_annotations_confirmed() -> bool {
+    RULE_ANNOTATIONS_CONFIRMED.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 thread_local! {
     static CURRENT_APPLY_HTTP_STATUS: Cell<Option<u16>> = const { Cell::new(None) };
+    static PENDING_RULE_SOURCES: RefCell<Option<BTreeMap<String, [u8; 32]>>> = const { RefCell::new(None) };
+    static DEFER_RELOAD: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Compile a whole candidate on one blocking thread before reloading it.
+pub(crate) struct DeferredReloadGuard {
+    previous: bool,
+    _marker: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl DeferredReloadGuard {
+    #[must_use]
+    pub(crate) fn enter() -> Self {
+        Self {
+            previous: DEFER_RELOAD.with(|value| value.replace(true)),
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Drop for DeferredReloadGuard {
+    fn drop(&mut self) {
+        DEFER_RELOAD.with(|value| value.set(self.previous));
+    }
 }
 
 pub(crate) fn set_current_apply_http_status(status: Option<u16>) {
@@ -56,10 +126,19 @@ impl HttpStatusGuard {
     #[must_use]
     pub fn enter() -> Self {
         CURRENT_APPLY_HTTP_STATUS.with(|c| c.set(None));
+        PENDING_RULE_SOURCES.with(|sources| *sources.borrow_mut() = None);
         Self {
             taken: false,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Call immediately before ext.apply, under `RUN_CONFIG_LOCK`. Direct host
+    /// writes such as `insert_rule` do not compile files and must not refresh this.
+    pub(crate) fn capture_rule_sources(&self, app: &tauri::AppHandle) -> Result<(), String> {
+        let sources = compiled_rule_sources(app)?;
+        PENDING_RULE_SOURCES.with(|pending| *pending.borrow_mut() = Some(sources));
+        Ok(())
     }
 
     #[must_use]
@@ -71,6 +150,7 @@ impl HttpStatusGuard {
 
 impl Drop for HttpStatusGuard {
     fn drop(&mut self) {
+        PENDING_RULE_SOURCES.with(|sources| *sources.borrow_mut() = None);
         if !self.taken {
             let _ = take_current_apply_http_status();
         }
@@ -386,7 +466,10 @@ impl PrismHost for ZephyrPrismHost {
         // would write the previous run's port/secret back into the
         // file and fail the startup health check.
         if super::pipeline::core_start_in_progress() {
-            return Err("Prism apply refused: a core start is in progress".to_owned());
+            return Err(
+                "Prism apply refused: a core start or configuration reload is in progress"
+                    .to_owned(),
+            );
         }
 
         // A script may add an unauthenticated control surface (such as
@@ -464,7 +547,10 @@ impl PrismHost for ZephyrPrismHost {
                 // written, without the injection and without a reload
                 // (same rule as `write_running_config` in the pipeline).
                 if super::pipeline::core_start_in_progress() {
-                    return Err("Prism apply refused: a core start is in progress".to_owned());
+                    return Err(
+                        "Prism apply refused: a core start or configuration reload is in progress"
+                            .to_owned(),
+                    );
                 }
                 endpoint = {
                     let state = self.app.state::<MihomoState>();
@@ -473,6 +559,17 @@ impl PrismHost for ZephyrPrismHost {
                     lock.last_port()
                         .map(|port| (port, lock.last_secret().to_owned()))
                 };
+                if endpoint.is_some() {
+                    // The script's output normally keeps the speed-test group
+                    // and listener from the running config it started from;
+                    // put them back if it dropped them (a no-op otherwise).
+                    // Reuse a confirmed port when available. A new candidate
+                    // stays unavailable until a successful reload binds it.
+                    let held = crate::speed_test::held_port(&self.app);
+                    crate::speed_test::with_running_port(held, || {
+                        crate::speed_test::inject_for_runtime(target);
+                    });
+                }
                 if let Some((port, secret)) = &endpoint {
                     if let serde_yaml::Value::Mapping(map) = target {
                         map.insert(
@@ -504,15 +601,40 @@ impl PrismHost for ZephyrPrismHost {
         // during the filter/serialize above would have its fresh
         // credentials overwritten by this write.
         if super::pipeline::core_start_in_progress() {
-            return Err("Prism apply refused: a core start is in progress".to_owned());
+            return Err(
+                "Prism apply refused: a core start or configuration reload is in progress"
+                    .to_owned(),
+            );
         }
 
+        // Only an actual ext.apply can supply source versions. A direct host
+        // write must not attribute existing rules to a newer save-only draft.
+        let sources = PENDING_RULE_SOURCES.with(|pending| pending.borrow_mut().take());
+        let compiled = sources.is_some();
+        let mut compiled_sources = COMPILED_RULE_SOURCES
+            .lock()
+            .map_err(|error| format!("Compiled rule source lock poisoned: {error}"))?;
         // Secure write (Unix 0600 / Windows DACL) through a temporary file:
         // a failed write leaves the config the core loaded intact.
         crate::core_manager::core::secure_io::write_file_secure_atomic(
             &run_config_path,
             config_to_write,
         )?;
+        set_rule_annotations_confirmed(false);
+        if let Some(captured) = sources {
+            *compiled_sources = captured;
+        }
+        drop(compiled_sources);
+
+        if DEFER_RELOAD.with(Cell::get) || endpoint.is_none() {
+            set_current_apply_http_status(None);
+            return Ok(ApplyStatus {
+                files_saved: true,
+                hot_reload_success: false,
+                message: "Config saved; reload deferred".to_owned(),
+                restarted: false,
+            });
+        }
 
         // Mihomo's PUT /configs expects a JSON body {"path": "..."} to reload
         // from disk — NOT the raw YAML config. Sending raw YAML with
@@ -527,18 +649,31 @@ impl PrismHost for ZephyrPrismHost {
         // Hot-reload via mihomo REST API (PUT for full config replacement).
         // The endpoint was read above, under the sequence lock, so the
         // PUT talks to the same core the injected controller values
-        // belong to. With no endpoint the core is stopped: there is
-        // nothing to reload, so no PUT is made — but a 0 is still
-        // recorded (a reload attempt with no answer), rather than
-        // leaving "no reload was attempted" (None), or the caller
-        // retries the reload itself against the stopped core (see
-        // `execute_prism_yaml_write`).
+        // belong to. Stopped and deferred writes returned above without
+        // attempting a reload; only a sent request can record a missing answer.
         // Synchronous HTTP PUT --- apply_config is a sync trait method that may be
         // called from non-tokio threads (e.g. WebView2 COM callbacks). Using
         // std::net avoids the "no reactor running" panic from block_on().
         let http_status_code = if let Some((port, secret)) = &endpoint {
+            let diagnostics = crate::speed_test::ReloadGuard::acquire();
             let url = format!("http://127.0.0.1:{port}/configs?force=true");
             let code = Self::http_put(&url, &body, secret);
+            if code.is_some_and(crate::network_coordinator::is_http_success) {
+                set_rule_annotations_confirmed(compiled);
+                crate::speed_test::confirm_listener(
+                    &self.app,
+                    crate::speed_test::route_from_config(config_to_write),
+                );
+                drop(diagnostics);
+                crate::speed_test::notify_reloaded(&self.app);
+            } else if code.is_none() {
+                crate::speed_test::reconcile_unknown_listener(
+                    &self.app,
+                    crate::speed_test::route_from_config(config_to_write),
+                );
+                drop(diagnostics);
+                crate::speed_test::notify_reloaded(&self.app);
+            }
             // A reload attempt without an HTTP answer (the connection or the
             // write failed, or the core never replied) is recorded as 0, so
             // callers can tell it from "no reload was attempted" (None);
@@ -758,6 +893,9 @@ None => "Config saved. Failed to apply via core REST API (connection or response
                 // Collect all non-special proxy group names
                 let names: Vec<String> = groups
                     .iter()
+                    // Zephyr's hidden download-test group is never a routing
+                    // target; a profile's own group of that name is.
+                    .filter(|g| !crate::speed_test::is_injected_group(g))
                     .filter_map(|g| g.get("name").and_then(|n| n.as_str()).map(String::from))
                     .filter(|n| {
                         // Skip internal/special groups

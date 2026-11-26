@@ -555,7 +555,7 @@ export async function initDnsRewriteToggle() {
         if (!startupSynced) void reapply.initial(syncFromCore);
     });
     Bus.on(Events.CONFIG_UPDATED, (/** @type {any} */ data) => {
-        if (!data?.reloaded) return;
+        if (!data?.reloaded && !data?.restoreRuntime) return;
         const done = reapply.run();
         if (typeof data.waitFor === 'function') data.waitFor(done);
         else void done;
