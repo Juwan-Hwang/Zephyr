@@ -15,7 +15,7 @@ vi.mock('../utils/logger.js', () => ({
 import { invoke } from '../api.js';
 import { invalidateSettingsCache } from './cache.js';
 import { settingsLogger } from '../utils/logger.js';
-import { saveSetting, saveSettings, saveSettingsChecked, getSetting, portPatchError, loadedToggleState } from './settings-helpers.js';
+import { saveSetting, saveSettings, saveSettingsChecked, inSettingsSaveQueue, getSetting, portPatchError, loadedToggleState } from './settings-helpers.js';
 
 const invokeMock = /** @type {import('vitest').Mock} */ (invoke);
 
@@ -90,6 +90,21 @@ describe('saveSettings', () => {
 });
 
 describe('saveSettingsChecked', () => {
+    it('drops a queued editor save invalidated by a successful reset', async () => {
+        let version = 0;
+        const reset = inSettingsSaveQueue(async () => { version += 1; });
+        const stale = saveSettingsChecked({ speed_test_url: 'https://old.example/file' }, () => version === 0);
+        await Promise.all([reset, stale]);
+        expect(invokeMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps an editor save when the reset failed before invalidating it', async () => {
+        const reset = inSettingsSaveQueue(async () => { throw new Error('reset failed'); });
+        const stale = saveSettingsChecked({ speed_test_url: 'https://edited.example/file' }, () => true);
+        await expect(reset).rejects.toThrow('reset failed');
+        await stale;
+        expect(invokeMock).toHaveBeenCalledWith('patch_settings', { patch: { speed_test_url: 'https://edited.example/file' } });
+    });
     it('rejects when the write fails, and later writes still run', async () => {
         invokeMock.mockRejectedValueOnce(new Error('nope'));
         await expect(saveSettingsChecked({ x: 1 })).rejects.toThrow('nope');
