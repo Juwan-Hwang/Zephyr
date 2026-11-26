@@ -1,4 +1,5 @@
 // @ts-check
+import { DEFAULT_LATENCY_TEST_URL } from './latency-defaults.js';
 import { setWsBaseUrl, setWsSecret } from './websocket.js';
 import { COMMANDS } from '@zephyr/shared';
 import { apiLogger } from './utils/logger.js';
@@ -418,7 +419,33 @@ function isMissingAutostartEntryError(err) {
  */
 export async function getProxies() {
   const res = await apiFetch('/proxies');
-  return res.json();
+  return stripSpeedTestGroup(await res.json());
+}
+
+/** Hidden group the app adds to every runtime config for the download speed test. */
+export const SPEED_TEST_GROUP = 'ZEPHYR-SPEED-TEST';
+
+/**
+ * Remove the speed-test group from a `/proxies` body: it is plumbing, never
+ * something to show or pick, and GLOBAL would otherwise list it as a card.
+ * Only the hidden group the app adds goes: a profile's own node, or its own
+ * visible group, under that name stays (the backend then adds nothing).
+ * @template T
+ * @param {T} data
+ * @returns {T}
+ */
+export function stripSpeedTestGroup(data) {
+  const proxies = /** @type {any} */ (data)?.proxies;
+  if (!proxies || typeof proxies !== 'object' || !hasOwn(proxies, SPEED_TEST_GROUP)) return data;
+  const entry = proxies[SPEED_TEST_GROUP];
+  if (!Array.isArray(entry?.all) || entry.hidden === false) return data;
+  delete proxies[SPEED_TEST_GROUP];
+  for (const entry of Object.values(proxies)) {
+    if (Array.isArray(entry?.all) && entry.all.includes(SPEED_TEST_GROUP)) {
+      entry.all = entry.all.filter((/** @type {string} */ n) => n !== SPEED_TEST_GROUP);
+    }
+  }
+  return data;
 }
 
 /**
@@ -431,6 +458,60 @@ export async function getProxies() {
 export async function getProxyProviders() {
   const res = await apiFetch('/providers/proxies');
   return res.json();
+}
+
+/** @param {unknown} err */
+function isNotFound(err) {
+  return err instanceof ApiError && err.status === 404;
+}
+
+/**
+ * Resolves null once `signal` aborts (now, when it already has).
+ * @param {AbortSignal} signal
+ * @returns {Promise<null>}
+ */
+function whenAborted(signal) {
+  return new Promise((resolve) => {
+    if (signal.aborted) resolve(null);
+    else signal.addEventListener('abort', () => resolve(null), { once: true });
+  });
+}
+
+/** @type {{ gen: number, ts: number, map: Map<string, string> } | null} */
+let _nodeProviders = null;
+const _NODE_PROVIDERS_TTL = 30_000;
+
+/**
+ * The proxy-provider that supplies node `name`, or null. Mihomo's
+ * `/proxies/:name` routes do not reach such nodes (404); its provider's
+ * `/providers/proxies/:provider/:name` routes do. Read once per 30 s, so a
+ * group of provider nodes tested in a row asks the core once.
+ * @param {string} name
+ * @returns {Promise<string | null>}
+ */
+async function providerOfNode(name) {
+  const now = Date.now();
+  const fresh = _nodeProviders && _nodeProviders.gen === _providerGen && now - _nodeProviders.ts < _NODE_PROVIDERS_TTL;
+  if (!fresh) {
+    const gen = _providerGen;
+    try {
+      const resp = /** @type {any} */ (await getProxyProviders());
+      // The config reloaded meanwhile: this list may name the old providers.
+      if (gen !== _providerGen) return null;
+      /** @type {Map<string, string>} */
+      const map = new Map();
+      for (const [key, provider] of Object.entries(resp?.providers ?? {})) {
+        const pname = typeof provider?.name === 'string' && provider.name ? provider.name : key;
+        for (const proxy of Array.isArray(provider?.proxies) ? provider.proxies : []) {
+          if (proxy?.name && !map.has(proxy.name)) map.set(proxy.name, pname);
+        }
+      }
+      _nodeProviders = { gen, ts: now, map };
+    } catch {
+      return null;
+    }
+  }
+  return _nodeProviders?.map.get(name) ?? null;
 }
 
 // ── Provider 缓存（避免轮询期间重复拉取 /providers/proxies） ─────────────
@@ -1161,6 +1242,31 @@ export function abortLatencyTests() {
   for (const controller of liveLatencyControllers.keys()) controller.abort();
 }
 
+export { DEFAULT_LATENCY_TEST_URL };
+let _latencyTestUrl = DEFAULT_LATENCY_TEST_URL;
+
+/**
+ * Address the latency test asks for through each node. Empty or invalid falls
+ * back to the built-in default; only http(s) addresses are taken.
+ * @param {string|null|undefined} url
+ */
+export function setLatencyTestUrl(url) {
+  const v = typeof url === 'string' ? url.trim() : '';
+  // The parsed form is what is sent: `https:example.com` passes the check
+  // but is not an address the core can fetch as written.
+  let href = '';
+  try {
+    const u = new URL(v);
+    if ((u.protocol === 'http:' || u.protocol === 'https:') && u.hostname) href = u.href;
+  } catch { /* not an address */ }
+  _latencyTestUrl = href || DEFAULT_LATENCY_TEST_URL;
+}
+
+/** @returns {string} */
+export function getLatencyTestUrl() {
+  return _latencyTestUrl;
+}
+
 /**
  * 测试指定代理节点的延迟
  *
@@ -1169,31 +1275,50 @@ export function abortLatencyTests() {
  *
  * @param {string}  name            - 代理节点名称
  * @param {number}  [customTimeout=5000] - 单次测试超时（ms）
+ * @param {AbortSignal} [signal] - 只中止这一次测试（如下载测速的预检被停止）
+ * @param {{ shared?: boolean }} [opts] - `shared: false`: not stopped by
+ *   `abortLatencyTests` (a download test's precheck follows its own run's
+ *   signal; a node switch on Home must not skip its nodes)
  * @returns {Promise<number>} 延迟（ms），失败或中止时返回 -1
  */
-export async function testProxy(name, customTimeout = 5000) {
+export async function testProxy(name, customTimeout = 5000, signal = undefined, { shared = true } = {}) {
   const localController = new AbortController();
   const timeout = setTimeout(() => localController.abort(), customTimeout + 1000);
+  const onOwnAbort = () => localController.abort();
+  if (signal?.aborted) localController.abort();
+  else signal?.addEventListener('abort', onOwnAbort, { once: true });
 
   const onGlobalAbort = () => localController.abort();
   // Keep the controller this test started under: a reset during the request
   // swaps the module-level one, and cleanup must detach from the original.
-  const globalController = latencyTestController;
-  liveLatencyControllers.set(globalController, (liveLatencyControllers.get(globalController) ?? 0) + 1);
-  globalController.signal.addEventListener('abort', onGlobalAbort, { once: true });
+  const globalController = shared ? latencyTestController : null;
+  if (globalController) {
+    liveLatencyControllers.set(globalController, (liveLatencyControllers.get(globalController) ?? 0) + 1);
+    globalController.signal.addEventListener('abort', onGlobalAbort, { once: true });
+  }
 
   try {
-    const testUrl = 'https://www.gstatic.com/generate_204';
+    const testUrl = _latencyTestUrl;
     const apiUrl = `/proxies/${encodeURIComponent(name)}/delay?timeout=${customTimeout}&url=${encodeURIComponent(testUrl)}`;
 
     // The test's own timeout and Stop keep aborting the request while the
     // body is read: a body that stalls after the headers would otherwise
     // leave the test pending.
-    const res = await apiFetch(apiUrl, {
+    const fetchOpts = {
       signal: localController.signal,
       timeout: customTimeout + 2000,
       abortAfterHeaders: true,
-    });
+    };
+    let res;
+    try {
+      res = await apiFetch(apiUrl, fetchOpts);
+    } catch (err) {
+      // A proxy-provider's node: `/proxies/:name` does not know it.
+      // Stop and the test's deadline end this wait too.
+      const provider = isNotFound(err) ? await Promise.race([providerOfNode(name), whenAborted(localController.signal)]) : null;
+      if (!provider || localController.signal.aborted) throw err;
+      res = await apiFetch(`/providers/proxies/${encodeURIComponent(provider)}/${encodeURIComponent(name)}/healthcheck?timeout=${customTimeout}&url=${encodeURIComponent(testUrl)}`, fetchOpts);
+    }
 
     if (res.ok) {
       const data = await res.json();
@@ -1216,10 +1341,13 @@ export async function testProxy(name, customTimeout = 5000) {
     return -1;
   } finally {
     clearTimeout(timeout);
-    globalController.signal.removeEventListener('abort', onGlobalAbort);
-    const left = (liveLatencyControllers.get(globalController) ?? 1) - 1;
-    if (left > 0) liveLatencyControllers.set(globalController, left);
-    else liveLatencyControllers.delete(globalController);
+    signal?.removeEventListener('abort', onOwnAbort);
+    if (globalController) {
+      globalController.signal.removeEventListener('abort', onGlobalAbort);
+      const left = (liveLatencyControllers.get(globalController) ?? 1) - 1;
+      if (left > 0) liveLatencyControllers.set(globalController, left);
+      else liveLatencyControllers.delete(globalController);
+    }
   }
 }
 
@@ -1364,4 +1492,87 @@ export async function restartCore(configPath, customArgs = []) {
  */
 export async function readCoreLog(offset = 0, limit = 500) {
   return invoke(COMMANDS.READ_LOG, { offset, limit });
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Download speed test / exit IP (see src-tauri/src/speed_test.rs)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Port of the speed-test listener in the running config, or null when this
+ * profile has none (it already uses the reserved names, or no core runs).
+ * @returns {Promise<number|null>}
+ */
+export async function speedTestPort() {
+  try {
+    const p = await invoke(COMMANDS.SPEED_TEST_PORT);
+    return typeof p === 'number' && p > 0 ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Point the hidden speed-test group at `node`.
+ * @param {string} node
+ */
+export async function selectSpeedTestNode(node) {
+  await apiFetch(`/proxies/${encodeURIComponent(SPEED_TEST_GROUP)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name: node }),
+  });
+}
+
+/**
+ * Download `url` through the speed-test listener.
+ * @param {{ url: string, maxSecs: number, maxBytes?: number|null, id: string, run?: string|null }} opts
+ * @returns {Promise<{ bytes: number, elapsedMs: number, peakBps: number, cancelled: boolean }>}
+ */
+export function speedTestDownload({ url, maxSecs, maxBytes = null, id, run = null }) {
+  return invoke(COMMANDS.SPEED_TEST_DOWNLOAD, { url, maxSecs, maxBytes, id, run });
+}
+
+/**
+ * Stop the downloads the speed test is running. With `run`, a download of
+ * that run that has not started yet is stopped too, when it starts.
+ * @param {string|null} [run]
+ */
+export async function speedTestCancel(run = null) {
+  try { await invoke(COMMANDS.SPEED_TEST_CANCEL, { run }); } catch { /* nothing running */ }
+}
+
+/**
+ * The address sites see for traffic through the local proxy port, with
+ * whatever location and network details the lookup service returned
+ * (see ui/exit-ip.js). Never sent anywhere but through that port.
+ * @param {number} port
+ * @returns {Promise<{ ip: string, country: string, source?: string } & Record<string, unknown>>}
+ */
+export function lookupExitIp(port) {
+  return invoke(COMMANDS.LOOKUP_EXIT_IP, { port });
+}
+
+/** Stop the exit-address lookups in flight: no retry or fallback request goes out after. */
+export async function cancelExitIpLookups() {
+  try { await invoke(COMMANDS.LOOKUP_EXIT_IP_CANCEL); } catch { /* nothing running */ }
+}
+
+/**
+ * One entry of `/proxies` (provider nodes included), as the core reports it.
+ * @param {string} name
+ * @returns {Promise<any>}
+ */
+export async function getProxyRecord(name) {
+  try {
+    const res = await apiFetch(`/proxies/${encodeURIComponent(name)}`);
+    return res.json();
+  } catch (err) {
+    // `/proxies/:name` only knows the profile's own nodes and groups; a node
+    // a proxy-provider supplies lives under its provider.
+    const provider = isNotFound(err) ? await providerOfNode(name) : null;
+    if (!provider) throw err;
+    const res = await apiFetch(`/providers/proxies/${encodeURIComponent(provider)}/${encodeURIComponent(name)}`);
+    return res.json();
+  }
 }
