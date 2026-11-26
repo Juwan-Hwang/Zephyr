@@ -1,8 +1,9 @@
 // @ts-check
 /**
  * In-page error state for a core that failed to start (replaces the native alert()).
- * The card takes the place of the home hero's speed area; the stats row and the
- * cards below stay visible but dimmed and inert, so the page keeps its shape.
+ * A banner at the top of the home page (either layout); the controls below stay
+ * visible but dimmed and inert, so the page keeps its shape, and the node bar
+ * reads "Stopped".
  *
  * @module ui/core-error
  */
@@ -10,7 +11,6 @@
 import { t } from '../i18n.js';
 import { readCoreLog } from '../api.js';
 import { appStore } from './state.js';
-import { trackHomeStatsHeight } from './no-subscription.js';
 
 const LOG_TAIL_LINES = 40;
 
@@ -22,9 +22,8 @@ const DOWN_CLASS = 'core-down';
 
 /** The dimmed sections behind the card (matches the `.core-down` rules in styles.css). */
 const DIMMED_SELECTOR = [
-    '.home-hero.is-core-error .home-stats',
-    '[data-page="home"] > :not(#home-hero)',
-    '[data-page="console"]',
+    '[data-page="home"] > :not(#home-node, #core-error-state)',
+    '[data-page="console"] .dz-content > :not(#core-error-state)',
 ].join(', ');
 
 /** Sections this module made inert, so hiding the card restores only those. */
@@ -74,6 +73,40 @@ async function readLogTail() {
     return lines.map((l) => String(l).replace(/\r?\n$/, '')).slice(-LOG_TAIL_LINES);
 }
 
+/** The home page that is showing (minimal or console), if any. */
+function visibleHomePage() {
+    const pages = [
+        document.querySelector('[data-page="home"]'),
+        document.querySelector('[data-page="console"] .dz-content'),
+    ];
+    return /** @type {HTMLElement | undefined} */ (pages.find((el) => el && el.getClientRects().length > 0));
+}
+
+/**
+ * Put the card at the top of the home page that is showing, or float it on
+ * any other page so its Retry stays reachable.
+ * @param {HTMLElement} card
+ */
+function placeCard(card) {
+    const page = visibleHomePage();
+    card.className = page ? 'core-error-card is-banner glass-card' : 'core-error-card is-floating glass-card';
+    if (page) {
+        if (card.parentElement !== page || page.firstElementChild !== card) page.prepend(card);
+    } else {
+        const host = document.getElementById('app-main-container') || document.body;
+        if (card.parentElement !== host) host.appendChild(card);
+    }
+}
+
+/**
+ * After a page switch: the card moves with the user (startup still waits on
+ * its Retry), as a banner on a home page and floating elsewhere.
+ */
+export function relocateCoreStartError() {
+    const card = document.getElementById(CARD_ID);
+    if (card) placeCard(card);
+}
+
 /**
  * Show the error card and resolve when the user presses Retry.
  * @param {string} message - raw error from start_core
@@ -81,14 +114,10 @@ async function readLogTail() {
  */
 export function showCoreStartError(message) {
     hideCoreStartError();
-    // The hero lives on the minimal home page; when the console home is shown
-    // instead, that page is hidden and the card (with its Retry) would be too.
-    const heroEl = document.getElementById('home-hero');
-    const hero = heroEl && heroEl.getClientRects().length > 0 ? heroEl : null;
-    const host = hero || document.getElementById('app-main-container') || document.body;
+    // The banner opens the home page that is showing (minimal or console);
+    // on any other page it floats so its Retry is still reachable.
     const card = document.createElement('div');
     card.id = CARD_ID;
-    card.className = hero ? 'core-error-card' : 'core-error-card is-floating glass-card';
     card.setAttribute('role', 'alert');
 
     const icon = document.createElement('div');
@@ -147,16 +176,26 @@ export function showCoreStartError(message) {
         }
     });
 
-    card.append(icon, title, sub, detail, actions, log);
-    host.appendChild(card);
-    if (hero) trackHomeStatsHeight();
-    hero?.classList.add('is-core-error');
+    const text = document.createElement('div');
+    text.className = 'core-error-text';
+    text.append(title, sub, detail);
+    card.append(icon, text, actions, log);
+    placeCard(card);
     const mainEl = document.getElementById('app-main-container');
     mainEl?.classList.add(DOWN_CLASS);
     // The dimming blocks the mouse only; inert keeps keyboard users out as well.
     setDimmedInert(mainEl);
     const status = document.getElementById('proxy-status-text');
-    if (status) status.textContent = t('coreNotRunning');
+    // The key too: a later translation pass re-reads it.
+    if (status) { status.dataset.i18n = 'coreNotRunning'; status.textContent = t('coreNotRunning'); }
+    // A first start that failed: the node bar has not been drawn yet (that
+    // starts with the core), so it says "Stopped" here.
+    const nodeSub = document.getElementById('home-node-sub');
+    if (nodeSub && !nodeSub.textContent) {
+        nodeSub.textContent = t('homeStopped');
+        delete nodeSub.dataset.key;
+        document.getElementById('home-node')?.classList.add('is-stopped');
+    }
 
     return new Promise((resolve) => {
         retry.addEventListener('click', () => {
@@ -178,7 +217,17 @@ export function hideCoreStartError() {
         const status = document.getElementById('proxy-status-text');
         // Leave the live "Proxy Active" text alone; otherwise show the idle hint.
         if (status && !appStore.get('isSysProxyEnabled')) {
-            status.textContent = t(appStore.get('noSubscription') ? 'sysProxyNeedsSubscription' : 'proxyStatusReady');
+            const key = appStore.get('noSubscription') ? 'sysProxyNeedsSubscription' : 'stateOff';
+            // The key too: a later translation pass re-reads it.
+            status.dataset.i18n = key;
+            status.textContent = t(key);
         }
+    }
+    // The "Stopped" this card wrote on an undrawn node bar (paintNode always
+    // sets a key, so its own text is left alone): the next paint fills it.
+    const nodeSub = document.getElementById('home-node-sub');
+    if (nodeSub && !nodeSub.dataset.key && nodeSub.textContent === t('homeStopped')) {
+        nodeSub.textContent = '';
+        document.getElementById('home-node')?.classList.remove('is-stopped');
     }
 }

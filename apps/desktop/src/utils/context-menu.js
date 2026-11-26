@@ -137,7 +137,9 @@ export function showContextMenu(e, items) {
         // SECURITY: sanitize HTML to prevent XSS while preserving allowed tags
         // Custom HTML item (for complex widgets like checkboxes)
         if (item.html) {
-            const wrapper = document.createElement('div');
+            // With an action it is a button, so the keyboard can reach and press it.
+            const wrapper = document.createElement(item.action ? 'button' : 'div');
+            if (wrapper instanceof HTMLButtonElement) wrapper.type = 'button';
             wrapper.className = item.className || '';
             wrapper.innerHTML = sanitizeHtml(item.html); // nosemgrep: js-innerhtml-assignment — dynamic content escaped
             if (item.action) {
