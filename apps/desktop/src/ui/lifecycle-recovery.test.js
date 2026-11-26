@@ -24,7 +24,7 @@ const { postRestartRecovery } = await import('./lifecycle.js');
 describe('postRestartRecovery result', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        prism.rebuild.mockResolvedValue(undefined);
+        prism.rebuild.mockResolvedValue({ hot_reload_success: true });
         prism.overrideApplyAll.mockResolvedValue([{ success: true }]);
         memory.restoreProxySelectionResult.mockResolvedValue('restored');
         memory.waitForMihomoReady.mockResolvedValue(true);
@@ -33,17 +33,19 @@ describe('postRestartRecovery result', () => {
 
     it('reports no failures when every step completes', async () => {
         await expect(postRestartRecovery('a.yaml')).resolves.toEqual({ failed: 0 });
+        expect(prism.rebuild).toHaveBeenCalledWith(undefined, { withOverrides: true });
+        expect(prism.overrideApplyAll).not.toHaveBeenCalled();
     });
 
-    it('counts override scripts that failed to apply', async () => {
-        prism.overrideApplyAll.mockResolvedValue([{ success: true }, { success: false }, { success: false }]);
-        await expect(postRestartRecovery('a.yaml')).resolves.toEqual({ failed: 2 });
+    it('counts a rejected combined script build and skips selection restoration', async () => {
+        prism.rebuild.mockRejectedValue(new Error('script failed'));
+        await expect(postRestartRecovery('a.yaml')).resolves.toEqual({ failed: 1 });
+        expect(memory.restoreProxySelectionResult).not.toHaveBeenCalled();
     });
 
     it('counts failed steps and still runs the rest', async () => {
-        prism.rebuild.mockRejectedValue(new Error('patch'));
         memory.restoreProxySelectionResult.mockRejectedValue(new Error('select'));
-        await expect(postRestartRecovery('a.yaml')).resolves.toEqual({ failed: 2 });
+        await expect(postRestartRecovery('a.yaml')).resolves.toEqual({ failed: 1 });
         expect(proxies.startSmartAutoTest).toHaveBeenCalled();
     });
 
@@ -58,7 +60,22 @@ describe('postRestartRecovery result', () => {
         prism.rebuild.mockResolvedValue({ hot_reload_success: false });
         await expect(postRestartRecovery('a.yaml')).resolves.toEqual({ failed: 1 });
         prism.rebuild.mockResolvedValue({ hot_reload_success: null });
-        await expect(postRestartRecovery('a.yaml')).resolves.toEqual({ failed: 0 });
+        await expect(postRestartRecovery('a.yaml')).resolves.toEqual({ failed: 1 });
+        expect(memory.restoreProxySelectionResult).not.toHaveBeenCalled();
+    });
+
+    it('keeps an unanswered combined reload unknown for runtime restoration', async () => {
+        const { Bus } = await import('./events.js');
+        prism.rebuild.mockResolvedValue({ hot_reload_success: false, hot_reload_uncertain: true });
+        await expect(postRestartRecovery('a.yaml')).resolves.toEqual({ failed: 1 });
+        expect(memory.restoreProxySelectionResult).not.toHaveBeenCalled();
+        expect(Bus.emit).toHaveBeenCalledWith('config-updated', expect.objectContaining({ reloaded: false, restoreRuntime: true }));
+    });
+
+    it('restores the saved node in the running base after an explicit candidate rejection', async () => {
+        prism.rebuild.mockResolvedValue({ hot_reload_success: false, hot_reload_uncertain: false, hot_reload_error: 'Core rejected reload with HTTP 400' });
+        await expect(postRestartRecovery('a.yaml')).resolves.toEqual({ failed: 1 });
+        expect(memory.restoreProxySelectionResult).toHaveBeenCalledExactlyOnceWith('a.yaml');
     });
 
     it('counts a core that did not become ready once, waits once, and still refreshes', async () => {

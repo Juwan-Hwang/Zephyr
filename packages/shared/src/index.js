@@ -20,6 +20,8 @@ export const CORE = Object.freeze({
     GET_CORE_UPTIME: "get_core_uptime",
     READ_CONFIG: "read_config",
     UPDATE_CONFIG: "update_config",
+    APPLY_RUNTIME_DNS: "apply_runtime_dns",
+    RUNTIME_DNS_READY: "runtime_dns_ready",
     READ_LOG: "read_core_log",
 });
 
@@ -71,10 +73,12 @@ export const CRYPTO = Object.freeze({
 
 export const TUN = Object.freeze({
     SET_TUN_ENABLED: "set_tun_enabled",
+    APPLY_RUNTIME_TUN: "apply_runtime_tun",
     // Live mode and node owners. `patch_settings` rejects a non-null `mode`, so
     // these are the only way to change either.
     SWITCH_MODE: "switch_mode",
     SWITCH_GLOBAL_NODE: "switch_global_node",
+    SWITCH_PROXY_NODE: "switch_proxy_node",
     // Records the TUN preference only, for flows that have already applied TUN
     // to the running core themselves (privileged macOS restart, non-macOS config
     // patch, Linux permission-gated restart, failure rollback).
@@ -169,6 +173,16 @@ export const MISC = Object.freeze({
     GET_PROCESS_ICON: "get_process_icon",
     // clash:// links that arrived before the page had its listener.
     TAKE_PENDING_DEEP_LINKS: "take_pending_deep_links",
+    // Download speed test through the hidden speed-test listener.
+    SPEED_TEST_PORT: "speed_test_port",
+    SPEED_TEST_GENERATION: "speed_test_generation",
+    SPEED_TEST_READY_GENERATION: "speed_test_ready_generation",
+    SPEED_TEST_GROUP_OWNED: "speed_test_group_owned",
+    SPEED_TEST_SELECT_NODE: "speed_test_select_node",
+    SPEED_TEST_DOWNLOAD: "speed_test_download",
+    SPEED_TEST_CANCEL: "speed_test_cancel",
+    LOOKUP_EXIT_IP: "lookup_exit_ip",
+    LOOKUP_EXIT_IP_CANCEL: "lookup_exit_ip_cancel",
 });
 
 // ---------------------------------------------------------------------------
@@ -192,6 +206,7 @@ export const PRISM = Object.freeze({
     PREVIEW_RULES: "prism_preview_rules",
     IS_PRISM_RULE: "prism_is_prism_rule",
     INSERT_RULE: "prism_insert_rule",
+    INSERT_RULE_AVAILABLE: "prism_insert_rule_available",
     INSERT_RULE_STR: "prism_insert_rule_str",
     TOGGLE_GROUP: "prism_toggle_group",
     TRACE_REPORT: "prism_trace_report",

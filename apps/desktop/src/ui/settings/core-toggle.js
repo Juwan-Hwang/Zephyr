@@ -24,7 +24,7 @@ const pendingOf = new WeakMap();
  * switch shows the new value. Once the core was replaced it starts with the
  * values settings.json holds, which the switch shows, so the record no
  * longer says what it runs.
- * @type {WeakMap<object, { value: boolean, generation: number }>}
+ * @type {WeakMap<object, { value: boolean|undefined, generation: number }>}
  */
 const applied = new WeakMap();
 
@@ -33,7 +33,19 @@ const applied = new WeakMap();
  * @param {boolean} value
  */
 function recordApplied(toggle, value, generation = coreReplacements()) {
+    if (generation !== coreReplacements()) return;
     applied.set(toggle, { value, generation });
+    if ('indeterminate' in toggle) toggle.indeterminate = false;
+}
+
+/** Keep a generation-tagged unknown record so the next click cannot infer
+ * the old running value from the checkbox after an unconfirmed reload.
+ * @param {object} toggle @param {number} generation
+ */
+function recordUnconfirmed(toggle, generation) {
+    if (generation !== coreReplacements()) return;
+    applied.set(toggle, { value: undefined, generation });
+    if ('indeterminate' in toggle) toggle.indeterminate = true;
 }
 
 /**
@@ -71,7 +83,7 @@ const persistedValue = new WeakMap();
 
 /**
  * @typedef {Object} CoreToggleDeps
- * @property {(patch: Record<string, any>) => Promise<boolean|'restart'|'partial'>} saveCore
+ * @property {(patch: Record<string, any>) => Promise<boolean|'restart'|'partial'|'unconfirmed'>} saveCore
  *   apply a patch to the core (shows its own notice for 'restart' / 'partial' / false)
  * @property {(value: boolean) => Promise<void>} persist write the choice to settings.json; rejects on failure
  * @property {(message: string, kind: 'error'|'info'|'success'|'warning') => void} notify
@@ -91,7 +103,7 @@ const persistedValue = new WeakMap();
  * @param {{ checked: boolean }} toggle
  * @param {string} coreKey the core config key (`ipv6`)
  * @param {CoreToggleDeps} deps
- * @returns {Promise<boolean|'restart'|'partial'|'unsaved'>} the outcome of this click
+ * @returns {Promise<boolean|'restart'|'partial'|'unconfirmed'|'unsaved'>} the outcome of this click
  */
 export function applyCoreToggle(toggle, coreKey, deps) {
     const wanted = toggle.checked;
@@ -186,6 +198,11 @@ export function noteCoreToggleApplied(toggle, value) {
     recordApplied(toggle, value);
 }
 
+/** A reset may have changed this running value without confirming it. @param {{ checked: boolean }} toggle */
+export function noteCoreToggleUnconfirmed(toggle, generation = coreReplacements()) {
+    recordUnconfirmed(toggle, generation);
+}
+
 /**
  * Record the value settings.json holds for the switch after a write outside
  * its own saves (Restore Defaults clears the preference): a core started
@@ -270,7 +287,7 @@ export async function pauseCoreToggles() {
  * @param {boolean} wanted
  * @param {CoreToggleDeps} deps
  * @param {() => boolean} isLatest whether no click came after this one
- * @returns {Promise<boolean|'restart'|'partial'|'unsaved'>}
+ * @returns {Promise<boolean|'restart'|'partial'|'unconfirmed'|'unsaved'>}
  */
 async function saveCoreToggle(toggle, coreKey, wanted, deps, isLatest) {
     // The core the save goes to: what it takes is recorded for it, not for
@@ -282,12 +299,26 @@ async function saveCoreToggle(toggle, coreKey, wanted, deps, isLatest) {
         // saveCore has told the user why already: no second error toast.
         // With no record for the core running now (it restarted during the
         // saves), it runs the value last saved, not this click's opposite.
-        if (isLatest()) toggle.checked = appliedValue(toggle) ?? persistedValue.get(toggle) ?? !wanted;
+        const recorded = applied.get(toggle);
+        const unknown = recorded?.generation === coreReplacements() && recorded.value === undefined;
+        if (isLatest() && !unknown) {
+            const known = appliedValue(toggle) ?? persistedValue.get(toggle);
+            toggle.checked = known ?? !wanted;
+            if (known !== undefined && 'indeterminate' in toggle) toggle.indeterminate = false;
+        }
+        if (isLatest() && unknown && 'indeterminate' in toggle) toggle.indeterminate = true;
         return false;
     }
     // 'restart': the files hold the value, the core runs the old one until
     // it restarts, so the record of what it runs stays as it was.
-    if (ok !== 'restart') recordApplied(toggle, wanted, generationAtSave);
+    if (ok === true || ok === 'partial') recordApplied(toggle, wanted, generationAtSave);
+    else if (ok === 'unconfirmed') recordUnconfirmed(toggle, generationAtSave);
+    else if (ok === 'restart' && isLatest()) {
+        const recorded = applied.get(toggle);
+        if (recorded?.generation === coreReplacements() && recorded.value === undefined) {
+            recordUnconfirmed(toggle, recorded.generation);
+        }
+    }
     try {
         await deps.persist(wanted);
         persistedValue.set(toggle, wanted);
@@ -312,7 +343,8 @@ async function saveCoreToggle(toggle, coreKey, wanted, deps, isLatest) {
         // Not taken: settings.json holds the value for the next start, and
         // saveCore has told the user why.
         if (!again) return 'partial';
-        if (again !== 'restart') recordApplied(toggle, wanted, generationAgain);
+        if (again === true || again === 'partial') recordApplied(toggle, wanted, generationAgain);
+        else if (again === 'unconfirmed') recordUnconfirmed(toggle, generationAgain);
         // The replacement core decides what this click achieved: 'restart'
         // there means it does not run the value yet.
         outcome = again;

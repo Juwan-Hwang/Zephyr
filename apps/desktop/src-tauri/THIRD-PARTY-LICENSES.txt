@@ -10928,12 +10928,12 @@ MIT License (SPDX: MIT):
   * hex 0.4.3 — https://github.com/KokaKiwi/rust-hex
 
 MIT License (SPDX: MIT):
-  * form_urlencoded 1.2.2 — https://github.com/servo/rust-url
+  * form_urlencoded 1.2.3 — https://github.com/servo/rust-url
 
 MIT License (SPDX: MIT):
   * idna 1.1.0 — https://github.com/servo/rust-url/
   * percent-encoding 2.3.2 — https://github.com/servo/rust-url/
-  * url 2.5.8 — https://github.com/servo/rust-url
+  * url 2.5.9 — https://github.com/servo/rust-url
 
 MIT License (SPDX: MIT):
   * cc 1.2.63 — https://github.com/rust-lang/cc-rs
@@ -11157,7 +11157,7 @@ MIT License (SPDX: MIT):
   * stable_deref_trait 1.2.1 — https://github.com/storyyeller/stable_deref_trait
 
 MIT License (SPDX: MIT):
-  * cookie 0.18.1 — https://github.com/SergioBenitez/cookie-rs
+  * cookie 0.18.3 — https://github.com/SergioBenitez/cookie-rs
 
 MIT License (SPDX: MIT):
   * foreign-types-macros 0.2.3 — https://github.com/sfackler/foreign-types
