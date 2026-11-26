@@ -534,7 +534,7 @@ async function showEditPanel(configInfo) {
         autoUpdateOptions.push({ value: String(currentInterval), label: tr('autoUpdateEveryHours', { hours }) });
     }
     const intervalTabs = autoUpdateOptions.map(opt =>
-        `<button type="button" role="radio" class="seg-tab flex-1 justify-center${opt.value === String(currentInterval) ? ' active' : ''}" aria-checked="${opt.value === String(currentInterval) ? 'true' : 'false'}" data-value="${opt.value}">${escapeHtml(opt.label)}</button>`
+        `<button type="button" role="radio" class="choice-card choice-card-compact" aria-checked="${opt.value === String(currentInterval) ? 'true' : 'false'}" data-value="${opt.value}"><span class="choice-card-title">${escapeHtml(opt.label)}</span></button>`
     ).join('');
 
     // Determine which UA option is currently selected (prefix match for versioned values)
@@ -617,7 +617,7 @@ async function showEditPanel(configInfo) {
                 </div>
                 <div class="flex flex-col gap-1.5">
                     <span id="edit-auto-update-label" class="text-xs font-medium text-[var(--text-muted)]">${escapeHtml(t.autoUpdateInterval || 'Auto Update')}</span>
-                    <div id="edit-auto-update" class="seg-tabs seg-tabs-lg w-full" role="radiogroup" aria-labelledby="edit-auto-update-label" data-value="${String(currentInterval)}">
+                    <div id="edit-auto-update" class="choice-grid w-full" role="radiogroup" aria-labelledby="edit-auto-update-label" data-value="${String(currentInterval)}">
                         ${intervalTabs}
                     </div>
                     <p id="edit-next-update" class="edit-field-hint"></p>
@@ -663,12 +663,13 @@ async function showEditPanel(configInfo) {
         /** @type {HTMLInputElement|null} */ (modal.querySelector('#edit-url'))?.focus();
     });
 
-    // Auto-update as a segmented control (the old dropdown was cut off by the window edge).
+    // Auto-update as choice cards: four or more single-choice options use
+    // cards, two or three use a segmented control.
     const intervalGroup = /** @type {HTMLElement|null} */ (modal.querySelector('#edit-auto-update'));
-    intervalGroup?.querySelectorAll('.seg-tab').forEach((tab) => {
+    intervalGroup?.style.setProperty('--choice-cols', String(autoUpdateOptions.length));
+    intervalGroup?.querySelectorAll('.choice-card').forEach((tab) => {
         tab.addEventListener('click', () => {
-            intervalGroup.querySelectorAll('.seg-tab').forEach((b) => {
-                b.classList.toggle('active', b === tab);
+            intervalGroup.querySelectorAll('.choice-card').forEach((b) => {
                 b.setAttribute('aria-checked', b === tab ? 'true' : 'false');
             });
             intervalGroup.dataset.value = /** @type {HTMLElement} */ (tab).dataset.value || '0';
@@ -1379,8 +1380,8 @@ export function initSubscriptionSettings({
             ]);
 
             // Files switched off in the rule library are parked as .disabled and cannot be read; leave them out.
-            const files = /** @type {{filename: string, rule_count: number, source: string, enabled?: boolean}[]} */ (ruleFilesData || [])
-                .filter((f) => f.enabled !== false);
+            const files = /** @type {{filename: string, rule_count: number, source: string, enabled?: boolean, read_only?: boolean}[]} */ (ruleFilesData || [])
+                .filter((f) => f.enabled !== false && !f.read_only);
             const groupsList = /** @type {{name: string, files: string[]}[]} */ ((groupData?.groups) || []);
             // All profile stems (for "exclude one profile" logic when unchecking global rules)
             const allProfileStems = (/** @type {any[]} */ (allConfigs || []))
@@ -1428,40 +1429,62 @@ export function initSubscriptionSettings({
                     checkbox.type = 'checkbox';
                     checkbox.className = 'w-3 h-3 rounded border-[var(--zephyr-border-default)] bg-[var(--zephyr-bg-input)] text-accent focus:ring-accent/50 shrink-0';
                     checkbox.checked = false;
+                    // A default unchecked value is not the saved binding. Do
+                    // not let a click race the read that establishes it.
+                    checkbox.disabled = true;
                     checkbox.dataset.filename = file.filename;
+                    let savedBinding = false;
+                    let bindingLoaded = false;
+                    let bindingChanged = false;
+                    const retryBinding = document.createElement('button');
+                    retryBinding.type = 'button';
+                    retryBinding.className = 'btn-ghost text-xs hidden';
+                    retryBinding.textContent = t.retry || 'Retry';
 
                     // Check binding by parsing __when__ block from rule file.
                     // - __when__.enabled === false → unchecked (explicitly disabled)
                     // - __when__.profile contains current profile → checked
                     // - no __when__ → global rule, checked (assumes already applied)
-                    invoke(COMMANDS.RULE_READ, { filename: file.filename })
+                    const readBinding = () => {
+                        retryBinding.disabled = true;
+                        return invoke(COMMANDS.RULE_READ, { filename: file.filename })
                         .then((content) => {
                             const str = /** @type {string} */ (content || '');
                             const whenBlock = parseWhenBlock(str);
-                            if (!whenBlock) {
-                                // No __when__ → global rule, assume applied
-                                checkbox.checked = true;
-                                return;
-                            }
-                            if (whenBlock.enabled === false) {
-                                checkbox.checked = false;
-                                return;
-                            }
                             // Use flat loop instead of .some() to reduce nesting (SonarCloud)
                             const normStem = profileStem.toLowerCase();
-                            let profileFound = false;
-                            for (const p of whenBlock.profiles) {
+                            let profileFound = !whenBlock;
+                            for (const p of whenBlock?.profiles || []) {
                                 if (p.toLowerCase() === normStem) { profileFound = true; break; }
                             }
-                            checkbox.checked = profileFound;
+                            savedBinding = whenBlock?.enabled === false ? false : profileFound;
+                            bindingLoaded = true;
+                            if (!bindingChanged) {
+                                checkbox.checked = savedBinding;
+                                checkbox.disabled = false;
+                                retryBinding.classList.add('hidden');
+                            }
                         })
-                        .catch(() => {});
+                        .catch((error) => {
+                            showNotification(String(error), 'error');
+                            retryBinding.classList.remove('hidden');
+                        })
+                        .finally(() => { retryBinding.disabled = false; });
+                    };
+                    retryBinding.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void readBinding();
+                    });
+                    void readBinding();
 
                     checkbox.addEventListener('change', async (ev) => {
                         ev.stopPropagation();
+                        if (!bindingLoaded) { checkbox.checked = savedBinding; return; }
+                        bindingChanged = true;
                         // Remember target state and revert immediately to avoid false state
                         const targetChecked = checkbox.checked;
-                        checkbox.checked = !targetChecked;
+                        checkbox.checked = savedBinding;
 
                         // Show spinner while processing
                         const spinner = document.createElement('span');
@@ -1469,6 +1492,7 @@ export function initSubscriptionSettings({
                         spinner.innerHTML = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 1 10 10"/></svg>'; // nosemgrep: js-innerhtml-assignment — static HTML
                         item.appendChild(spinner);
                         checkbox.disabled = true;
+                        let bindingSaved = false;
 
                         try {
                             const currentContent = /** @type {string} */ (await invoke(COMMANDS.RULE_READ, { filename: file.filename }));
@@ -1526,7 +1550,10 @@ export function initSubscriptionSettings({
                                 }
                             }
 
-                            await invoke(COMMANDS.RULE_UPDATE, { filename: file.filename, content: newContent });
+                            await invoke(COMMANDS.RULE_UPDATE, { filename: file.filename, content: newContent, expectedContent: currentContent });
+                            bindingSaved = true;
+                            savedBinding = targetChecked;
+                            checkbox.checked = targetChecked;
                             rulesLogger.info(`[rule-toggle] newContent (first 500 chars):\n`, newContent.slice(0, 500));
                             rulesLogger.info(`[rule-toggle] RULE_UPDATE done, calling prism.rebuild() ...`);
                             // Use rebuild instead of apply to ensure a clean base config.
@@ -1536,9 +1563,8 @@ export function initSubscriptionSettings({
                             // base to the original subscription profile first, so skipped/
                             // disabled patches produce no residual rules.
                             /** @type {any} */
-                            const rebuildResult = await prism.rebuild();
-                            // Only update visual state after rebuild succeeds
-                            checkbox.checked = targetChecked;
+                            const rebuildResult = await prism.rebuildWithOverrides();
+                            // The checkbox reflects the saved binding even if reload fails.
                             if (rebuildResult?.hot_reload_success === false) {
                                 // The rule file is saved and the config rebuilt, but the
                                 // core refused the reload: it is not running yet.
@@ -1555,9 +1581,10 @@ export function initSubscriptionSettings({
                             );
                         } catch (err) {
                             rulesLogger.error(`[rule-toggle] FAILED`, err);
-                            // Restore to previous state (opposite of target)
-                            checkbox.checked = !targetChecked;
-                            showNotification(String(err), 'error');
+                            checkbox.checked = savedBinding;
+                            showNotification(bindingSaved
+                                ? `${t.requireRestart || 'Changes saved. Restart the core to take effect.'}\n${String(err)}`
+                                : String(err), bindingSaved ? 'warning' : 'error');
                         } finally {
                             checkbox.disabled = false;
                             spinner.remove();
@@ -1575,6 +1602,7 @@ export function initSubscriptionSettings({
                     item.appendChild(checkbox);
                     item.appendChild(label);
                     item.appendChild(count);
+                    item.appendChild(retryBinding);
                     return item;
                 };
 

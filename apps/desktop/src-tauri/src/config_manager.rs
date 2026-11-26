@@ -692,8 +692,11 @@ pub async fn update_config(
     let blocking_patch = patch.clone();
     let profiles_dir = paths.profiles_dir.clone();
     let profile_at_check = recorded_profile.clone();
-    let (current_yaml, profile_save, port, secret) = tokio::task::spawn_blocking(move || {
+    let saved = tokio::task::spawn_blocking(move || {
         let _run_config = lock_run_config_within(RUN_CONFIG_WAIT)?;
+        // Block other runtime writers until this exact candidate has finished
+        // reloading and its diagnostic listener has been reconciled.
+        let config_guard = crate::prism::pipeline::CoreStartGuard::acquire();
 
         // Steps 1-4: Read, merge, secure, write (testable core)
         let (current_yaml, _port_from_core) =
@@ -748,10 +751,11 @@ pub async fn update_config(
                 &blocking_patch,
             )?,
         };
-        Ok::<_, String>((current_yaml, profile_save, port, secret))
+        Ok::<_, String>((current_yaml, profile_save, port, secret, config_guard))
     })
     .await
     .map_err(|e| format!("Config update task failed: {e}"))??;
+    let (current_yaml, profile_save, port, secret, config_guard) = saved;
 
     // 6. Request Core Reload
     let actual_port = if let Some(ext_ctrl) = current_yaml
@@ -806,6 +810,30 @@ pub async fn update_config(
     };
 
     let sent = req.send().await;
+    let reloaded = sent
+        .as_ref()
+        .is_ok_and(|response| response.status().is_success());
+    if reloaded {
+        let candidate = crate::speed_test::injected_route(&current_yaml);
+        let app_for_confirmation = app.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::speed_test::confirm_listener(&app_for_confirmation, candidate);
+        })
+        .await;
+    }
+    let unknown = sent.as_ref().is_err_and(reload_may_still_land);
+    if unknown {
+        let candidate = crate::speed_test::injected_route(&current_yaml);
+        let app_for_confirmation = app.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::speed_test::reconcile_unknown_listener(&app_for_confirmation, candidate);
+        })
+        .await;
+    }
+    drop(config_guard);
+    if reloaded || unknown {
+        crate::speed_test::notify_reloaded(&app);
+    }
     // The core has answered the reload (or the request ended): a start may
     // go ahead. The lock is held through the reload, bounded by
     // CONFIG_RELOAD_TIMEOUT, so no start replaces the core while it loads
@@ -819,14 +847,11 @@ pub async fn update_config(
             if status.is_success() {
                 hot_reload_success = true;
                 // The listener the core reports after the reload: the run
-                // config may have changed again since this update wrote it
-                // (a Prism write once the run-config lock was let go), and
-                // the reload loaded that newer file. A core busy right after
-                // the reload is asked again: only its answer says what it
-                // loaded. When it never answers, the file this update wrote
-                // is the fallback. The file on disk is not: a Prism write
-                // that saves without a reload may have changed it after the
-                // core loaded it, and nothing tells the two apart.
+                // config can change after the transition guard is released
+                // above. A core busy right after the reload is asked again:
+                // only its answer says what it loaded. When it never answers,
+                // this update's candidate is the fallback, since a later
+                // save-only Prism write may already have changed the disk.
                 let endpoint = if let Some(endpoint) =
                     core_reported_endpoint_retrying(actual_port, &secret).await
                 {

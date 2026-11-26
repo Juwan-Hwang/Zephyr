@@ -11,17 +11,12 @@ use std::path::Path;
 /// the temporary file instead of publishing it. The owner-only DACL set on
 /// Windows travels with the file through the rename.
 pub fn write_file_secure_atomic(path: &Path, content: &str) -> Result<(), String> {
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     // Hidden, and not ending in `.yaml`, so profile listings and the batches
     // never pick up a leftover from a crash. Unique per write so two writers to
     // the same path cannot interleave in one temporary file. Opaque rather than
     // derived from the destination name: a profile name may already use the
     // whole 255-byte file name limit, leaving no room for a suffix.
-    let tmp = path.with_file_name(format!(
-        ".zephyr-write-{}-{}.tmp",
-        std::process::id(),
-        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ));
+    let tmp = path.with_file_name(format!(".zephyr-write-{}.tmp", uuid::Uuid::new_v4().simple()));
     if let Err(e) = write_new_private_file(&tmp, content) {
         let _ = fs::remove_file(&tmp);
         return Err(format!("Failed to write to {path:?}: {e}"));
@@ -89,8 +84,21 @@ fn write_new_private_file(path: &Path, content: &str) -> std::io::Result<()> {
 /// Returns `Err` if either the file write or permission setting fails.
 /// Callers can distinguish "secure write succeeded" from "file written but insecure".
 pub fn write_file_secure(path: &Path, content: &str) -> Result<(), String> {
-    fs::write(path, content).map_err(|e| format!("Failed to write to {path:?}: {e}"))?;
+    write_owner_only(path, content).map_err(|e| format!("Failed to write to {path:?}: {e}"))?;
     restrict_permissions(path)
+}
+
+/// On Unix, replace the inode so descriptors opened before permission repair
+/// cannot read newly written private content through an older readable handle.
+fn write_owner_only(path: &Path, content: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        write_file_secure_atomic(path, content).map_err(std::io::Error::other)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, content)
+    }
 }
 
 /// Owner-only permissions for an existing file (the second half of
@@ -281,4 +289,41 @@ fn restrict_permissions(path: &Path) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::io::Read as _;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    #[test]
+    fn owner_only_writer_secures_existing_files_and_truncates_old_content() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("private.yaml");
+        fs::write(&path, "previous content that is longer").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        // Exercise the write half directly: the later restriction is not
+        // what protects the new contents of a previously permissive file.
+        write_owner_only(&path, "secret").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "secret");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn owner_only_writer_does_not_publish_secrets_through_old_descriptors() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("private.yaml");
+        fs::write(&path, "old public content").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        let mut old_descriptor = fs::File::open(&path).unwrap();
+        write_owner_only(&path, "new private secret").unwrap();
+        let mut old_content = String::new();
+        old_descriptor.read_to_string(&mut old_content).unwrap();
+        assert_eq!(old_content, "old public content");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new private secret");
+    }
 }

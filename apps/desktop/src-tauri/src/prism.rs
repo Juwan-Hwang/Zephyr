@@ -201,6 +201,7 @@ impl PrismState {
     > {
         let opts = options.unwrap_or_default();
         let inner = Arc::clone(&self.inner);
+        let app = self.app.clone();
         tokio::task::spawn_blocking(move || {
             // RAII Scope Guard: Guarantees TLS is cleared before execution and on early exit/Drop
             let guard = host::HttpStatusGuard::enter();
@@ -224,6 +225,7 @@ impl PrismState {
                 .extension
                 .as_ref()
                 .ok_or_else(|| "Prism not initialized".to_owned())?;
+            guard.capture_rule_sources(&app)?;
             let result = ext.apply(opts)?;
             if let Ok(val) = serde_json::to_value(&result.trace) {
                 lock.last_trace = val.as_array().cloned().unwrap_or_default();
