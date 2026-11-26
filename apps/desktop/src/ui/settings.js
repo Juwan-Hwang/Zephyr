@@ -91,6 +91,7 @@ import { updateModeUI } from './modes.js';
 
 // Settings submodules
 import { initThemeSettings } from './settings/theme.js';
+import { initSpeedSettings, afterSpeedSettingsReset } from './settings/speed-settings.js';
 import { initTunnelSettings } from './settings/tunnels.js';
 import { applyFailover, applySmart, applyAutoTest, readSmartState, readAutoTestEnabled, shownFailover, queueSmartConfigWrite, smartEnabledOf } from './settings/auto-switch.js';
 import { initSubscriptionSettings, keepFallbackProfile } from './settings/subscriptions.js';
@@ -101,6 +102,9 @@ import { createClientVersionFetcher, DEFAULT_MAX_ATTEMPTS, isValidClientVersions
 import { uaTripleFromBackendUA, createUaEditTracker, trimLikeRust } from './settings/ua-triple.js';
 import { configUpdateOutcome, updateConfigThenSync } from './config-update.js';
 import { readRunningProfile } from './running-profile.js';
+
+/** The privacy policy (Settings › About). */
+export const PRIVACY_POLICY_URL = 'https://github.com/Juwan-Hwang/Zephyr/blob/main/PRIVACY.md';
 
 /** @type {ReturnType<typeof initCustomDropdown> | null} */
 let __langDropdown = null;
@@ -2116,6 +2120,13 @@ export async function initSettings() {
         };
     }
 
+    const privacyBtn = document.getElementById('view-privacy-btn');
+    if (privacyBtn) {
+        privacyBtn.onclick = () => {
+            openUrl(PRIVACY_POLICY_URL).catch(err => settingsLogger.warn('Failed to open the privacy policy', err));
+        };
+    }
+
     const gotoGithubBtn = document.getElementById('btn-goto-github');
     if (gotoGithubBtn) {
         gotoGithubBtn.onclick = (e) => {
@@ -2329,6 +2340,9 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             }
         });
     });
+
+    // ---- Latency test address + download speed test (settings/speed-settings.js) ----
+    registerCleanup(initSpeedSettings());
 
     // ---- Theme + Opacity (delegated to settings/theme.js) ----
     const _themeApi = initThemeSettings({
@@ -2790,6 +2804,11 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     resetKeys.add('copy_env_format');
                     resetTo('log_retention_days', 3);
                     resetTo('log_max_file_mb', 50);
+                    // Latency test address, download test and the IP line (null: the default).
+                    resetTo('latency_test_url', null);
+                    resetTo('speed_test_url', null);
+                    resetTo('speed_test_max_secs', null);
+                    resetTo('show_exit_ip', false);
                     // Owned by the auto-switch switch: if it was turned on while the
                     // reset ran, this snapshot must not save it back off.
                     if (failoverToggle) resetTo('failover_enabled', !!appStore.get('failoverEnabled'));
@@ -2827,6 +2846,7 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     await invoke(COMMANDS.PATCH_SETTINGS, { patch: { log_max_file_mb: 50 } });
                 })));
                 invalidateSettingsCache();
+                if (appSettingsSaved) afterSpeedSettingsReset();
                 // The core runs the reset DNS choice (or what it kept after a
                 // refusal) but the settings still hold the old one: re-applies
                 // after a restart follow the core's, as after a failed toggle save.
