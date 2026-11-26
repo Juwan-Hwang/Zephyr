@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as yaml from '../../js-yaml.min.js';
 
 const settings = { last_config: 'a.yaml', config_order: ['a.yaml', 'b.yaml', 'c.yaml'], custom_args: [] };
 const configs = [{ name: 'a.yaml' }, { name: 'b.yaml' }, { name: 'c.yaml' }];
@@ -68,6 +69,225 @@ describe('subscription card reorder', () => {
         a.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true }));
         expect(names(list)).toEqual(['a.yaml', 'b.yaml', 'c.yaml']);
         ctl.destroy();
+    });
+});
+
+describe('subscription rule binding conflicts', () => {
+    it('only mounts the newest requested rule menu when IPC replies arrive out of order', async () => {
+        vi.stubGlobal('jsyaml', yaml);
+        document.body.replaceChildren();
+        const replies = [];
+        vi.mocked(invoke).mockImplementation(async (command) => {
+            if (command === COMMANDS.LIST_CONFIGS) return configs;
+            if (command === COMMANDS.RULE_LIST) return new Promise((resolve) => { replies.push(resolve); });
+            if (command === COMMANDS.RULE_GROUP_LIST) return { groups: [] };
+            if (command === COMMANDS.RULE_READ) return 'rules: []\n';
+            if (String(command).includes('settings')) return { ...settings };
+            return null;
+        });
+        const list = document.createElement('div');
+        document.body.appendChild(list);
+        const ctl = initSubscriptionSettings({ subAddBtn: null, updateAllSubBtn: null, configsList: list });
+        try {
+            await ctl.renderConfigs(true);
+            list.querySelector('[data-config-name="a.yaml"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 }));
+            list.querySelector('[data-config-name="b.yaml"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 }));
+            expect(replies).toHaveLength(2);
+            replies[1]([{ filename: 'newest.prism.yaml', rule_count: 1 }]);
+            await vi.waitFor(() => expect(document.querySelector('input[data-filename="newest.prism.yaml"]')).not.toBeNull());
+            replies[0]([{ filename: 'stale.prism.yaml', rule_count: 1 }]);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            expect(document.querySelectorAll('.ctx-menu-root')).toHaveLength(1);
+            expect(document.querySelector('input[data-filename="stale.prism.yaml"]')).toBeNull();
+            expect(document.querySelector('input[data-filename="newest.prism.yaml"]')).not.toBeNull();
+        } finally { ctl.destroy(); vi.unstubAllGlobals(); document.body.replaceChildren(); }
+    });
+
+    it('shows pattern bindings as indeterminate and directs editing to YAML', async () => {
+        vi.stubGlobal('jsyaml', yaml);
+        document.body.replaceChildren();
+        let writes = 0;
+        vi.mocked(invoke).mockImplementation(async (command) => {
+            if (command === COMMANDS.RULE_LIST) return [{ filename: 'mine.prism.yaml', rule_count: 1 }];
+            if (command === COMMANDS.RULE_GROUP_LIST) return { groups: [] };
+            if (command === COMMANDS.LIST_CONFIGS) return configs;
+            if (command === COMMANDS.RULE_READ) return '__when__: { profile: ["a*"] }\nrules: []\n';
+            if (command === COMMANDS.RULE_UPDATE) { writes++; return null; }
+            if (String(command).includes('settings')) return { ...settings };
+            return null;
+        });
+        const list = document.createElement('div');
+        document.body.appendChild(list);
+        const ctl = initSubscriptionSettings({ subAddBtn: null, updateAllSubBtn: null, configsList: list });
+        try {
+            await ctl.renderConfigs(true);
+            list.querySelector('[data-config-name="a.yaml"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 }));
+            await vi.waitFor(() => expect(document.querySelector('input[data-filename="mine.prism.yaml"]')?.indeterminate).toBe(true));
+            const checkbox = document.querySelector('input[data-filename="mine.prism.yaml"]');
+            expect(checkbox.disabled).toBe(true);
+            expect(checkbox.title).toContain('YAML editor');
+            expect(checkbox.closest('label').parentElement.textContent).toContain('YAML');
+            expect(document.querySelector('button[aria-label*="mine.prism"]').classList.contains('hidden')).toBe(true);
+            checkbox.dispatchEvent(new Event('change'));
+            expect(writes).toBe(0);
+        } finally { ctl.destroy(); vi.unstubAllGlobals(); document.body.replaceChildren(); }
+    });
+
+    it.each([{ readFails: false, freshBound: true }, { readFails: false, freshBound: false }, { readFails: true, freshBound: true }])('reloads a conflicting binding before enabling its checkbox: %j', async ({ readFails, freshBound }) => {
+        vi.stubGlobal('jsyaml', yaml);
+        document.body.replaceChildren();
+        let reads = 0;
+        vi.mocked(invoke).mockImplementation(async (command) => {
+            if (command === COMMANDS.RULE_LIST) return [{ filename: 'mine.prism.yaml', rule_count: 1 }];
+            if (command === COMMANDS.RULE_GROUP_LIST) return { groups: [] };
+            if (command === COMMANDS.LIST_CONFIGS) return configs;
+            if (command === COMMANDS.RULE_READ) {
+                reads++;
+                if (reads >= 3 && readFails) throw new Error('read failed');
+                return reads >= 3 ? `# changed by another editor\n__when__: { profile: [${freshBound ? 'a, b' : 'b'}] }\nrules: []\n` : '__when__: { profile: [a] }\nrules: []\n';
+            }
+            if (command === COMMANDS.RULE_UPDATE) throw new Error('RULE_FILE_CHANGED: Reopen and retry.');
+            if (String(command).includes('settings')) return { ...settings };
+            return null;
+        });
+        const list = document.createElement('div');
+        document.body.appendChild(list);
+        const ctl = initSubscriptionSettings({ subAddBtn: null, updateAllSubBtn: null, configsList: list });
+        try {
+            await ctl.renderConfigs(true);
+            list.querySelector('[data-config-name="a.yaml"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+            await vi.waitFor(() => expect(document.querySelector('input[data-filename="mine.prism.yaml"]')?.disabled).toBe(false));
+            const checkbox = document.querySelector('input[data-filename="mine.prism.yaml"]');
+            expect(checkbox.checked).toBe(true);
+            checkbox.checked = false;
+            checkbox.dispatchEvent(new Event('change'));
+            await vi.waitFor(() => expect(reads).toBe(3));
+            if (readFails) {
+                await vi.waitFor(() => expect(document.querySelector('button[aria-label*="mine.prism"]')?.classList.contains('hidden')).toBe(false));
+                expect(checkbox.disabled).toBe(true);
+            } else {
+                await vi.waitFor(() => expect(checkbox.disabled).toBe(false));
+                expect(checkbox.checked).toBe(freshBound);
+            }
+        } finally {
+            ctl.destroy();
+            vi.unstubAllGlobals();
+            document.body.replaceChildren();
+        }
+    });
+
+    it.each([false, true])('uses the fresh binding and only writes a real change (alreadySaved=%s)', async (alreadySaved) => {
+        vi.stubGlobal('jsyaml', yaml);
+        document.body.replaceChildren();
+        let reads = 0;
+        let writes = 0;
+        let rebuilds = 0;
+        let writeArgs;
+        const latest = `__when__: {profile: [${alreadySaved ? 'b' : 'a, b'}]}\nrules: []\n`;
+        vi.mocked(invoke).mockImplementation(async (command, args) => {
+            if (command === COMMANDS.RULE_LIST) return [{ filename: 'mine.prism.yaml', rule_count: 1 }];
+            if (command === COMMANDS.RULE_GROUP_LIST) return { groups: [] };
+            if (command === COMMANDS.LIST_CONFIGS) return configs;
+            if (command === COMMANDS.RULE_READ) return ++reads === 1 ? '__when__: {profile: [a]}\nrules: []\n' : latest;
+            if (command === COMMANDS.RULE_UPDATE) { writes++; writeArgs = args; throw new Error('Disk is full'); }
+            if (command === COMMANDS.PRISM.REBUILD) { rebuilds++; return null; }
+            if (String(command).includes('settings')) return { ...settings };
+            return null;
+        });
+        const list = document.createElement('div');
+        document.body.appendChild(list);
+        const ctl = initSubscriptionSettings({ subAddBtn: null, updateAllSubBtn: null, configsList: list });
+        try {
+            await ctl.renderConfigs(true);
+            list.querySelector('[data-config-name="a.yaml"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 }));
+            await vi.waitFor(() => expect(document.querySelector('input[data-filename="mine.prism.yaml"]')?.disabled).toBe(false));
+            const checkbox = document.querySelector('input[data-filename="mine.prism.yaml"]');
+            checkbox.checked = false;
+            checkbox.dispatchEvent(new Event('change'));
+            await vi.waitFor(() => expect(reads).toBe(2));
+            await vi.waitFor(() => expect(checkbox.disabled).toBe(false));
+            expect(writes).toBe(alreadySaved ? 0 : 1);
+            if (!alreadySaved) {
+                expect(writeArgs.expectedContent).toBe(latest);
+                expect(yaml.load(writeArgs.content).__when__.profile).toEqual(['b']);
+            }
+            expect(rebuilds).toBe(0);
+            expect(checkbox.checked).toBe(!alreadySaved);
+        } finally { ctl.destroy(); vi.unstubAllGlobals(); document.body.replaceChildren(); }
+    });
+
+    it('enumerates current profiles only when a global rule is unchecked', async () => {
+        vi.stubGlobal('jsyaml', yaml);
+        document.body.replaceChildren();
+        let profiles = [{ name: 'a.yaml' }, { name: 'b.yaml' }];
+        let saved;
+        vi.mocked(invoke).mockImplementation(async (command, args) => {
+            if (command === COMMANDS.RULE_LIST) return [{ filename: 'mine.prism.yaml', rule_count: 1 }];
+            if (command === COMMANDS.RULE_GROUP_LIST) return { groups: [] };
+            if (command === COMMANDS.LIST_CONFIGS) return profiles;
+            if (command === COMMANDS.RULE_READ) return 'rules: []\n';
+            if (command === COMMANDS.RULE_UPDATE) { saved = args.content; return null; }
+            if (String(command).includes('settings')) return { ...settings };
+            return null;
+        });
+        const list = document.createElement('div');
+        document.body.appendChild(list);
+        const ctl = initSubscriptionSettings({ subAddBtn: null, updateAllSubBtn: null, configsList: list });
+        try {
+            await ctl.renderConfigs(true);
+            list.querySelector('[data-config-name="a.yaml"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 }));
+            await vi.waitFor(() => expect(document.querySelector('input[data-filename="mine.prism.yaml"]')?.disabled).toBe(false));
+            profiles = [...profiles, { name: 'c.yaml' }];
+            const checkbox = document.querySelector('input[data-filename="mine.prism.yaml"]');
+            checkbox.checked = false;
+            checkbox.dispatchEvent(new Event('change'));
+            await vi.waitFor(() => expect(saved).toBeTypeOf('string'));
+            expect(yaml.load(saved).__when__.profile).toEqual(['b', 'c']);
+            await vi.waitFor(() => expect(checkbox.disabled).toBe(false));
+        } finally { ctl.destroy(); vi.unstubAllGlobals(); document.body.replaceChildren(); }
+    });
+
+    it('focuses keyboard-opened rule menu actions and returns focus on Escape', async () => {
+        const { initTablistKeys } = await import('../tablist-keys.js');
+        const cleanupKeys = initTablistKeys();
+        document.body.replaceChildren();
+        vi.mocked(invoke).mockImplementation(async (command) => {
+            if (command === COMMANDS.LIST_CONFIGS) return configs;
+            if (command === COMMANDS.RULE_LIST) return [];
+            if (command === COMMANDS.RULE_GROUP_LIST) return { groups: [] };
+            if (String(command).includes('settings')) return { ...settings };
+            return null;
+        });
+        const list = document.createElement('div');
+        document.body.appendChild(list);
+        const ctl = initSubscriptionSettings({ subAddBtn: null, updateAllSubBtn: null, configsList: list });
+        try {
+            await ctl.renderConfigs(true);
+            const card = list.querySelector('[data-config-name="a.yaml"]');
+            card.focus();
+            card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 0 }));
+            await vi.waitFor(() => expect(document.querySelector('.ctx-menu-root button')).not.toBeNull());
+            expect(document.activeElement).toBe(document.querySelector('.ctx-menu-root button'));
+            expect(document.querySelectorAll('.ctx-menu-root button')).toHaveLength(2);
+            document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+            expect(document.querySelector('.ctx-menu-root')).toBeNull();
+            expect(document.activeElement).toBe(card);
+            card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 0 }));
+            await vi.waitFor(() => expect(document.querySelector('.ctx-menu-root button')).not.toBeNull());
+            document.querySelector('.ctx-menu-root button').click();
+            await vi.waitFor(() => expect(document.getElementById('edit-auto-update')).not.toBeNull());
+            const interval = document.getElementById('edit-auto-update');
+            const choices = interval.querySelectorAll('.choice-card');
+            expect(choices[0].tabIndex).toBe(0);
+            expect(choices[1].tabIndex).toBe(-1);
+            choices[0].focus();
+            choices[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+            expect(interval.dataset.value).toBe('43200');
+            expect(document.activeElement).toBe(choices[1]);
+            expect(choices[1].getAttribute('aria-checked')).toBe('true');
+            document.getElementById('edit-modal-close').click();
+            await new Promise((resolve) => setTimeout(resolve, 350));
+        } finally { cleanupKeys(); ctl.destroy(); document.body.replaceChildren(); }
     });
 });
 

@@ -569,11 +569,12 @@ async function saveRules() {
             return;
         }
         const outcome = configUpdateOutcome(/** @type {any} */ (result));
+        const needsRetry = outcome === 'partial' || outcome === 'unconfirmed';
         if (outcome !== 'failed') rulesSaves += 1;
         // Kept across page reads too: the core runs these rules, the
         // profile file still has the older ones. Recorded before any await,
         // so a read of the page while connections close shows them.
-        if (outcome === 'partial' && ownerAtSave) {
+        if (needsRetry && ownerAtSave) {
             unsavedLiveRules = { profile: ownerAtSave, rules: savingRules, core: coreAtSave };
         } else if (outcome !== 'failed' && unsavedLiveRules?.profile === ownerAtSave) {
             unsavedLiveRules = null;
@@ -596,7 +597,7 @@ async function saveRules() {
                 loadedRules = [...savingRules];
                 void renderRulesList();
             }
-            if (outcome === 'partial') {
+            if (needsRetry) {
                 profileBehindCore = true;
             } else {
                 originalConfigRules = [...savingRules];
@@ -619,7 +620,7 @@ async function saveRules() {
         if (loadAtSave === rulesLoads) {
             // A partial save left the active profile without the rules: keep
             // them marked unsaved so Save stays available for a retry.
-            if (outcome === 'partial') {
+            if (needsRetry) {
                 profileBehindCore = true;
             } else if (outcome !== 'failed') {
                 originalConfigRules = savingRules;
@@ -633,8 +634,8 @@ async function saveRules() {
         } else if (outcome === 'failed') {
             // Neither the core nor the active profile took the rules.
             showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesParseFailed, 'error');
-        } else if (outcome === 'partial') {
-            // Live now, but the active profile did not take the rules.
+        } else if (needsRetry) {
+            // The profile did not take the rules; the core may need recovery too.
             showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'warning');
         } else {
             showNotification((/** @type {any} */ (result))?.message || /** @type {any} */ (translations)[currentLang].notifRulesSaved, 'info');

@@ -288,6 +288,36 @@ describe('tunnel list saves', () => {
         expect(unsavedRow(tunnelsList)).toBeNull();
     });
 
+    it('retains an unconfirmed reset as the retry intent after a failed retry', async () => {
+        const save = vi.fn(async () => false);
+        const { tunnelsList, api } = mount(save);
+        const result = await api.saveAfterPending(async () => 'unconfirmed', 'a.yaml');
+        expect(api.resetAfterSave(result)).toBe(true);
+        expect(deleteButtons(tunnelsList)).toHaveLength(0);
+        const row = unsavedRow(tunnelsList);
+        expect(row).not.toBeNull();
+        await row.querySelector('button').onclick();
+        expect(deleteButtons(tunnelsList)).toHaveLength(0);
+        expect(unsavedRow(tunnelsList)).not.toBeNull();
+        save.mockResolvedValue(true);
+        await unsavedRow(tunnelsList).querySelector('button').onclick();
+        expect(save).toHaveBeenLastCalledWith({ tunnels: [] }, 'a.yaml');
+        expect(unsavedRow(tunnelsList)).toBeNull();
+    });
+
+    it('restores the last pending list when a subsequent edit fails', async () => {
+        const save = vi.fn().mockResolvedValueOnce('unconfirmed').mockResolvedValueOnce(false).mockResolvedValue(true);
+        const { tunnelsList } = mount(save);
+        await deleteButtons(tunnelsList)[0].onclick();
+        expect(deleteButtons(tunnelsList)).toHaveLength(1);
+        await deleteButtons(tunnelsList)[0].onclick();
+        expect(deleteButtons(tunnelsList)).toHaveLength(1);
+        expect(tunnelsList.textContent).toContain(tunnelB.address);
+        await unsavedRow(tunnelsList).querySelector('button').onclick();
+        expect(save).toHaveBeenLastCalledWith({ tunnels: [tunnelB] }, 'a.yaml');
+        expect(unsavedRow(tunnelsList)).toBeNull();
+    });
+
     it('saves of a list read from one profile go out checked against that profile', async () => {
         const save = vi.fn(async () => true);
         const { tunnelsList, api } = mount(save);

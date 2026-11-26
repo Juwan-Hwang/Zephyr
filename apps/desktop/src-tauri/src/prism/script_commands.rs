@@ -74,8 +74,7 @@ pub fn script_execute(
 ///
 /// Rate-limited: 5 calls per 10 seconds.
 ///
-/// Note: This function is synchronous internally but declared as async to allow
-/// Tauri to run it on a blocking thread, preventing UI freezes during script execution.
+/// The synchronous script, write and reload run together on a blocking worker.
 #[tauri::command]
 pub async fn script_execute_write(
     state: State<'_, PrismState>,
@@ -86,10 +85,14 @@ pub async fn script_execute_write(
     // Security: Validate script input size to prevent DoS
     check_input_size(&script, "Script")?;
 
-    // Tauri automatically runs async commands on a blocking thread pool,
-    // so we can call the synchronous pipeline directly without blocking the UI.
-    let result = execute_write_pipeline(&state, &script, &script_name)?;
-    Ok(pipeline_result_to_json(&result))
+    let app = state.app.clone();
+    tokio::task::spawn_blocking(move || {
+        let state = tauri::Manager::state::<PrismState>(&app);
+        let result = execute_write_pipeline(&state, &script, &script_name)?;
+        Ok(pipeline_result_to_json(&result))
+    })
+    .await
+    .map_err(|error| format!("Script write task failed: {error}"))?
 }
 
 #[tauri::command]

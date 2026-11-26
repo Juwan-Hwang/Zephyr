@@ -183,11 +183,14 @@ describe('saving rules', () => {
         expect(save.classList.contains('hidden')).toBe(false);
     });
 
-    it('shows the live rules as unsaved when the page is read again after a partial save', async () => {
+    it.each([false, true])('keeps the draft available for retry after an incomplete save (unconfirmed=%s)', async (unconfirmed) => {
         await addRuleAndSave({
             files_saved: false, run_config_saved: true, profile_saved: false,
-            hot_reload_success: true, message: 'Rules are live but the profile was not saved',
+            hot_reload_success: !unconfirmed, reload_unconfirmed: unconfirmed,
+            message: 'The profile was not saved',
         });
+        expect(showNotification).toHaveBeenCalledWith('The profile was not saved', 'warning');
+        if (unconfirmed) expect(api.closeAllConnections).not.toHaveBeenCalled();
         // Read again: the profile file still has only the old rule.
         await initRulesPage();
         const save = /** @type {HTMLElement} */ (document.getElementById('save-rules-btn'));

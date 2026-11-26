@@ -138,24 +138,43 @@ describe('createDnsReapply', () => {
         await expect(off.run()).resolves.toBe(true);
     });
 
-    it('a user turning DNS off mid re-apply wins: no check, no save, and the disable runs after', async () => {
+    it('a user toggle cancels a stalled restore without waiting for its deadline', async () => {
         const pending = deferred();
         const order = /** @type {string[]} */ ([]);
         const persist = vi.fn(async () => {});
         const setChecked = vi.fn();
         const r = createDnsReapply({
             isSaved: async () => true,
-            apply: async () => { order.push('apply'); await pending.promise; order.push('applied'); },
+            apply: async (signal) => {
+                order.push('apply');
+                signal.addEventListener('abort', () => order.push('aborted'), { once: true });
+                await pending.promise;
+                order.push('applied');
+            },
             persist,
             setChecked,
         });
         const run = r.run();
         await new Promise((res) => setTimeout(res, 0));
         const off = r.userChange(async () => { order.push('disable'); });
-        pending.resolve();
-        await run; await off;
-        expect(order).toEqual(['apply', 'applied', 'disable']);
+        try {
+            await expect(run).resolves.toBe(false);
+            await off;
+            expect(order).toEqual(['apply', 'aborted', 'disable']);
+        } finally { pending.resolve(); }
+        await Promise.resolve();
         expect(setChecked).not.toHaveBeenCalled();
+        expect(persist).not.toHaveBeenCalled();
+    });
+
+    it('reflects the reloaded core when no saved-on preference needs restoration', async () => {
+        const setChecked = vi.fn();
+        const apply = vi.fn();
+        const persist = vi.fn();
+        const r = createDnsReapply({ isSaved: async () => false, readEnabled: async () => true, apply, persist, setChecked });
+        await expect(r.run()).resolves.toBe(true);
+        expect(setChecked).toHaveBeenCalledExactlyOnceWith(true);
+        expect(apply).not.toHaveBeenCalled();
         expect(persist).not.toHaveBeenCalled();
     });
 
@@ -205,6 +224,44 @@ describe('createDnsReapply', () => {
         await expect(r.run()).resolves.toBe(false);
         expect(apply).not.toHaveBeenCalled();
         expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not confirm an unapplied saved choice when a newer toggle supersedes the read', async () => {
+        const saved = deferred();
+        const apply = vi.fn();
+        const r = createDnsReapply({ isSaved: () => saved.promise, apply, persist: vi.fn(), setChecked: vi.fn() });
+        const restore = r.run();
+        await Promise.resolve();
+        const change = r.userChange(async () => false);
+        saved.resolve(true);
+        await expect(restore).resolves.toBe(false);
+        await change;
+        expect(apply).not.toHaveBeenCalled();
+    });
+
+    it.each(['read', 'apply'])('releases the restore queue after a stuck %s and ignores late completion', async (stalled) => {
+        vi.useFakeTimers();
+        const pending = deferred();
+        const apply = vi.fn((signal) => stalled === 'apply' ? pending.promise : Promise.resolve(signal));
+        const persist = vi.fn();
+        const setChecked = vi.fn();
+        const next = vi.fn(async () => {});
+        const r = createDnsReapply({ isSaved: () => stalled === 'read' ? pending.promise : Promise.resolve(true), apply, persist, setChecked });
+        try {
+            const restore = r.run();
+            await vi.advanceTimersByTimeAsync(0);
+            const queued = r.serversChange(next);
+            await vi.advanceTimersByTimeAsync(25_000);
+            await expect(restore).resolves.toBe(false);
+            await queued;
+            expect(next).toHaveBeenCalledOnce();
+            if (stalled === 'apply') expect(apply.mock.calls[0][0].aborted).toBe(true);
+            pending.resolve(true);
+            await vi.advanceTimersByTimeAsync(0);
+            if (stalled === 'read') expect(apply).not.toHaveBeenCalled();
+            expect(persist).not.toHaveBeenCalled();
+            expect(setChecked).not.toHaveBeenCalled();
+        } finally { vi.useRealTimers(); }
     });
 
     it('keeps the switch on when only saving the choice fails', async () => {

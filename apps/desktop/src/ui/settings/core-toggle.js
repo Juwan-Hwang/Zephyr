@@ -71,7 +71,7 @@ const persistedValue = new WeakMap();
 
 /**
  * @typedef {Object} CoreToggleDeps
- * @property {(patch: Record<string, any>) => Promise<boolean|'restart'|'partial'>} saveCore
+ * @property {(patch: Record<string, any>) => Promise<boolean|'restart'|'partial'|'unconfirmed'>} saveCore
  *   apply a patch to the core (shows its own notice for 'restart' / 'partial' / false)
  * @property {(value: boolean) => Promise<void>} persist write the choice to settings.json; rejects on failure
  * @property {(message: string, kind: 'error'|'info'|'success'|'warning') => void} notify
@@ -91,7 +91,7 @@ const persistedValue = new WeakMap();
  * @param {{ checked: boolean }} toggle
  * @param {string} coreKey the core config key (`ipv6`)
  * @param {CoreToggleDeps} deps
- * @returns {Promise<boolean|'restart'|'partial'|'unsaved'>} the outcome of this click
+ * @returns {Promise<boolean|'restart'|'partial'|'unconfirmed'|'unsaved'>} the outcome of this click
  */
 export function applyCoreToggle(toggle, coreKey, deps) {
     const wanted = toggle.checked;
@@ -270,7 +270,7 @@ export async function pauseCoreToggles() {
  * @param {boolean} wanted
  * @param {CoreToggleDeps} deps
  * @param {() => boolean} isLatest whether no click came after this one
- * @returns {Promise<boolean|'restart'|'partial'|'unsaved'>}
+ * @returns {Promise<boolean|'restart'|'partial'|'unconfirmed'|'unsaved'>}
  */
 async function saveCoreToggle(toggle, coreKey, wanted, deps, isLatest) {
     // The core the save goes to: what it takes is recorded for it, not for
@@ -287,7 +287,7 @@ async function saveCoreToggle(toggle, coreKey, wanted, deps, isLatest) {
     }
     // 'restart': the files hold the value, the core runs the old one until
     // it restarts, so the record of what it runs stays as it was.
-    if (ok !== 'restart') recordApplied(toggle, wanted, generationAtSave);
+    if (ok === true || ok === 'partial') recordApplied(toggle, wanted, generationAtSave);
     try {
         await deps.persist(wanted);
         persistedValue.set(toggle, wanted);
@@ -312,7 +312,7 @@ async function saveCoreToggle(toggle, coreKey, wanted, deps, isLatest) {
         // Not taken: settings.json holds the value for the next start, and
         // saveCore has told the user why.
         if (!again) return 'partial';
-        if (again !== 'restart') recordApplied(toggle, wanted, generationAgain);
+        if (again === true || again === 'partial') recordApplied(toggle, wanted, generationAgain);
         // The replacement core decides what this click achieved: 'restart'
         // there means it does not run the value yet.
         outcome = again;
