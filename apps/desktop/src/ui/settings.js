@@ -45,7 +45,7 @@ import { checkConsoleWidthNotification } from './console-width.js';
 import { invalidateSettingsCache } from './cache.js';
 import { postRestartRecovery, restartedProfile, withPageBusy } from './lifecycle.js';
 import { currentProfile } from './active-profile.js';
-import { loadedToggleState, portPatchError, saveSettingChecked, saveSettingsChecked } from './settings-helpers.js';
+import { inSettingsSaveQueue, loadedToggleState, portPatchError, saveSettingChecked, saveSettingsChecked } from './settings-helpers.js';
 import { applyCoreToggle, noteCoreToggleApplied, noteCoreTogglePersisted, coreToggleApplied, pauseCoreToggles, coreToggleMark, coreToggleChangedSince, coreToggleShownBeforeHeld, coreToggleClickedDuringReset } from './settings/core-toggle.js';
 import { initNetworkOptim } from './network-optim.js';
 import { noNetworkChangeSince } from './network-change.js';
@@ -91,6 +91,7 @@ import { updateModeUI } from './modes.js';
 
 // Settings submodules
 import { initThemeSettings } from './settings/theme.js';
+import { initSpeedSettings, afterSpeedSettingsReset } from './settings/speed-settings.js';
 import { initTunnelSettings } from './settings/tunnels.js';
 import { applyFailover, applySmart, applyAutoTest, readSmartState, readAutoTestEnabled, shownFailover, queueSmartConfigWrite, smartEnabledOf } from './settings/auto-switch.js';
 import { initSubscriptionSettings, keepFallbackProfile } from './settings/subscriptions.js';
@@ -101,6 +102,9 @@ import { createClientVersionFetcher, DEFAULT_MAX_ATTEMPTS, isValidClientVersions
 import { uaTripleFromBackendUA, createUaEditTracker, trimLikeRust } from './settings/ua-triple.js';
 import { configUpdateOutcome, updateConfigThenSync } from './config-update.js';
 import { readRunningProfile } from './running-profile.js';
+
+/** The privacy policy (Settings › About). */
+export const PRIVACY_POLICY_URL = 'https://github.com/Juwan-Hwang/Zephyr/blob/main/PRIVACY.md';
 
 /** @type {ReturnType<typeof initCustomDropdown> | null} */
 let __langDropdown = null;
@@ -2116,6 +2120,13 @@ export async function initSettings() {
         };
     }
 
+    const privacyBtn = document.getElementById('view-privacy-btn');
+    if (privacyBtn) {
+        privacyBtn.onclick = () => {
+            openUrl(PRIVACY_POLICY_URL).catch(err => settingsLogger.warn('Failed to open the privacy policy', err));
+        };
+    }
+
     const gotoGithubBtn = document.getElementById('btn-goto-github');
     if (gotoGithubBtn) {
         gotoGithubBtn.onclick = (e) => {
@@ -2329,6 +2340,9 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
             }
         });
     });
+
+    // ---- Latency test address + download speed test (settings/speed-settings.js) ----
+    registerCleanup(initSpeedSettings());
 
     // ---- Theme + Opacity (delegated to settings/theme.js) ----
     const _themeApi = initThemeSettings({
@@ -2790,6 +2804,11 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     resetKeys.add('copy_env_format');
                     resetTo('log_retention_days', 3);
                     resetTo('log_max_file_mb', 50);
+                    // Latency test address, download test and the IP line (null: the default).
+                    resetTo('latency_test_url', null);
+                    resetTo('speed_test_url', null);
+                    resetTo('speed_test_max_secs', null);
+                    resetTo('show_exit_ip', false);
                     // Owned by the auto-switch switch: if it was turned on while the
                     // reset ran, this snapshot must not save it back off.
                     if (failoverToggle) resetTo('failover_enabled', !!appStore.get('failoverEnabled'));
@@ -2799,11 +2818,22 @@ document.getElementById('custom-args-paste-btn')?.addEventListener('click', (e) 
                     /** @type {any} */
                     // Unread, the snapshot alone would put back everything
                     // saved while the reset ran: the item fails instead.
-                    const now = await invoke(COMMANDS.GET_SETTINGS);
-                    if (!now || typeof now !== 'object') throw new Error('Settings could not be read before saving the reset');
-                    const stored = withResetChanges(now, resetBase, settings, forced);
-                    await invoke(COMMANDS.SAVE_SETTINGS, { settings: stored });
+                    // In the settings write queue: a switch saved just before
+                    // (the IP line) lands first and is reset; one saved after
+                    // lands after, not inside the read and write.
+                    await inSettingsSaveQueue(async () => {
+                        const now = await invoke(COMMANDS.GET_SETTINGS);
+                        if (!now || typeof now !== 'object') throw new Error('Settings could not be read before saving the reset');
+                        const stored = withResetChanges(now, resetBase, settings, forced);
+                        await invoke(COMMANDS.SAVE_SETTINGS, { settings: stored });
+                    });
                     appSettingsSaved = true;
+                    // The test addresses and the IP line follow the saved
+                    // snapshot now, in step with it: a switch moved after this
+                    // point is newer and must not be undone once the log patch
+                    // below returns.
+                    invalidateSettingsCache();
+                    afterSpeedSettingsReset();
                     // The switches' preferences are cleared: a core started from
                     // now on runs what the profile holds, the defaults once the
                     // reset wrote them there, else a value not known here.
