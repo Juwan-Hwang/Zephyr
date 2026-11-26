@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { applyCoreToggle, noteCoreToggleApplied, noteCoreTogglePersisted, coreToggleApplied, pauseCoreToggles, coreToggleMark, coreToggleChangedSince, coreToggleShownBeforeHeld, coreToggleClickedDuringReset } from './core-toggle.js';
+import { applyCoreToggle, noteCoreToggleApplied, noteCoreToggleUnconfirmed, noteCoreTogglePersisted, coreToggleApplied, pauseCoreToggles, coreToggleMark, coreToggleChangedSince, coreToggleShownBeforeHeld, coreToggleClickedDuringReset } from './core-toggle.js';
 import { noteCoreReplaced } from '../../api.js';
 
 /** Deps with a controllable core save per call. */
@@ -65,6 +65,46 @@ describe('core settings switch', () => {
         expect(d.saveCore).toHaveBeenCalledWith({ ipv6: true });
         expect(d.persist).toHaveBeenCalledWith(true);
         expect(d.notify).toHaveBeenCalledWith('Applied', 'success');
+    });
+
+    it('keeps an unconfirmed edit without recording it as the running value', async () => {
+        const toggle = { checked: true };
+        const d = deps(vi.fn(async () => 'unconfirmed'));
+        expect(await applyCoreToggle(toggle, 'ipv6', d)).toBe('unconfirmed');
+        expect(d.persist).toHaveBeenCalledWith(true);
+        expect(coreToggleApplied(toggle)).toBeUndefined();
+        expect(d.notify).not.toHaveBeenCalled();
+        d.saveCore.mockResolvedValue(false);
+        toggle.checked = false;
+        expect(await applyCoreToggle(toggle, 'ipv6', d)).toBe(false);
+        expect(toggle.checked).toBe(true);
+    });
+
+    it('does not restore a pre-reset running value after an unconfirmed reset', async () => {
+        const toggle = { checked: true };
+        noteCoreToggleApplied(toggle, true);
+        const release = await pauseCoreToggles();
+        toggle.checked = false;
+        noteCoreToggleUnconfirmed(toggle);
+        noteCoreTogglePersisted(toggle, undefined);
+        expect(coreToggleApplied(toggle)).toBeUndefined();
+        toggle.checked = true;
+        const d = deps(vi.fn(async () => false));
+        const pending = applyCoreToggle(toggle, 'ipv6', d);
+        release();
+        expect(await pending).toBe(false);
+        expect(toggle.checked).toBe(false);
+    });
+
+    it('marks a replacement core unknown after an unconfirmed follow-up', async () => {
+        const toggle = { checked: true };
+        const d = deps(vi.fn().mockImplementationOnce(async () => { noteCoreReplaced(); return true; })
+            .mockResolvedValueOnce('unconfirmed').mockResolvedValue(false));
+        expect(await applyCoreToggle(toggle, 'ipv6', d)).toBe('unconfirmed');
+        expect(coreToggleApplied(toggle)).toBeUndefined();
+        toggle.checked = false;
+        expect(await applyCoreToggle(toggle, 'ipv6', d)).toBe(false);
+        expect(toggle.checked).toBe(true);
     });
 
     it('a failed write to settings.json is not reported as applied', async () => {

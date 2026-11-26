@@ -106,8 +106,8 @@
   --zephyr-fontSize-4xl: 36px;
   --zephyr-text-primary: rgba(255, 255, 255, 0.95);
   --zephyr-text-secondary: rgba(255, 255, 255, 0.6);
-  --zephyr-text-tertiary: rgba(255, 255, 255, 0.4);
-  --zephyr-text-muted: #71717a;
+  --zephyr-text-tertiary: rgba(255, 255, 255, 0.52);
+  --zephyr-text-muted: #8e8e98;
   --zephyr-text-danger: #ef4444;
   --zephyr-text-warning: #f59e0b;
   --zephyr-text-success: #4ade80;
@@ -154,7 +154,8 @@ html:not(.dark) {
   --zephyr-shadow-dialog: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.2), 0 8px 40px rgba(0, 0, 0, 0.25);
   --zephyr-text-primary: rgba(24, 24, 28, 0.95);
   --zephyr-text-secondary: rgba(24, 24, 28, 0.65);
-  --zephyr-text-tertiary: rgba(24, 24, 28, 0.4);
+  --zephyr-text-tertiary: rgba(24, 24, 28, 0.64);
+  --zephyr-text-muted: #5b5b65;
   --zephyr-text-danger: #dc2626;
   --zephyr-text-warning: #d97706;
   --zephyr-text-success: #16a34a;

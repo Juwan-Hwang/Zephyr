@@ -26,6 +26,8 @@ pub struct RuleFileInfo {
     /// `false` when the file is parked as `<name>.prism.yaml.disabled`
     /// (see `prism_toggle_group`); `filename` is still the base name.
     pub enabled: bool,
+    /// Generated workspace file owned by an override, edited through that override only.
+    pub read_only: bool,
 }
 
 #[derive(Serialize, Deserialize)]
