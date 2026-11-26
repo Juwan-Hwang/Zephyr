@@ -177,6 +177,9 @@ pub struct CoreData {
     last_custom_args: Option<Vec<String>>,
     last_port: Option<u16>,
     last_proxy_endpoint: Option<ProxyEndpoint>,
+    speed_test_listener: Option<crate::speed_test::Listener>,
+    speed_test_group_owned: Option<bool>,
+    confirmed_runtime_config: Option<String>,
     last_log_path: Option<String>,
     /// Monotonic time when mihomo process was spawned (None if not started).
     started_at: Option<std::time::Instant>,
@@ -198,6 +201,9 @@ impl CoreData {
             last_custom_args: None,
             last_port: None,
             last_proxy_endpoint: None,
+            speed_test_listener: None,
+            speed_test_group_owned: None,
+            confirmed_runtime_config: None,
             last_log_path: None,
             started_at: None,
         }
@@ -235,6 +241,24 @@ impl CoreData {
         self.last_proxy_endpoint
     }
     #[must_use]
+    pub const fn speed_test_listener(&self) -> Option<&crate::speed_test::Listener> {
+        self.speed_test_listener.as_ref()
+    }
+    #[must_use]
+    pub const fn speed_test_group_owned(&self) -> Option<bool> {
+        self.speed_test_group_owned
+    }
+    pub const fn set_speed_test_group_owned(&mut self, owned: Option<bool>) {
+        self.speed_test_group_owned = owned;
+    }
+    #[must_use]
+    pub fn confirmed_runtime_config(&self) -> Option<&str> {
+        self.confirmed_runtime_config.as_deref()
+    }
+    pub fn set_confirmed_runtime_config(&mut self, config: Option<String>) {
+        self.confirmed_runtime_config = config;
+    }
+    #[must_use]
     pub fn last_log_path(&self) -> Option<&str> {
         self.last_log_path.as_deref()
     }
@@ -251,11 +275,18 @@ impl CoreData {
     pub fn set_last_custom_args(&mut self, a: Option<Vec<String>>) {
         self.last_custom_args = a;
     }
-    pub const fn set_last_port(&mut self, p: Option<u16>) {
+    pub fn set_last_port(&mut self, p: Option<u16>) {
         self.last_port = p;
+        // Every newly published/stopped core needs its own listener confirmation.
+        self.speed_test_listener = None;
+        self.speed_test_group_owned = None;
+        self.confirmed_runtime_config = None;
     }
     pub const fn set_last_proxy_endpoint(&mut self, p: Option<ProxyEndpoint>) {
         self.last_proxy_endpoint = p;
+    }
+    pub fn set_speed_test_listener(&mut self, listener: Option<crate::speed_test::Listener>) {
+        self.speed_test_listener = listener;
     }
     pub fn set_last_log_path(&mut self, p: Option<String>) {
         self.last_log_path = p;

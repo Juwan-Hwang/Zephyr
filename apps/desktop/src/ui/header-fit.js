@@ -8,9 +8,18 @@
  * a tooltip); if that still is not enough, `.is-compact-2` also hides the
  * secondary read-outs (line count, rule stats). Each step is undone as soon as
  * the full header fits again.
+ *
+ * A header can name its own steps, in order, in `data-fit-steps` (the proxies
+ * header folds "Test Download Speed" before anything else).
  */
 
 const STEPS = ['is-compact', 'is-compact-2'];
+
+/** @param {HTMLElement} header @returns {string[]} */
+function stepsOf(header) {
+    const own = (header.dataset.fitSteps || '').split(/\s+/).filter(Boolean);
+    return own.length ? own : STEPS;
+}
 const LABEL_SELECTOR = ':is(.btn-ghost, .btn-accent, .btn-danger, .btn-primary) > span';
 
 /** @param {HTMLElement} header */
@@ -47,10 +56,11 @@ function syncTitles(header, compact) {
  */
 export function fitHeader(header) {
     if (!header || header.clientWidth === 0) return 0; // hidden page: refit when it is shown
-    header.classList.remove(...STEPS);
+    const steps = stepsOf(header);
+    header.classList.remove(...steps);
     let applied = 0;
-    while (applied < STEPS.length && overflows(header)) {
-        header.classList.add(STEPS[applied]);
+    while (applied < steps.length && overflows(header)) {
+        header.classList.add(steps[applied]);
         applied++;
     }
     syncTitles(header, applied > 0);

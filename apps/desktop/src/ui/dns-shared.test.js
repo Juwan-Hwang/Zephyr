@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../api.js', async (importOriginal) => ({ ...(await importOriginal()), getConfig: vi.fn(), invoke: vi.fn() }));
 
 import { getConfig, invoke } from '../api.js';
-import { isValidIPv6, isValidDns, DEFAULT_DNS_CONFIG, createDnsReapply, dnsShownAfterFailure, buildDnsRewritePayload } from './dns-shared.js';
+import { isValidIPv6, isValidDns, DEFAULT_DNS_CONFIG, createDnsReapply, dnsShownAfterFailure, buildDnsRewritePayload, applyDnsRewrite, rememberUnsavedDnsChoice, forgetUnsavedDnsChoice } from './dns-shared.js';
 
 describe('isValidIPv6', () => {
     it('full address', () => expect(isValidIPv6('2001:0db8:85a3:0000:0000:8a2e:0370:7334')).toBe(true));
@@ -138,25 +138,106 @@ describe('createDnsReapply', () => {
         await expect(off.run()).resolves.toBe(true);
     });
 
-    it('a user turning DNS off mid re-apply wins: no check, no save, and the disable runs after', async () => {
+    it('keeps a prior confirmed overlay when a later queued restore is refused', async () => {
+        let confirmed = false;
+        const apply = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValue(new Error('refused'));
+        const setChecked = vi.fn((checked) => { confirmed = checked; });
+        const r = createDnsReapply({ isSaved: async () => true, apply, persist: vi.fn(),
+            setChecked, confirmedState: () => confirmed, wait: async () => {} });
+        const first = r.run();
+        const second = r.run();
+        await expect(first).resolves.toBe(true);
+        await expect(second).resolves.toBe(false);
+        expect(setChecked.mock.calls).toEqual([[true], [true]]);
+    });
+
+    it('a user toggle waits for a dispatched restore write before sending its own change', async () => {
         const pending = deferred();
         const order = /** @type {string[]} */ ([]);
         const persist = vi.fn(async () => {});
         const setChecked = vi.fn();
         const r = createDnsReapply({
             isSaved: async () => true,
-            apply: async () => { order.push('apply'); await pending.promise; order.push('applied'); },
+            apply: async (signal, beforeDispatch) => {
+                beforeDispatch();
+                order.push('apply');
+                signal.addEventListener('abort', () => order.push('aborted'), { once: true });
+                await pending.promise;
+                order.push('applied');
+            },
             persist,
             setChecked,
         });
         const run = r.run();
         await new Promise((res) => setTimeout(res, 0));
         const off = r.userChange(async () => { order.push('disable'); });
-        pending.resolve();
-        await run; await off;
+        try {
+            await Promise.resolve(); await Promise.resolve();
+            expect(order).toEqual(['apply']);
+        } finally { pending.resolve(); }
+        await expect(run).resolves.toBe(false);
+        await off;
         expect(order).toEqual(['apply', 'applied', 'disable']);
         expect(setChecked).not.toHaveBeenCalled();
         expect(persist).not.toHaveBeenCalled();
+    });
+
+    it('keeps the rewrite off when the saved choice does not request restoration', async () => {
+        const setChecked = vi.fn();
+        const apply = vi.fn();
+        const persist = vi.fn();
+        const r = createDnsReapply({ isSaved: async () => false, apply, persist, setChecked });
+        await expect(r.run()).resolves.toBe(true);
+        expect(setChecked).toHaveBeenCalledExactlyOnceWith(false);
+        expect(apply).not.toHaveBeenCalled();
+        expect(persist).not.toHaveBeenCalled();
+    });
+
+    it('adopts a dispatched restore success after the preparation deadline', async () => {
+        vi.useFakeTimers();
+        const pending = deferred();
+        const persist = vi.fn();
+        const setChecked = vi.fn();
+        const r = createDnsReapply({ isSaved: async () => true,
+            apply: async (_signal, dispatch) => { dispatch(); await pending.promise; },
+            persist, setChecked });
+        const restoring = r.run();
+        try {
+            await vi.advanceTimersByTimeAsync(26_000);
+            expect(setChecked).not.toHaveBeenCalled();
+            pending.resolve();
+            await expect(restoring).resolves.toBe(true);
+            expect(setChecked).toHaveBeenCalledExactlyOnceWith(true);
+            expect(persist).toHaveBeenCalledOnce();
+            expect(persist.mock.calls[0][0].aborted).toBe(false);
+        } finally {
+            pending.resolve();
+            await restoring;
+            vi.useRealTimers();
+        }
+    });
+
+    it('keeps a dispatched write serialized past the preparation deadline', async () => {
+        vi.useFakeTimers();
+        const pending = deferred();
+        const next = vi.fn(async () => {});
+        const r = createDnsReapply({ isSaved: async () => true,
+            apply: async (_signal, dispatch) => { dispatch(); await pending.promise; },
+            persist: vi.fn(), setChecked: vi.fn() });
+        const restoring = r.run();
+        let queued;
+        try {
+            await vi.advanceTimersByTimeAsync(0);
+            queued = r.userChange(next);
+            await vi.advanceTimersByTimeAsync(25_001);
+            expect(next).not.toHaveBeenCalled();
+        } finally {
+            pending.resolve();
+            await restoring;
+            await queued;
+            vi.useRealTimers();
+        }
+        expect(next).toHaveBeenCalledOnce();
     });
 
     it('stops retrying once the user changes the toggle', async () => {
@@ -185,6 +266,33 @@ describe('createDnsReapply', () => {
         expect(seen).toEqual([false, true]);
     });
 
+    it('cancels automatic restoration without superseding pending user feedback', async () => {
+        const gate = deferred();
+        const apply = vi.fn();
+        const r = createDnsReapply({ isSaved: async () => true, apply, persist: vi.fn(), setChecked: vi.fn() });
+        let stillLatest = false;
+        const user = r.userChange(async (isLatest) => { await gate.promise; stillLatest = isLatest(); });
+        const restore = r.run();
+        r.cancelRestores();
+        gate.resolve();
+        await user;
+        await expect(restore).resolves.toBe(false);
+        expect(stillLatest).toBe(true);
+        expect(apply).not.toHaveBeenCalled();
+    });
+
+    it('does not retry an unconfirmed native write as a missing-base failure', async () => {
+        const error = new Error('DNS update outcome is unconfirmed; reload or restart the core, then retry');
+        const apply = vi.fn(async (_signal, beforeDispatch) => { beforeDispatch(); throw error; });
+        const onError = vi.fn();
+        const setChecked = vi.fn();
+        const r = createDnsReapply({ isSaved: async () => true, apply, persist: vi.fn(), setChecked, onError });
+        await expect(r.run()).resolves.toBe(false);
+        expect(apply).toHaveBeenCalledOnce();
+        expect(onError).toHaveBeenCalledWith(error);
+        expect(setChecked).not.toHaveBeenCalled();
+    });
+
     it('keeps a toggle the latest when saved servers are applied after it', async () => {
         const r = createDnsReapply({ isSaved: async () => false, apply: async () => {}, persist: async () => {}, setChecked: vi.fn() });
         const first = deferred();
@@ -205,6 +313,68 @@ describe('createDnsReapply', () => {
         await expect(r.run()).resolves.toBe(false);
         expect(apply).not.toHaveBeenCalled();
         expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not confirm an unapplied saved choice when a newer toggle supersedes the read', async () => {
+        const saved = deferred();
+        const apply = vi.fn();
+        const r = createDnsReapply({ isSaved: () => saved.promise, apply, persist: vi.fn(), setChecked: vi.fn() });
+        const restore = r.run();
+        await Promise.resolve();
+        const change = r.userChange(async () => false);
+        saved.resolve(true);
+        await expect(restore).resolves.toBe(false);
+        await change;
+        expect(apply).not.toHaveBeenCalled();
+    });
+
+    it.each(['read', 'apply'])('releases the restore queue after a stuck preparation %s and ignores late completion', async (stalled) => {
+        vi.useFakeTimers();
+        const pending = deferred();
+        const apply = vi.fn((signal) => stalled === 'apply' ? pending.promise : Promise.resolve(signal));
+        const persist = vi.fn();
+        const setChecked = vi.fn();
+        const next = vi.fn(async () => {});
+        const r = createDnsReapply({ isSaved: () => stalled === 'read' ? pending.promise : Promise.resolve(true), apply, persist, setChecked });
+        try {
+            const restore = r.run();
+            await vi.advanceTimersByTimeAsync(0);
+            const queued = r.serversChange(next);
+            await vi.advanceTimersByTimeAsync(25_000);
+            await expect(restore).resolves.toBe(false);
+            await queued;
+            expect(next).toHaveBeenCalledOnce();
+            if (stalled === 'apply') expect(apply.mock.calls[0][0].aborted).toBe(true);
+            pending.resolve(true);
+            await vi.advanceTimersByTimeAsync(0);
+            if (stalled === 'read') expect(apply).not.toHaveBeenCalled();
+            expect(persist).not.toHaveBeenCalled();
+            expect(setChecked).not.toHaveBeenCalled();
+        } finally { vi.useRealTimers(); }
+    });
+
+    it('releases recovery and the DNS queue when saving a restored preference stalls', async () => {
+        vi.useFakeTimers();
+        const pending = deferred();
+        const onError = vi.fn();
+        const next = vi.fn(async () => {});
+        const persist = vi.fn((/** @type {AbortSignal} */ _signal) => pending.promise);
+        const r = createDnsReapply({ isSaved: async () => true, apply: async () => {}, persist, setChecked: vi.fn(), onError });
+        const restore = r.run();
+        const queued = r.serversChange(next);
+        try {
+            await vi.advanceTimersByTimeAsync(5000);
+            await expect(restore).resolves.toBe(true);
+            await queued;
+            expect(next).toHaveBeenCalledOnce();
+            expect(persist.mock.calls[0][0].aborted).toBe(true);
+            expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('saving its preference timed out') }));
+        } finally {
+            pending.resolve();
+            await restore;
+            await queued;
+            vi.useRealTimers();
+        }
     });
 
     it('keeps the switch on when only saving the choice fails', async () => {
@@ -237,28 +407,41 @@ describe('createDnsReapply', () => {
 });
 
 describe('dnsShownAfterFailure', () => {
-    it('shows the core state, not just the opposite of the failed toggle', async () => {
-        // On then off, both refused: the core is still off.
-        vi.mocked(getConfig).mockResolvedValueOnce({ dns: { enable: false } });
-        expect(await dnsShownAfterFailure(false)).toBe(false);
-        vi.mocked(getConfig).mockResolvedValueOnce({ dns: { enable: true } });
-        expect(await dnsShownAfterFailure(true)).toBe(true);
+    it('keeps the earlier rewrite choice without interpreting profile DNS', async () => {
+        forgetUnsavedDnsChoice();
+        vi.mocked(getConfig).mockClear();
+        vi.mocked(getConfig).mockResolvedValue({ dns: { enable: true } });
+        expect(await dnsShownAfterFailure(true, false)).toBe(false);
+        expect(await dnsShownAfterFailure(false, true)).toBe(true);
+        expect(getConfig).not.toHaveBeenCalled();
     });
 
-    it('falls back to the state before the toggle when the core can\'t be read', async () => {
-        vi.mocked(getConfig).mockRejectedValueOnce(new Error('down'));
+    it('falls back to the state before the toggle', async () => {
+        forgetUnsavedDnsChoice();
         expect(await dnsShownAfterFailure(false)).toBe(true);
-        vi.mocked(getConfig).mockResolvedValueOnce({});
         expect(await dnsShownAfterFailure(true)).toBe(false);
     });
 
-    it('falls back to a known earlier state when given one', async () => {
-        vi.mocked(getConfig).mockRejectedValueOnce(new Error('down'));
-        expect(await dnsShownAfterFailure(true, true)).toBe(true);
+    it('preserves an earlier applied choice that could not be saved', async () => {
+        rememberUnsavedDnsChoice(false);
+        try {
+            expect(await dnsShownAfterFailure(true, true)).toBe(false);
+        } finally {
+            forgetUnsavedDnsChoice();
+        }
     });
 });
 
 describe('buildDnsRewritePayload', () => {
+    it('applies DNS through the native runtime overlay command', async () => {
+        vi.mocked(invoke).mockClear();
+        vi.mocked(invoke).mockResolvedValue(undefined);
+        await applyDnsRewrite(DEFAULT_DNS_CONFIG);
+        expect(invoke).toHaveBeenCalledWith('apply_runtime_dns', {
+            enabled: true,
+            dns: expect.objectContaining({ enable: true, nameserver: DEFAULT_DNS_CONFIG.nameserver }),
+        });
+    });
     it('uses the servers it is given instead of the saved ones', async () => {
         vi.mocked(invoke).mockResolvedValue({ dns_nameservers: ['https://custom/dns-query'], dns_fallbacks: ['1.1.1.1'] });
         const payload = /** @type {any} */ (await buildDnsRewritePayload(DEFAULT_DNS_CONFIG));
