@@ -2761,4 +2761,3 @@ export function deactivateConsole() {
     pendingLatencyRetry = null;
     prevConnStats.clear(); // discard stale snapshot to avoid huge fake speed on re-activate
 }
-
