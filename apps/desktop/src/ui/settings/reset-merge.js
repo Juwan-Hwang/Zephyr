@@ -26,4 +26,3 @@ export function resetChangesPatch(before, reset, forced = []) {
     }
     return patch;
 }
-
