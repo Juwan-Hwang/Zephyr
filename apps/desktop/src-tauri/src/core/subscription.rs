@@ -11,7 +11,9 @@ use zephyr_core::config::subscription::{
 };
 
 use super::core_process::ensure_app_storage;
-use super::crypto::{load_metadata, lock_metadata, save_metadata, write_profile_file};
+use super::crypto::{
+    load_metadata, lock_metadata, require_persistent_machine_key, save_metadata, write_profile_file,
+};
 use super::{MihomoState, MAX_RESPONSE_SIZE};
 #[allow(unused_imports)]
 use crate::emit_warn;
@@ -592,6 +594,22 @@ pub(crate) async fn check_mihomo_dns_is_private(
 /// 全局互斥锁，确保并发的订阅下载任务在尝试临时切换 Mihomo global 模式时不发生竞态。
 static GLOBAL_MODE_LOCK: std::sync::LazyLock<std::sync::Arc<tokio::sync::Mutex<()>>> =
     std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
+
+/// Keep a full runtime overlay ordered with user and temporary mode changes.
+pub(crate) async fn lock_mode_for_overlay() -> Result<tokio::sync::OwnedMutexGuard<()>, String> {
+    let guard = tokio::time::timeout(
+        Duration::from_millis(1500),
+        GLOBAL_MODE_LOCK.clone().lock_owned(),
+    )
+    .await
+    .map_err(|_elapsed| "Proxy mode is changing; retry the runtime update".to_owned())?;
+    // Temporary downloads release the mode lock while streaming. A full
+    // reload would reset their selected route, so wait for their restore.
+    if GLOBAL_FALLBACK_ACTIVE.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("Subscription fallback is active; retry the runtime update".to_owned());
+    }
+    Ok(guard)
+}
 
 /// Set while a global-mode fallback is in progress (switches done, download
 /// running, restore pending).
@@ -2880,7 +2898,8 @@ pub(crate) fn read_dropped_profile(path: &std::path::Path) -> Option<String> {
 /// An entry spelled another way counts too when it now resolves to the
 /// written file (a file system that ignores case or Unicode normalization);
 /// an entry that is a symlink is a separate profile and stays. When the
-/// metadata cannot be saved, the written file is removed again.
+/// metadata cannot be saved, the written file is removed again. With a
+/// session-only key, plaintext imports choose an unreserved name instead.
 pub(crate) fn save_dropped_profile(
     paths: &super::AppPaths,
     target: &std::path::Path,
@@ -2889,8 +2908,13 @@ pub(crate) fn save_dropped_profile(
     encrypt: bool,
 ) -> Result<(), String> {
     let _metadata_guard = lock_metadata();
-    write_profile_file(target, content, encrypt)?;
     let mut metadata = load_metadata(paths);
+    if !encrypt && !super::crypto::is_machine_key_persisted() {
+        let free_name = dropped_profile_name_without_metadata(&paths.profiles_dir, name, &metadata);
+        let free_target = paths.profiles_dir.join(free_name);
+        return write_profile_file(&free_target, content, false);
+    }
+    write_profile_file(target, content, encrypt)?;
     let written = target.canonicalize().ok();
     let before = metadata.configs.len();
     metadata.configs.retain(|key, _| {
@@ -2915,6 +2939,34 @@ pub(crate) fn save_dropped_profile(
         }
     }
     Ok(())
+}
+
+fn dropped_profile_name_without_metadata(
+    profiles_dir: &std::path::Path,
+    name: &str,
+    metadata: &super::crypto::ProfilesMetadata,
+) -> String {
+    use unicode_normalization::UnicodeNormalization as _;
+
+    // Missing entries cannot be canonicalized. Conservatively reserve their
+    // Unicode/case aliases so importing never attaches stale subscription data.
+    #[allow(clippy::iter_over_hash_type)]
+    let reserved: std::collections::HashSet<String> = metadata
+        .configs
+        .keys()
+        .map(|key| key.nfc().collect::<String>().to_lowercase())
+        .collect();
+    let allowed = |candidate: &str| {
+        !reserved.contains(&candidate.nfc().collect::<String>().to_lowercase())
+    };
+    if allowed(name)
+        && !name.eq_ignore_ascii_case(RUN_CONFIG_FILE_NAME)
+        && !profile_entry_exists(&profiles_dir.join(name))
+    {
+        name.to_owned()
+    } else {
+        next_free_profile_name_where(profiles_dir, name, allowed)
+    }
 }
 
 /// The name and text a profile file dropped on the window is saved under,
@@ -3073,6 +3125,14 @@ fn profile_entry_exists(path: &std::path::Path) -> bool {
 /// boundary) to leave room for the widest suffix; the cut is the same for
 /// every call, so the suffix search stays consistent.
 fn next_free_profile_name(profiles_dir: &std::path::Path, clean_name: &str) -> String {
+    next_free_profile_name_where(profiles_dir, clean_name, |_| true)
+}
+
+fn next_free_profile_name_where(
+    profiles_dir: &std::path::Path,
+    clean_name: &str,
+    allowed: impl Fn(&str) -> bool,
+) -> String {
     // Strip the YAML extension case-insensitively so the collision
     // suffix lands before it (`Foo.YAML` → `Foo-1.YAML`): appending
     // after it would make `Foo.YAML-1`, whose extension is not YAML
@@ -3118,7 +3178,7 @@ fn next_free_profile_name(profiles_dir: &std::path::Path, clean_name: &str) -> S
     // and otherwise take the next free suffix, wrapping to the low gaps.
     let free_name = |n: u32| {
         let name = format!("{stem}-{n}{ext}");
-        (!profile_entry_exists(&profiles_dir.join(&name))).then_some(name)
+        (allowed(&name) && !profile_entry_exists(&profiles_dir.join(&name))).then_some(name)
     };
     (max_suffix..=u32::MAX)
         .chain(1..max_suffix)
@@ -3333,6 +3393,10 @@ async fn download_sub_inner_raw(
     let safe_name = validate_subscription_name(&name).map_err(|e| e.to_string())?;
 
     let (host, port, user_entered_private) = validate_subscription_url_basic(&url)?;
+    // Every subscription saves an encrypted URL in metadata, even when its
+    // profile itself is plaintext. Fail before network work or mode changes.
+    require_persistent_machine_key()?;
+
     let trusted_private_literal = is_literal_private_host(&host);
     let private_suffix_host = user_entered_private && !trusted_private_literal;
     let user_entered_private_literal = trusted_private_literal;
@@ -3936,6 +4000,7 @@ async fn download_sub_inner_raw(
         } else {
             clean_name.clone()
         };
+        let restore_path = paths.profiles_dir.join(&stored_name);
         let backup_path = if target_path.exists() {
             if !overwrite {
                 // Still taken after picking a free suffix: refuse to clobber it.
@@ -3959,7 +4024,7 @@ async fn download_sub_inner_raw(
             let _ = std::fs::remove_file(&temp_path);
             if let Some(bp) = backup_path.as_ref() {
                 if bp.exists() {
-                    let _ = std::fs::rename(bp, &target_path);
+                    let _ = std::fs::rename(bp, &restore_path);
                 }
             }
             return Err(format!("Failed to apply config file: {e}"));
@@ -4081,29 +4146,14 @@ async fn download_sub_inner_raw(
                 Ok(())
             }
             Err(e) => {
-                // Rollback under lock to prevent cleanup_metadata_cache
-                // from removing the metadata entry while the file is
-                // temporarily absent during rollback.
-                if let Err(rm_err) = std::fs::remove_file(&target_path) {
-                    emit_warn!(
-                        Subscription,
-                        SUB_UPDATE_FAILED,
-                        "Rollback: failed to remove {clean_name}: {rm_err}"
-                    );
-                }
-                if let Some(bp) = backup_path.as_ref() {
-                    if bp.exists() {
-                        if let Err(rn_err) = std::fs::rename(bp, &target_path) {
-                            emit_warn!(
-                                Subscription,
-                                SUB_UPDATE_FAILED,
-                                "Rollback: failed to restore {clean_name} from {:?}: {rn_err}",
-                                bp
-                            );
-                        }
-                    }
-                }
-                Err(e)
+                // Keep metadata cleanup excluded while restoring the old
+                // profile or removing a newly created one.
+                Err(rollback_profile_after_metadata_failure(
+                    &target_path,
+                    backup_path.as_deref(),
+                    &restore_path,
+                    &e,
+                ))
             }
         }
     };
@@ -4113,9 +4163,7 @@ async fn download_sub_inner_raw(
     // needs to be kept out.
     drop(transform_guard);
 
-    if let Err(e) = metadata_result {
-        return Err(format!("Metadata save failed (config rolled back): {e}"));
-    }
+    metadata_result?;
 
     // Success — clean up backup
     // (backup_path is derived from unique_id, so we can reconstruct it)
@@ -4128,6 +4176,36 @@ async fn download_sub_inner_raw(
         message: format!("Config saved as {clean_name}"),
         name: clean_name,
     })
+}
+
+fn rollback_profile_after_metadata_failure(
+    target: &std::path::Path,
+    backup: Option<&std::path::Path>,
+    restore_target: &std::path::Path,
+    error: &str,
+) -> String {
+    if let Some(backup_path) = backup {
+        // Replacement rename leaves the published profile intact if the
+        // backup is missing or cannot be restored. Keep its original spelling.
+        return match std::fs::rename(backup_path, restore_target) {
+            Ok(()) => format!("Metadata save failed (config rolled back): {error}"),
+            Err(restore) => format!(
+                "Metadata save failed: {error}; rollback failed: {restore}; the replacement profile was not removed at {} and its metadata may still describe the previous profile. Previous-profile backup path for recovery: {}",
+                target.display(),
+                backup_path.display()
+            ),
+        };
+    }
+    match std::fs::remove_file(target) {
+        Ok(()) => format!("Metadata save failed (config rolled back): {error}"),
+        Err(remove) if remove.kind() == std::io::ErrorKind::NotFound => {
+            format!("Metadata save failed (config rolled back): {error}")
+        }
+        Err(remove) => format!(
+            "Metadata save failed: {error}; rollback failed to remove the new profile at {}: {remove}",
+            target.display()
+        ),
+    }
 }
 
 fn log_sub_update_failure(name: &str, err: &str) {
@@ -4273,6 +4351,93 @@ pub async fn fetch_text(app: AppHandle, url: String) -> Result<String, String> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    #[test]
+    fn metadata_failure_reports_successful_profile_rollback() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("profile.yaml");
+        let backup = dir.path().join(".sub-test.bak");
+        std::fs::write(&target, "new profile").unwrap();
+        std::fs::write(&backup, "previous profile").unwrap();
+        let error = super::rollback_profile_after_metadata_failure(
+            &target,
+            Some(&backup),
+            &target,
+            "metadata unavailable",
+        );
+        assert!(error.contains("config rolled back"));
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "previous profile"
+        );
+        assert!(!backup.exists());
+    }
+
+    #[test]
+    fn metadata_failure_preserves_replacement_when_backup_restore_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("profile.yaml");
+        let backup = dir.path().join(".sub-missing.bak");
+        std::fs::write(&target, "new profile").unwrap();
+        let error = super::rollback_profile_after_metadata_failure(
+            &target,
+            Some(&backup),
+            &target,
+            "metadata unavailable",
+        );
+        assert!(!error.contains("config rolled back"));
+        assert!(error.contains("replacement profile was not removed"));
+        assert!(error.contains("metadata may still describe the previous profile"));
+        assert!(error.contains(&backup.display().to_string()));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new profile");
+    }
+
+    #[test]
+    fn metadata_failure_restores_original_filename_spelling() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("Work.yaml");
+        let replacement = dir.path().join("WORK.yaml");
+        let backup = dir.path().join(".sub-test.bak");
+        std::fs::write(&original, "previous profile").unwrap();
+        if !replacement.exists() {
+            return; // These spellings are different profiles on this volume.
+        }
+        std::fs::rename(&original, &backup).unwrap();
+        std::fs::write(&replacement, "new profile").unwrap();
+        let error = super::rollback_profile_after_metadata_failure(
+            &replacement,
+            Some(&backup),
+            &original,
+            "metadata unavailable",
+        );
+        assert!(error.contains("config rolled back"));
+        assert_eq!(
+            std::fs::read_to_string(&original).unwrap(),
+            "previous profile"
+        );
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("Work.yaml")]);
+    }
+
+    #[test]
+    fn metadata_failure_reports_a_new_profile_that_cannot_be_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("profile.yaml");
+        std::fs::create_dir(&target).unwrap();
+        let error = super::rollback_profile_after_metadata_failure(
+            &target,
+            None,
+            &target,
+            "metadata unavailable",
+        );
+        assert!(!error.contains("config rolled back"));
+        assert!(error.contains("failed to remove the new profile"));
+        assert!(error.contains(&target.display().to_string()));
+        assert!(target.exists());
+    }
+
     #[test]
     fn group_switch_status_maps_answers() {
         use super::{group_switch_status_outcome, GroupSwitchFailure};
@@ -4847,10 +5012,11 @@ mod tests {
         // and one for another profile.
         let mut metadata = ProfilesMetadata::default();
         for name in ["foo.yaml", "other.yaml"] {
+            // Entry ownership is independent of encrypted URL contents.
             metadata.configs.insert(
                 name.to_owned(),
                 ConfigMetadata {
-                    url: Some(format!("https://sub.example.com/{name}")),
+                    last_updated: Some(1),
                     ..Default::default()
                 },
             );
@@ -4863,6 +5029,36 @@ mod tests {
         let metadata = load_metadata(&paths);
         assert!(!metadata.configs.contains_key("foo.yaml"));
         assert!(metadata.configs.contains_key("other.yaml"));
+    }
+
+    #[test]
+    fn plaintext_import_name_avoids_stale_metadata_without_rewriting_it() {
+        use super::super::crypto::{ConfigMetadata, ProfilesMetadata};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut metadata = ProfilesMetadata::default();
+        for name in ["foo.yaml", "FOO-1.yaml", "other.yaml"] {
+            metadata.configs.insert(
+                name.to_owned(),
+                ConfigMetadata {
+                    url: Some("https://example.com/legacy-subscription".to_owned()),
+                    ..Default::default()
+                },
+            );
+        }
+        std::fs::write(dir.path().join("foo-2.yaml"), "existing profile").unwrap();
+        let picked =
+            super::dropped_profile_name_without_metadata(dir.path(), "foo.yaml", &metadata);
+        assert_eq!(picked, "foo-3.yaml");
+        assert_eq!(metadata.configs.len(), 3);
+        assert_eq!(
+            metadata.configs.get("other.yaml").unwrap().url.as_deref(),
+            Some("https://example.com/legacy-subscription")
+        );
+        assert_eq!(
+            super::dropped_profile_name_without_metadata(dir.path(), "plain.yaml", &metadata),
+            "plain.yaml"
+        );
     }
 
     #[test]

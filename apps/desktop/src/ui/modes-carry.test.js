@@ -49,6 +49,15 @@ describe('carrying the node over on a mode switch', () => {
             .mockResolvedValueOnce({ current: 'node-a.example.com', uiGroupName: 'Proxy', proxies: ['node-a.example.com', 'node-b.example.com'] });
     });
 
+    it.each([null, 'DIRECT', 'REJECT'])('opens GLOBAL when %s does not need carrying', async (current) => {
+        appStore.set('uiGroupName', 'Proxy');
+        groups.fetchProxyGroups.mockReset();
+        groups.fetchProxyGroups.mockResolvedValueOnce({ current, uiGroupName: 'Proxy', proxies: [] });
+        await expect(applyMode('global', { silent: true })).resolves.toBe('ok');
+        expect(appStore.get('uiGroupName')).toBe('GLOBAL');
+        expect(api.switchProxy).not.toHaveBeenCalled();
+    });
+
     it('records the carried node as the known choice of the running profile', async () => {
         noteKnownSelection('a.yaml', { group: 'Proxy', node: 'node-a.example.com' });
         await expect(applyMode('rule', { silent: true })).resolves.toBe('ok');

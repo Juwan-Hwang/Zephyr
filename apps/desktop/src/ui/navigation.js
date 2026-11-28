@@ -8,6 +8,7 @@
 
 import { setup3DEffect } from './3d-effect.js';
 import { appStore } from './state.js';
+import { relocateCoreStartError } from './core-error.js';
 
 /** @returns {boolean} */
 function prefersReducedMotion() {
@@ -62,6 +63,9 @@ export function switchPage(pageId) {
         }
     });
 
+    // A core-start error card follows the user to the page now showing.
+    relocateCoreStartError();
+
     // Cross-fade the shared background glow for the active page
     document.querySelectorAll('[id^="glow-"]').forEach(g => {
         g.classList.add('page-glow');
@@ -107,7 +111,7 @@ function moveNavIndicator(target, instant = false) {
 /** Store leave-timeout IDs without polluting DOM element types. */
 const leaveTimeouts = new WeakMap();
 
-/** @type {((page: string) => void) | null} Reference set by initNavigation for programmatic use. */
+/** @type {((page: string, options?: { reenter?: boolean }) => void) | null} Reference set by initNavigation for programmatic use. */
 let _navigateToRef = null;
 
 /**
@@ -116,10 +120,11 @@ let _navigateToRef = null;
  * Must be called after initNavigation().
  *
  * @param {string} pageId - The target page (e.g. 'home', 'console', 'proxies')
+ * @param {{ reenter?: boolean }} [options] replay the current page's entry after deferred startup
  */
-export function navigateTo(pageId) {
+export function navigateTo(pageId, options = {}) {
     if (_navigateToRef) {
-        _navigateToRef(pageId);
+        _navigateToRef(pageId, options);
     } else {
         // Fallback: just switch the page without callbacks
         switchPage(pageId);
@@ -260,14 +265,18 @@ export function initNavigation(callbacks = {}) {
     /**
      * Internal navigation function shared by click handler and navigateTo().
      * @param {string} targetPage
+     * @param {{ reenter?: boolean }} [options]
      */
-    function navigateToInternal(targetPage) {
+    function navigateToInternal(targetPage, { reenter = false } = {}) {
         // Normalize 'home' to 'console' when console mode is enabled, so
         // programmatic navigation follows the same redirect rule as sidebar clicks.
         const normalizedPage = normalizePage(targetPage);
 
         // Short-circuit: no-op when navigating to the already-current page
-        if (normalizedPage === currentPage) return;
+        if (normalizedPage === currentPage) {
+            if (reenter) fireEnterCallback(normalizedPage);
+            return;
+        }
 
         // Guard: no-op if the target page element doesn't exist
         const pageEl = document.querySelector(`[data-page="${normalizedPage}"]`);
@@ -278,6 +287,8 @@ export function initNavigation(callbacks = {}) {
         switchPage(normalizedPage);
         currentPage = normalizedPage;
         fireEnterCallback(normalizedPage);
+        // Entry may lazily construct the console after switchPage placed the banner.
+        relocateCoreStartError();
     }
 
     // Expose for programmatic navigation (e.g. HOME_PAGE_MODE_CHANGED handler)

@@ -1,4 +1,5 @@
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tauri::{AppHandle, Manager as _};
 
 #[cfg(not(target_os = "macos"))]
@@ -56,6 +57,60 @@ pub fn release_tun_toggle() {
 /// Check if TUN toggle is in progress
 pub fn is_tun_toggling() -> bool {
     TUN_TOGGLING.load(Ordering::SeqCst)
+}
+
+/// Apply only the live TUN value, serialized with full runtime DNS reloads.
+/// The caller confirms it through the controller before recording a preference.
+#[tauri::command]
+pub async fn apply_runtime_tun(app: AppHandle, enable: bool) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let _config = crate::config_manager::lock_run_config_within(Duration::from_secs(5))
+            .map_err(|error| format!("TUN_UPDATE_BUSY: {error}"))?;
+        if crate::prism::pipeline::core_start_in_progress() {
+            return Err("TUN_UPDATE_BUSY: core startup or reload is in progress".to_owned());
+        }
+        let state = app.state::<super::MihomoState>();
+        let (port, secret, instance) = {
+            let core = crate::backend_event::lock_best_effort(&state.0);
+            (
+                core.last_port().ok_or("Core is stopped")?,
+                core.last_secret().to_owned(),
+                core.started_at(),
+            )
+        };
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .connect_timeout(Duration::from_secs(1))
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|error| error.to_string())?;
+        client
+            .patch(format!("http://127.0.0.1:{port}/configs"))
+            .bearer_auth(&secret)
+            .json(&serde_json::json!({ "tun": { "enable": enable } }))
+            .send()
+            .map_err(|error| {
+                if crate::config_manager::reload_may_still_land(&error) {
+                    format!("TUN_UPDATE_UNCONFIRMED: {}", error.without_url())
+                } else {
+                    error.without_url().to_string()
+                }
+            })?
+            .error_for_status()
+            .map_err(|error| error.without_url().to_string())?;
+        let core = crate::backend_event::lock_best_effort(&state.0);
+        if core.last_port() != Some(port)
+            || core.last_secret() != secret
+            || core.started_at() != instance
+            || crate::prism::pipeline::core_start_in_progress()
+        {
+            return Err("TUN_UPDATE_UNCONFIRMED: core changed during TUN update".to_owned());
+        }
+        drop(core);
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// TUN state the running core has confirmed after an override hot-reload,
@@ -437,6 +492,16 @@ pub async fn restart_core_as_root(
     app: &AppHandle,
     enable_tun: bool,
 ) -> Result<String, RootStartError> {
+    restart_core_as_root_with_config(app, enable_tun)
+        .await
+        .map(|(secret, _)| secret)
+}
+
+#[cfg(target_os = "macos")]
+async fn restart_core_as_root_with_config(
+    app: &AppHandle,
+    enable_tun: bool,
+) -> Result<(String, String), RootStartError> {
     let paths = resolve_app_paths(app)?;
     let core_path = get_core_exe_path(app)?;
     ensure_executable(&core_path)?;
@@ -847,7 +912,7 @@ pub async fn restart_core_as_root(
     // still identify it if the binary is replaced or removed.
     record_root_core_exe(&core_path);
 
-    Ok(secret)
+    Ok((secret, updated))
 }
 
 /// On non-macOS platforms, this is a no-op
@@ -1749,6 +1814,12 @@ pub async fn kill_all_mihomo_as_root_cmd(app: tauri::AppHandle) -> Result<(), St
 #[tauri::command]
 #[cfg(target_os = "macos")]
 pub async fn disable_tun_cmd(app: tauri::AppHandle) -> Result<bool, String> {
+    let diagnostics = crate::speed_test::ReloadGuard::acquire();
+    let core_instance = {
+        let state = app.state::<super::MihomoState>();
+        let core = crate::backend_event::lock_best_effort(&state.0);
+        core.started_at()
+    };
     // Scope the privileged cleanup to this app's managed core: unrelated root
     // mihomo services must never be killed, and a self-restarting external
     // service must not be able to block TUN from being disabled.
@@ -1767,6 +1838,19 @@ pub async fn disable_tun_cmd(app: tauri::AppHandle) -> Result<bool, String> {
     .await
     .map_err(|e| e.to_string())??;
 
+    {
+        let state = app.state::<super::MihomoState>();
+        let mut core = crate::backend_event::lock_best_effort(&state.0);
+        // A replacement may have been published after the root-exit check.
+        // Its confirmed diagnostic route belongs to that newer core.
+        if core.started_at() == core_instance {
+            core.set_speed_test_listener(None);
+            core.set_speed_test_group_owned(None);
+            core.set_confirmed_runtime_config(None);
+        }
+    }
+    drop(diagnostics);
+    crate::speed_test::notify_reloaded(&app);
     set_tun_mode(false);
     // Only the preference is recorded: the frontend restarts the core next, and
     // every start regenerates `run_config.yaml` from it. Nothing after the kill
@@ -1781,11 +1865,14 @@ pub async fn disable_tun_cmd(app: tauri::AppHandle) -> Result<bool, String> {
 #[tauri::command]
 #[cfg(not(target_os = "macos"))]
 #[allow(clippy::needless_pass_by_value)]
-pub fn disable_tun_cmd(app: tauri::AppHandle) -> Result<(), String> {
-    set_tun_mode(false);
+pub async fn disable_tun_cmd(app: tauri::AppHandle) -> Result<(), String> {
     // On Windows/Linux, TUN is handled via config change, no need for root kill
     // Just update the config
-    set_tun_enabled_internal(&app, false)
+    tokio::task::spawn_blocking(move || set_tun_enabled_internal(&app, false))
+        .await
+        .map_err(|error| format!("TUN config task failed: {error}"))??;
+    set_tun_mode(false);
+    Ok(())
 }
 
 /// Persist the `tun_enabled` preference in `settings.json` (never touches
@@ -1886,6 +1973,13 @@ pub fn record_tun_started(app: &AppHandle) -> bool {
 
 /// Update TUN enable setting in `run_config.yaml` (without restarting core)
 pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), String> {
+    let _config = crate::config_manager::lock_run_config_within(Duration::from_secs(5))
+        .map_err(|error| format!("TUN_UPDATE_BUSY: {error}"))?;
+    if crate::prism::pipeline::core_start_in_progress() {
+        return Err(
+            "TUN config update refused during a core start or configuration reload".to_owned(),
+        );
+    }
     let paths = resolve_app_paths(app)?;
     let config_file = paths.core_dir.join("run_config.yaml");
 
@@ -1916,8 +2010,10 @@ pub fn set_tun_enabled_internal(app: &AppHandle, enable: bool) -> Result<(), Str
 /// Tauri command to set TUN enabled in config (without restarting)
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub fn set_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String> {
-    set_tun_enabled_internal(&app, enable)
+pub async fn set_tun_enabled(app: tauri::AppHandle, enable: bool) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || set_tun_enabled_internal(&app, enable))
+        .await
+        .map_err(|error| format!("TUN config task failed: {error}"))?
 }
 
 /// Record the TUN preference for a state a caller has applied — or, with
@@ -2197,18 +2293,50 @@ pub async fn restart_core_as_root_cmd(
         return Err(super::core_process::CORE_STOPPED_BEFORE_START.to_owned());
     }
     let user_stopped = || super::core_process::user_stop_begins() != stops_before;
-    let restarted = restart_core_as_root(&app, enable_tun).await;
+    // Adopt from the same runtime file the privileged launch reads. Set the
+    // start guard under the writers' lock, then retain it through adoption so
+    // a no-reload Prism write cannot replace that file while authorization waits.
+    let config_start = tokio::task::spawn_blocking(|| {
+        let _config = crate::prism::pipeline::RUN_CONFIG_LOCK
+            .lock()
+            .map_err(|error| format!("Run config lock poisoned: {error}"))?;
+        Ok::<_, String>(crate::prism::pipeline::CoreStartGuard::acquire())
+    })
+    .await
+    .map_err(|error| format!("Start guard task failed: {error}"))??;
+    if user_stopped() {
+        return Err(super::core_process::CORE_STOPPED_BEFORE_START.to_owned());
+    }
+    let restarted = restart_core_as_root_with_config(&app, enable_tun).await;
+    if let Some(error) = restarted.as_ref().err().filter(|error| error.script_ran()) {
+        // The helper may have replaced the tracked child before failing.
+        // Its old diagnostic route is no longer evidence of a live listener.
+        // Recovery/adoption will confirm a surviving or restarted core.
+        let state = app.state::<super::MihomoState>();
+        let mut core = crate::backend_event::lock_best_effort(&state.0);
+        core.set_speed_test_listener(None);
+        core.set_speed_test_group_owned(None);
+        core.set_confirmed_runtime_config(None);
+        drop(core);
+        drop(config_start);
+        crate::speed_test::notify_reloaded(&app);
+        return Err(if user_stopped() {
+            super::core_process::CORE_STOPPED_MEANWHILE.to_owned()
+        } else {
+            format!("{}: {}", ROOT_START_FAILED_MARKER, error.message())
+        });
+    }
     // The user stopped the core while the authorization waited: a failed
     // restart is not recovered (that would start the core they stopped),
     // and a root core it brought up is adopted only to be stopped again.
     if user_stopped() {
-        if let Ok(secret) = &restarted {
-            adopt_toggled_root_core(&app, secret).await;
+        if let Ok((secret, launch_content)) = &restarted {
+            adopt_toggled_root_core(&app, secret, launch_content).await;
             return stop_root_core_after_user_stop(&app, secret).await;
         }
         return Err(super::core_process::CORE_STOPPED_MEANWHILE.to_owned());
     }
-    let secret = restarted.map_err(|e| {
+    let (secret, launch_content) = restarted.map_err(|e| {
         // Preserve the "script ran" classification across the string boundary.
         // `root_start_failed` is what makes the frontend run its recovery: for
         // these variants the script already killed the user's core, so reporting
@@ -2220,13 +2348,15 @@ pub async fn restart_core_as_root_cmd(
             e.to_string()
         }
     })?;
-    adopt_toggled_root_core(&app, &secret).await;
+    adopt_toggled_root_core(&app, &secret, &launch_content).await;
     // A stop that ran while the adoption awaited the old child's exit found
     // no root core to stop yet, and the adoption then marked it running:
     // stop it now, as when the stop came during the authorization.
     if user_stopped() {
         return stop_root_core_after_user_stop(&app, &secret).await;
     }
+    drop(config_start);
+    crate::speed_test::notify_reloaded(&app);
     Ok(secret)
 }
 
@@ -2271,12 +2401,12 @@ async fn stop_root_core_after_user_stop(app: &AppHandle, secret: &str) -> Result
 ///
 /// The privileged script killed the tracked unprivileged child and started a
 /// root core on `run_config.yaml`. The controller port and proxy endpoint are
-/// re-read from that file rather than kept: a core that crashed before the
+/// taken from the launch snapshot rather than kept: a core that crashed before the
 /// toggle has had them cleared, and without them status reports the core as
 /// stopped, the next non-forced start cannot reuse the root core (and prompts
 /// for administrator rights again), and the system proxy has no endpoint.
 #[cfg(target_os = "macos")]
-async fn adopt_toggled_root_core(app: &AppHandle, secret: &str) {
+async fn adopt_toggled_root_core(app: &AppHandle, secret: &str, launch_content: &str) {
     let tracked = {
         let state = app.state::<super::MihomoState>();
         let mut guard = crate::backend_event::lock_best_effort(&state.0);
@@ -2290,24 +2420,26 @@ async fn adopt_toggled_root_core(app: &AppHandle, secret: &str) {
         })
         .await;
     }
-    let run_config = resolve_app_paths(app)
-        .ok()
-        .and_then(|p| std::fs::read_to_string(p.core_dir.join("run_config.yaml")).ok());
-    let state = app.state::<super::MihomoState>();
-    let mut guard = crate::backend_event::lock_best_effort(&state.0);
-    if let Some(content) = run_config {
+    let listener = crate::speed_test::route_from_config(launch_content);
+    {
+        let state = app.state::<super::MihomoState>();
+        let mut guard = crate::backend_event::lock_best_effort(&state.0);
         guard.set_last_proxy_endpoint(super::core_process::extract_configured_proxy_endpoint(
-            &content,
+            launch_content,
         ));
         guard.set_last_port(Some(zephyr_core::process::parse_external_controller_port(
-            content,
+            launch_content.to_owned(),
         )));
+        guard.set_last_secret(secret.to_owned());
+        guard.set_last_custom_args(None);
+        guard.set_last_log_path(Some(get_tun_log_path()));
+        guard.set_started_at(Some(std::time::Instant::now()));
     }
-    guard.set_last_secret(secret.to_owned());
-    guard.set_last_custom_args(None);
-    guard.set_last_log_path(Some(get_tun_log_path()));
-    guard.set_started_at(Some(std::time::Instant::now()));
-    drop(guard);
+    let app_for_listener = app.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        crate::speed_test::confirm_listener(&app_for_listener, listener);
+    })
+    .await;
 }
 
 /// On non-macOS platforms, this is a no-op

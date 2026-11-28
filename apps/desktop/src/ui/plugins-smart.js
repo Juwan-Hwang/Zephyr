@@ -328,13 +328,17 @@ function initScriptsSection() {
             runBtn.disabled = true;
             try {
                 const result = await prism.scriptExecute(code, name);
+                const reloadError = result.reload?.error;
+                const succeeded = result.success && !reloadError;
                 const logArea = document.getElementById('script-output');
                 if (logArea instanceof HTMLTextAreaElement || logArea instanceof HTMLInputElement) {
                     logArea.value = result.logs.map(l => `[${l.level}] ${l.message}`).join('\n') +
                         (result.error ? `\nERROR: ${result.error}` : '') +
-                        `\n\nDuration: ${result.duration_us}µs — ${result.success ? 'OK' : 'FAILED'}`;
+                        (reloadError ? `\nRELOAD ERROR: ${reloadError}` : '') +
+                        `\n\nDuration: ${result.duration_us}µs — ${succeeded ? 'OK' : 'FAILED'}`;
                 }
-                showNotification(result.success ? 'Script executed' : `Script failed: ${result.error}`, result.success ? 'success' : 'error');
+                showNotification(result.success && reloadError ? `Script saved, reload failed: ${reloadError}`
+                    : result.success ? 'Script executed' : `Script failed: ${result.error}`, succeeded ? 'success' : 'error');
             } catch (e) { showNotification(String(e), 'error'); }
             finally { runBtn.disabled = false; }
         });
